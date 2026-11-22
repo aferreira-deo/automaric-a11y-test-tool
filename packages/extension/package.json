@@ -1,0 +1,9 @@
+{
+  "name": "@a11y-vision/extension",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Chrome MV3 extension (milestone M8, placeholder)",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"]
+}

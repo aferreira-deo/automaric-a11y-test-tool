@@ -1,0 +1,15 @@
+{
+  "name": "@a11y-vision/playwright",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright API, modelled on @axe-core/playwright",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "dependencies": {
+    "@a11y-vision/collector-cdp": "workspace:*",
+    "@a11y-vision/core": "workspace:*"
+  },
+  "peerDependencies": { "playwright-core": ">=1.40.0" },
+  "devDependencies": { "playwright-core": "1.65.1" }
+}

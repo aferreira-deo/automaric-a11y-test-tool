@@ -1,0 +1,16 @@
+{
+  "name": "@a11y-vision/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Command line scanner",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "bin": { "a11y-vision": "./dist/bin.js" },
+  "dependencies": {
+    "@a11y-vision/core": "workspace:*",
+    "@a11y-vision/playwright": "workspace:*",
+    "@a11y-vision/reporters": "workspace:*",
+    "playwright": "1.65.1"
+  }
+}

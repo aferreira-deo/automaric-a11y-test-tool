@@ -1,0 +1,6 @@
+{
+  "description": "The noop check reports the document once, as info.",
+  "checks": ["noop"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "noop", "status": "info", "rule": "noop/page" }]
+}

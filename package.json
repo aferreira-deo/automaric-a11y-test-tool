@@ -1,0 +1,29 @@
+{
+  "name": "a11y-vision-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.21.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "check": "eslint . && tsc -b && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
+  },
+  "devDependencies": {
+    "@a11y-vision/cli": "workspace:*",
+    "@a11y-vision/core": "workspace:*",
+    "@a11y-vision/playwright": "workspace:*",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.65.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.15.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.1"
+  }
+}
