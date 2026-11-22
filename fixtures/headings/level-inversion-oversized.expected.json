@@ -1,0 +1,9 @@
+{
+  "description": "One oversized heading among well-ordered ones: an h4 at 36px between two h2 at 22px. It is reported once, on the h4 (larger than the h2 it is coded under). The h2 that comes after it is coded above it and is smaller than it, but that says nothing new and blames a heading that is in order: it is not reported.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#promo", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/level-inversion", "flags": ["belowLarger", "extreme"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

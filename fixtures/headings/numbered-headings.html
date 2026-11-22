@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: numbered-headings</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .num { font-size: 22px; font-weight: 700; margin: 24px 0 8px; }
+      .plan { display: inline-block; width: 200px; vertical-align: top; }
+      .price { font-size: 30px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>This guide explains how to deploy the service to a cluster and keep it running across upgrades without downtime for its users. Its sections are numbered, and none of the numbers is a figure.</p>
+
+      <!-- Numbered titles without a full stop after the number. -->
+      <div class="num" id="number-space">1 Introduction</div>
+      <p>The service is shipped as a single container image that reads its settings from the environment when it starts.</p>
+      <div class="num" id="number-dotted">1.2 Requirements</div>
+      <p>You need a cluster with at least three nodes and a recent version of the command line client on your machine.</p>
+      <div class="num" id="number-full-stop">2. Installation</div>
+      <p>The installer downloads the image layers on its first run, so it needs access to the network at that point.</p>
+
+      <!-- Titles that open with a number and are short: they could be statistics, so they are info, and a judgement can change that. -->
+      <div class="num" id="number-letter">3D rendering options</div>
+      <p>The renderer can be switched between the software path and the hardware path with one flag when it starts.</p>
+      <div class="num" id="number-unit">5G coverage map</div>
+      <p>The map shows where the service can be reached from a phone, region by region, and how fast it answers there.</p>
+      <div class="num" id="year">2026 roadmap</div>
+      <p>The roadmap lists the features planned for the year and the order in which they are expected to reach users.</p>
+
+      <!-- Statistics and prices stay what they were. -->
+      <div class="num" id="statistic">15 years</div>
+      <p>of experience in running services of this kind for customers of every size and in every region.</p>
+      <div class="plan"><div class="price">$10</div><p>Starter plan.</p></div>
+      <div class="plan"><div class="price">$40</div><p>Team plan.</p></div>
+      <div class="plan"><div class="price" id="price-word">Free</div><p>Hobby plan.</p></div>
+    </main>
+  </body>
+</html>

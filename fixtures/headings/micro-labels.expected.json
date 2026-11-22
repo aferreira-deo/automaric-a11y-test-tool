@@ -1,0 +1,15 @@
+{
+  "description": "Small bold capitals used as labels (seen 48 times on a shop category page: a stock badge over one word). The same text in the same style several times on a page is a label, not a heading, whatever follows it (flag repeatedText), also when it is set large over each teaser. A small bold label over text no longer than itself is a label over a value (flag shortFollower). The same small capitals over a real paragraph stay likely.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#badge-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "#badge-4", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "#badge-6", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "#micro-once", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#micro-heading", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder", "uppercase"] },
+    { "selector": "#repeat-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "#repeat-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "#repeat-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["repeatedText"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

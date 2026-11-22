@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: thin-main</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main, .content { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .note { font-size: 12px; }
+      .lead { font-size: 17px; margin: 24px 0 8px; }
+      .title { font-size: 24px; font-weight: 700; margin: 24px 0 8px; }
+    </style>
+  </head>
+  <body>
+    <!-- main holds one short note at 12px; the text of the page is outside it. -->
+    <main><div class="note">Updated in March.</div></main>
+    <div class="content">
+      <div class="title" id="title">How the tide tables are made</div>
+      <p>Body text of the page, outside main, at sixteen pixels. It is long enough to be the most common style of the page by a wide margin, and it goes on for a few sentences so that the count of characters leaves no doubt about it.</p>
+      <!-- 17px is 1.42 times the size of the note in main, and only 1.06 times that of body text. -->
+      <div class="lead" id="lead">A line slightly larger than body text</div>
+      <p>Body text under the line, long enough to be a paragraph of its own and to run over more than one line of the column.</p>
+    </div>
+  </body>
+</html>

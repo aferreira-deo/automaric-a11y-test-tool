@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: micro-labels</title>
+    <style>
+      body { margin: 32px; font: 14px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 900px; }
+      p { margin: 0 0 12px; }
+      h1 { font-size: 28px; margin: 0 0 16px; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .card { border: 1px solid #767676; padding: 12px; }
+      .card a { display: block; font-size: 15px; color: #00539b; }
+      /* Smaller than body text, bold, in capitals: a badge (seen on a shop category page, 48 times). */
+      .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #1d6b1d; margin-top: 8px; }
+      .micro { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #595959; margin-top: 24px; }
+      .teaser { font-size: 22px; font-weight: 700; margin: 24px 0 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">Processors</h1>
+      <p>Body text of the category page, long enough to be the most common style of the page by a wide margin. It describes the range, how the list is sorted and what the stock labels under each product stand for.</p>
+
+      <!-- A badge under every product, followed by one word: the same text in the same style, many times. -->
+      <div class="grid">
+        <div class="card"><a href="/p1">Processor with six cores, boxed</a><p>Six cores and twelve threads, with a cooler in the box.</p><div class="badge" id="badge-1">In stock</div><div>Web</div></div>
+        <div class="card"><a href="/p2">Processor with eight cores, boxed</a><p>Eight cores and sixteen threads, with a cooler in the box.</p><div class="badge" id="badge-2">In stock</div><div>Web</div></div>
+        <div class="card"><a href="/p3">Processor with twelve cores, tray</a><p>Twelve cores and twenty-four threads, sold without a cooler.</p><div class="badge" id="badge-3">In stock</div><div>Web</div></div>
+        <div class="card"><a href="/p4">Processor with sixteen cores, tray</a><p>Sixteen cores for work that uses every one of them.</p><div class="badge" id="badge-4">In stock</div><div>Web</div></div>
+        <div class="card"><a href="/p5">Processor with four cores, boxed</a><p>Four cores for an office machine, with a cooler in the box.</p><div class="badge" id="badge-5">In stock</div><div>Shops</div></div>
+        <div class="card"><a href="/p6">Processor with two cores, boxed</a><p>Two cores for a machine that only shows a schedule.</p><div class="badge" id="badge-6">In stock</div><div>Shops</div></div>
+      </div>
+
+      <!-- Once only, and what follows it is no longer than it is: a label over a value. -->
+      <div class="micro" id="micro-once">Warehouse</div>
+      <div>Lyon</div>
+
+      <!-- The same small capitals above real content: still a heading. -->
+      <div class="micro" id="micro-heading">Delivery and returns</div>
+      <p>Orders placed before noon leave the warehouse the same day. A product can be sent back within thirty days of delivery, in its box, and the cost of the return is refunded with the product once it has been checked.</p>
+
+      <!-- Identical text in one style over each teaser: a label, however large it is set. -->
+      <div class="teaser" id="repeat-1">Buying guide</div>
+      <p>How to choose a processor for a machine that is used for office work, and what to leave out of the budget without regret.</p>
+      <div class="teaser" id="repeat-2">Buying guide</div>
+      <p>How to choose a processor for a machine that is used for games, and which other parts decide what it can do.</p>
+      <div class="teaser" id="repeat-3">Buying guide</div>
+      <p>How to choose a processor for a machine that renders video, and when more cores stop making a difference.</p>
+    </main>
+  </body>
+</html>

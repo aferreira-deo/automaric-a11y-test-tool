@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { resolveConfig } from '../config.js';
-import { bodyBaseline, headingCandidates, headingReport, isNumericText, levelInversions, styleSignature } from '../measure/headings.js';
+import { bodyBaseline, headingCandidates, headingReport, isNumericText, isStatisticText, levelInversions, styleSignature } from '../measure/headings.js';
 import { runChecks } from '../run.js';
 import type { Finding, HeadingSurvey, HeadingsConfig, Snapshot, TextBlock, TextStyle } from '../types.js';
 
@@ -40,7 +40,9 @@ function block(text: string, over: Partial<TextBlock> = {}): TextBlock {
   };
 }
 
-const PARAGRAPH = 'Body text that goes on for a while so that it is the most common style of the page by far.';
+// Long enough to be trusted as body text on its own (`baselineMinChars`).
+const PARAGRAPH =
+  'Body text that goes on for a while so that it is the most common style of the page by far. It has a second sentence and a third one, so that one paragraph alone holds enough characters to say what body text looks like on a page that has little else, whatever the other blocks of that page are.';
 const body = (over: Partial<TextBlock> = {}): TextBlock => block(PARAGRAPH, over);
 const title = (text = 'A title', over: Partial<TextBlock> = {}): TextBlock => block(text, { style: TITLE, ...over });
 
@@ -77,11 +79,11 @@ const candidate = (headings: HeadingSurvey, text: string, over: Partial<Headings
 describe('bodyBaseline', () => {
   it('is the most common size and weight by characters, inside main', () => {
     const blocks = page(() => [body({ inMain: false, style: { ...BODY, size: 13 } }), body({ inMain: false, style: { ...BODY, size: 13 } }), body(), title()]).blocks;
-    expect(bodyBaseline(blocks)).toMatchObject({ size: 16, weight: 400, from: 'main', family: 'arial', color: '#1a1a1a' });
+    expect(bodyBaseline(blocks, config.headings)).toMatchObject({ size: 16, weight: 400, from: 'main', family: 'arial', color: '#1a1a1a' });
   });
   it('falls back to the page when main holds no text', () => {
     const blocks = page(() => [body({ inMain: false }), title('A title', { inMain: false })]).blocks;
-    expect(bodyBaseline(blocks)).toMatchObject({ size: 16, from: 'page' });
+    expect(bodyBaseline(blocks, config.headings)).toMatchObject({ size: 16, from: 'page' });
   });
   it('leaves out headings, links, buttons, navigation, labels, code and text hidden from assistive technology', () => {
     const small = { ...BODY, size: 10 };
@@ -93,30 +95,46 @@ describe('bodyBaseline', () => {
       body({ style: small, heading: { level: 2, selector: 'h2' } }),
       block('Short body text.'),
     ]).blocks;
-    expect(bodyBaseline(blocks)).toMatchObject({ size: 16 });
+    expect(bodyBaseline(blocks, config.headings)).toMatchObject({ size: 16 });
   });
   it('still answers when every block is a link', () => {
-    expect(bodyBaseline(page(() => [body({ contexts: ['link'] })]).blocks)).toMatchObject({ size: 16 });
-    expect(bodyBaseline([])).toBeNull();
+    expect(bodyBaseline(page(() => [body({ contexts: ['link'] })]).blocks, config.headings)).toMatchObject({ size: 16 });
+    expect(bodyBaseline([], config.headings)).toBeNull();
   });
   it('does not depend on the order of equally common styles', () => {
     const a = (): TextBlock => block('abcdef', { style: { ...BODY, size: 14 } });
     const b = (): TextBlock => block('ghijkl', { style: { ...BODY, size: 18 } });
-    expect(bodyBaseline(page(() => [a(), b()]).blocks)).toEqual(bodyBaseline(page(() => [b(), a()]).blocks));
+    expect(bodyBaseline(page(() => [a(), b()]).blocks, config.headings)).toEqual(bodyBaseline(page(() => [b(), a()]).blocks, config.headings));
   });
 });
 
 describe('isNumericText', () => {
-  const numeric = (text: string): boolean => isNumericText(text, text.split(/\s+/).length, config.headings);
-  it.each(['$29.99', '98%', '98 %', '2 400 €', '120', '15 ans', '15 years', '10k+ users', '3x faster', '12/03/2026', '€ 12', '24/7'])('%s is a number', (text) => {
+  const numeric = (text: string): boolean => isNumericText(text, config.headings);
+  const statistic = (text: string): boolean => isStatisticText(text, text.split(/\s+/).length, config.headings);
+  it.each(['$29.99', '98%', '98 %', '2 400 €', '120', '12/03/2026', '€ 12', '24/7', '1,204'])('%s is a number', (text) => {
     expect(numeric(text)).toBe(true);
+    expect(statistic(text)).toBe(false);
   });
-  it.each(['Chapter 1', '1. Scope', '2) Method', '1.2. Definitions', '10 things nobody tells you about tides', 'Sur devis', 'Web 2.0 and after', 'A title'])(
-    '%s is not',
-    (text) => {
-      expect(numeric(text)).toBe(false);
-    },
-  );
+  it.each(['15 ans', '15 years', '10k+ users', '3x faster', '2026 roadmap', '3D rendering options', '120 Countries', '2.4 million users'])('%s may be a statistic', (text) => {
+    expect(numeric(text)).toBe(false);
+    expect(statistic(text)).toBe(true);
+  });
+  it.each([
+    'Chapter 1',
+    '1. Scope',
+    '2) Method',
+    '1.2. Definitions',
+    '1 Introduction',
+    '1.2 Requirements',
+    '12.3.4 Limits',
+    '10 things nobody tells you about tides',
+    'Sur devis',
+    'Web 2.0 and after',
+    'A title',
+  ])('%s is neither', (text) => {
+    expect(numeric(text)).toBe(false);
+    expect(statistic(text)).toBe(false);
+  });
 });
 
 describe('styleSignature', () => {
@@ -139,8 +157,8 @@ describe('heading candidates', () => {
     // The hand-off to the adjudicator: a candidate names its finding.
     expect(finding!.id).toBe(found.findingId);
     expect(finding!.ai).toBeUndefined();
-    expect(finding!.evidence.values).toMatchObject({ text: 'A title', fontSizePx: 24, bodyFontSizePx: 16, followedBy: PARAGRAPH });
-    expect(found.context).toMatchObject({ text: 'A title', textBefore: PARAGRAPH, textAfter: PARAGRAPH, bodyStyle: { size: 16, weight: 400 } });
+    expect(finding!.evidence.values).toMatchObject({ text: 'A title', fontSizePx: 24, bodyFontSizePx: 16, followedBy: `${PARAGRAPH.slice(0, config.headings.contextAfterMaxChars)}…` });
+    expect(found.context).toMatchObject({ text: 'A title', textBefore: `${PARAGRAPH.slice(0, config.headings.contextBeforeMaxChars)}…`, textAfter: `${PARAGRAPH.slice(0, config.headings.contextAfterMaxChars)}…`, bodyStyle: { size: 16, weight: 400 } });
   });
 
   it('text in the style of body text is not a candidate, nor is text under the thresholds', () => {
@@ -219,7 +237,7 @@ describe('heading candidates', () => {
 
   it.each([
     ['$29.99', 'numeric'],
-    ['15 years', 'numeric'],
+    ['15 years', 'statistic'],
     ['“It changed how we work”', 'quotation'],
     ['« Un rapport utile »', 'quotation'],
     ['This reads as a sentence.', 'sentence'],
@@ -253,7 +271,7 @@ describe('heading candidates', () => {
   it('a word among prices in the style of prices is taken for one', () => {
     const price: TextStyle = { ...BODY, size: 30, weight: 700 };
     const headings = page(() => [body(), block('$10', { style: price }), body(), block('$40', { style: price }), body(), block('Free', { style: price }), body()]);
-    expect(candidate(headings, 'Free')).toMatchObject({ status: 'info', reasons: ['peersNumeric'], adjudicate: false });
+    expect(candidate(headings, 'Free')).toMatchObject({ status: 'info', reasons: ['peersNumeric'], adjudicate: true });
     // One price is not a pattern.
     const two = page(() => [body(), block('$10', { style: price }), body(), block('Free', { style: price }), body()]);
     expect(candidate(two, 'Free')).toMatchObject({ status: 'likely' });
@@ -450,5 +468,250 @@ describe('level inversions', () => {
     ]);
     expect(inversions.find((finding) => finding.selector === '#detail')!.evidence.flags).toContain('extreme');
     expect(all.some((finding) => finding.status === 'fail')).toBe(false);
+  });
+});
+
+describe('labels, badges and other text that only looks like a heading', () => {
+  const SMALL_CAPS: TextStyle = { ...BODY, size: 12, weight: 700, transform: 'uppercase' };
+  const short = (text: string, over: Partial<TextBlock> = {}): TextBlock => block(text, over);
+
+  it('the same text in the same style several times on a page is a label: repeatedText', () => {
+    const headings = page(() => [body(), title('In stock'), body(), body(), title('In stock'), body(), body(), title('In stock'), body()]);
+    const found = candidatesOf(headings).filter((entry) => entry.text === 'In stock');
+    expect(found).toHaveLength(3);
+    for (const entry of found) expect(entry).toMatchObject({ status: 'info', reasons: ['repeatedText'], adjudicate: true });
+    // Twice is under the default limit, and the limit is an option.
+    const twice = page(() => [body(), title('In stock'), body(), body(), title('In stock'), body()]);
+    expect(candidate(twice, 'In stock')).toMatchObject({ status: 'likely' });
+    expect(candidate(twice, 'In stock', { repeatedTextMinCount: 2 })).toMatchObject({ status: 'info', reasons: ['repeatedText'] });
+    // The same text in another style is another thing.
+    const mixed = page(() => [body(), title('In stock'), body(), block('In stock'), body(), title('In stock'), body(), block('In stock')]);
+    expect(candidate(mixed, 'In stock')).toMatchObject({ status: 'likely' });
+  });
+
+  it('bold text over text no longer than itself, or over one short line, is a label over a value: shortFollower', () => {
+    const badge = page(() => [body(), block('Warehouse', { style: SMALL_CAPS }), short('Lyon'), title(), body()]);
+    expect(candidate(badge, 'Warehouse')).toMatchObject({ status: 'info', reasons: ['shortFollower'], adjudicate: true });
+    const notice = page(() => [body(), block('Changes saved', { style: BOLD }), short('Your settings were updated a moment ago'), title(), body()]);
+    expect(candidate(notice, 'Changes saved')).toMatchObject({ status: 'info', reasons: ['shortFollower'] });
+    // One line that reads as a sentence is content, as a title over a one-line paragraph has; that is an option.
+    const sentence = page(() => [body(), block('File format', { style: BOLD }), short('JSON with comments.'), title(), body()]);
+    expect(candidate(sentence, 'File format')).toMatchObject({ status: 'likely' });
+    expect(candidate(sentence, 'File format', { sentenceFollowerIsContent: false })).toMatchObject({ status: 'info', reasons: ['shortFollower'] });
+    // Under small print it is not.
+    const small = page(() => [body(), block('Example Docs', { style: SMALL_CAPS }), short('Content under a permissive licence.'), title(), body()]);
+    expect(candidate(small, 'Example Docs')).toMatchObject({ status: 'info', reasons: ['shortFollower'] });
+    // A paragraph under it, of several lines or of many words, is content.
+    const lines = page(() => [body(), block('A bold title', { style: BOLD }), short('Two lines of text', { lines: 2 }), title(), body()]);
+    expect(candidate(lines, 'A bold title')).toMatchObject({ status: 'likely' });
+    expect(candidate(page(() => [body(), block('A bold title', { style: BOLD }), body()]), 'A bold title')).toMatchObject({ status: 'likely' });
+    // So are several short lines of one style stacked under it: a list of links, of options.
+    const list = page(() => [body(), block('Related', { style: BOLD }), short('Checklist', { contexts: ['link'] }), short('Rollback', { contexts: ['link'] }), title(), body()]);
+    expect(candidate(list, 'Related')).toMatchObject({ status: 'likely' });
+    // And so is something set as a title of its own, smaller than it: the block heads a structure.
+    const BIGGER_BOLD: TextStyle = { ...BODY, size: 19, weight: 700 };
+    const nested = page(() => [body(), block('Activity', { style: BIGGER_BOLD }), block('Omar Haddad', { style: BOLD }), short('Merged the request'), title(), body()]);
+    expect(candidate(nested, 'Activity')).toMatchObject({ status: 'likely' });
+    // Text that is larger than body text, or styled as a real heading of the page, is not held to this.
+    expect(candidate(page(() => [body(), title('A title'), short('One short line'), title('Next'), body()]), 'A title')).toMatchObject({ status: 'likely' });
+  });
+
+  it('label, one short line, label again: labelSeries', () => {
+    const pairs = page(() => [
+      body(),
+      block('Owner', { style: BOLD }),
+      short('Marketing team'),
+      block('Repository', { style: BOLD }),
+      short('acme/atlas-web'),
+      block('Description', { style: BOLD }),
+      short('Customer portal for the product line'),
+      body(),
+    ]);
+    for (const text of ['Owner', 'Repository', 'Description']) {
+      const found = candidate(pairs, text)!;
+      expect(found, text).toMatchObject({ status: 'info', adjudicate: true });
+      expect(found.reasons, text).toContain('labelSeries');
+    }
+    // Titles over paragraphs are not a series of labels.
+    const sections = page(() => [body(), block('First', { style: BOLD }), body(), block('Second', { style: BOLD }), body()]);
+    expect(candidate(sections, 'First')).toMatchObject({ status: 'likely' });
+    expect(candidate(sections, 'Second')).toMatchObject({ status: 'likely' });
+  });
+
+  it('large italic text of normal weight is a pull quote at most: italic', () => {
+    const ITALIC: TextStyle = { ...BODY, size: 24, italic: true };
+    const quote = page(() => [body(), block('Most outages start with a change nobody thought was risky', { style: ITALIC }), body()]);
+    expect(candidate(quote, 'Most outages start with a change nobody thought was risky')).toMatchObject({ status: 'info', reasons: ['italic'], adjudicate: true });
+    // Bold italic is a title set in italics.
+    const bold = page(() => [body(), block('An italic title', { style: { ...ITALIC, weight: 700 } }), body()]);
+    expect(candidate(bold, 'An italic title')).toMatchObject({ status: 'likely' });
+  });
+
+  it('text in the colour of its background is info, and a judgement can change it', () => {
+    const headings = page(() => [body(), title('White on white', { sameColourAsBackground: true }), body()]);
+    expect(candidate(headings, 'White on white')).toMatchObject({ status: 'info', reasons: ['sameColourAsBackground'], adjudicate: true });
+  });
+
+  it('a control beside the block on its line is not what follows it', () => {
+    const row = page(() => [
+      body(),
+      title('Recent deployments', { box: { x: 32, y: 40, width: 300, height: LINE } }),
+      block('View all', { contexts: ['link'], box: { x: 500, y: 44, width: 60, height: 20 } }),
+      body({ box: { x: 32, y: 80, width: 400, height: LINE } }),
+    ]);
+    expect(candidate(row, 'Recent deployments')).toMatchObject({ status: 'likely', features: { followedByBody: true } });
+    // Plain text beside it is another column: the block heads nothing.
+    const columns = page(() => [
+      body(),
+      title('Recent deployments', { box: { x: 32, y: 40, width: 300, height: LINE } }),
+      block('Some text', { box: { x: 500, y: 44, width: 60, height: 20 } }),
+      body({ box: { x: 32, y: 80, width: 400, height: LINE } }),
+    ]);
+    expect(candidate(columns, 'Recent deployments')).toMatchObject({ status: 'info', reasons: ['notFollowed'] });
+  });
+});
+
+describe('numbers in titles', () => {
+  it.each(['1 Introduction', '1.2 Requirements', '2. Installation', '12 Appendix'])('%s is a numbered title: likely', (text) => {
+    expect(candidate(page(() => [body(), title(text), body()]), text)).toMatchObject({ status: 'likely' });
+  });
+
+  it.each(['3D rendering options', '2026 roadmap', '15 years', '3x faster'])('%s may be a statistic: info, left to a judgement', (text) => {
+    expect(candidate(page(() => [body(), title(text), body()]), text)).toMatchObject({ status: 'info', reasons: ['statistic'], adjudicate: true });
+  });
+
+  it.each(['$29.99', '98%', '12/03/2026', '1,204'])('%s is a number for good', (text) => {
+    expect(candidate(page(() => [body(), title(text), body()]), text)).toMatchObject({ status: 'info', reasons: ['numeric'], adjudicate: false });
+  });
+
+  it('numbered titles among short titles that open with a number are not taken for numbers', () => {
+    const headings = page(() => [body(), title('1 Introduction'), body(), title('3D rendering options'), body(), title('2026 roadmap'), body(), title('Summary'), body()]);
+    expect(candidate(headings, '1 Introduction')).toMatchObject({ status: 'likely' });
+    expect(candidate(headings, 'Summary')).toMatchObject({ status: 'likely' });
+  });
+
+  it('a title in the style of prices is left to a judgement', () => {
+    const price: TextStyle = { ...BODY, size: 30, weight: 700 };
+    const headings = page(() => [body(), block('$10', { style: price }), body(), block('$40', { style: price }), body(), block('Our plans', { style: price }), body()]);
+    expect(candidate(headings, 'Our plans')).toMatchObject({ status: 'info', reasons: ['peersNumeric'], adjudicate: true });
+  });
+});
+
+describe('sentence endings of other scripts', () => {
+  it.each(['يجب أن تتوفر ثلاث نسخ على الأقل،', 'يجب أن تتوفر ثلاث نسخ؛', 'یہ ایک جملہ ہے۔', 'यह एक वाक्य है।'])('%s ends like a sentence', (text) => {
+    expect(candidate(page(() => [body(), title(text), body()]), text)).toMatchObject({ status: 'info', reasons: ['sentence'] });
+  });
+});
+
+describe('the identity of a candidate', () => {
+  it('is the same whatever its status, and is that of its finding', () => {
+    const make = (over: Partial<TextBlock> = {}): TextBlock[] => [body(), title('A title', { selector: '#title', ...over }), body()];
+    const likely = candidate(page(() => make()), 'A title')!;
+    const info = candidate(page(() => make({ contexts: ['link'] })), 'A title')!;
+    const blind = candidate(page(() => make(), false), 'A title')!;
+    expect(likely.status).toBe('likely');
+    expect(info.status).toBe('info');
+    expect(likely.rule).not.toBe(info.rule);
+    expect(info.findingId).toBe(likely.findingId);
+    expect(blind.findingId).toBe(likely.findingId);
+    for (const [headings, entry] of [
+      [page(() => make()), likely],
+      [page(() => make({ contexts: ['link'] })), info],
+    ] as const) {
+      const finding = findings(headings).find((found) => found.selector === '#title')!;
+      expect(finding.id).toBe(entry.findingId);
+      expect(finding.rule).toBe(entry.rule);
+      expect(finding).not.toHaveProperty('fingerprintRule');
+    }
+    // Another element is another finding.
+    expect(candidate(page(() => make({ selector: '#other' })), 'A title')!.findingId).not.toBe(likely.findingId);
+  });
+
+  it('a candidate a model may judge can come without a capture', () => {
+    const headings = page(() => [body(), title('Under a banner', { covered: true, crop: null }), body()]);
+    expect(candidate(headings, 'Under a banner')).toMatchObject({ status: 'likely', adjudicate: true, crop: null, covered: true });
+  });
+});
+
+describe('a body style that cannot be trusted', () => {
+  const few = (over: Partial<TextBlock> = {}): TextBlock => block('Prices per person, taxes included.', over);
+
+  it('too little text in main: the body style is that of the page', () => {
+    const blocks = page(() => [few({ style: { ...BODY, size: 12 } }), body({ inMain: false }), body({ inMain: false }), body({ inMain: false })]).blocks;
+    expect(bodyBaseline(blocks, config.headings)).toMatchObject({ size: 16, from: 'page', lowText: false });
+    // A main with enough text, but a small share of the text of the page, does not decide either.
+    const large = page(() => [body({ style: { ...BODY, size: 12 } }), ...Array.from({ length: 12 }, () => body({ inMain: false }))]).blocks;
+    expect(bodyBaseline(large, config.headings)).toMatchObject({ size: 16, from: 'page' });
+    expect(bodyBaseline(large, { ...config.headings, baselineMainMinShare: 0.05 })).toMatchObject({ size: 12, from: 'main' });
+  });
+
+  it('too little text on the page: lowText, and nothing is above info', () => {
+    const headings = page(() => [title('Popular destinations'), block('Lisbon, three nights', { contexts: ['link'] }), block('Porto, a weekend', { contexts: ['link'] }), few()]);
+    expect(bodyBaseline(headings.blocks, config.headings)).toMatchObject({ lowText: true });
+    expect(candidate(headings, 'Popular destinations')).toMatchObject({ strength: 'strong', status: 'info', adjudicate: true });
+    const all = findings(headings);
+    expect(all.every((finding) => finding.status === 'info')).toBe(true);
+    expect(all.find((finding) => finding.rule === 'headings/heading-candidate')!.evidence.flags).toContain('lowText');
+    const surveyFinding = all.find((finding) => finding.rule === 'headings/survey')!;
+    expect(surveyFinding.evidence.flags).toContain('lowText');
+    expect(surveyFinding.message).toContain('too little');
+    // The limit is an option.
+    expect(candidate(headings, 'Popular destinations', { baselineMinChars: 10 })).toMatchObject({ status: 'likely' });
+  });
+});
+
+describe('statuses can never be fail', () => {
+  const heading = (level: number, size: number, text: string): TextBlock => block(text, { style: { ...BODY, size, weight: 700 }, heading: { level, selector: `#${text}` } });
+  const make = (): TextBlock[] => [heading(2, 16, 'section'), body(), heading(4, 36, 'detail'), body(), heading(3, 30, 'big'), body()];
+
+  it('resolveConfig clamps the status of inversions', () => {
+    const bad = { inversionStatus: 'fail', extremeInversionStatus: 'fail' } as unknown as Partial<HeadingsConfig>;
+    expect(resolveConfig({ headings: bad }).headings).toMatchObject({ inversionStatus: 'likely', extremeInversionStatus: 'likely' });
+    const odd = { inversionStatus: 'error', extremeInversionStatus: undefined } as unknown as Partial<HeadingsConfig>;
+    expect(resolveConfig({ headings: odd }).headings).toMatchObject({ inversionStatus: 'advisory', extremeInversionStatus: 'likely' });
+    expect(resolveConfig({ headings: { inversionStatus: 'likely', extremeInversionStatus: 'advisory' } }).headings).toMatchObject({
+      inversionStatus: 'likely',
+      extremeInversionStatus: 'advisory',
+    });
+  });
+
+  it('and so does the check, for a configuration that was not resolved', () => {
+    const bad = { ...config.headings, inversionStatus: 'fail', extremeInversionStatus: 'fail' } as unknown as HeadingsConfig;
+    expect(levelInversions(page(make).blocks, bad).map((entry) => entry.status)).toEqual(['likely', 'likely']);
+    const all = runChecks(snapshotOf(page(make)), { ...config, headings: bad });
+    expect(all.filter((finding) => finding.rule === 'headings/level-inversion')).toHaveLength(2);
+    expect(all.some((finding) => finding.status === 'fail')).toBe(false);
+  });
+});
+
+describe('level inversions, once per cause', () => {
+  const heading = (level: number, size: number, text: string): TextBlock => block(text, { style: { ...BODY, size, weight: 700 }, heading: { level, selector: `#${text}` } });
+
+  it('one oversized heading is reported once, and the heading after it is not blamed', () => {
+    const blocks = page(() => [heading(1, 40, 'top'), heading(2, 22, 'a'), body(), heading(4, 36, 'promo'), body(), heading(2, 22, 'b'), body(), heading(2, 22, 'c')]).blocks;
+    expect(levelInversions(blocks, config.headings).map((entry) => [entry.selector, entry.kind, entry.other.selector])).toEqual([['#promo', 'below-larger', '#a']]);
+  });
+
+  it('at most maxInversions are reported, and the rest is counted', () => {
+    const make = (): TextBlock[] => [heading(2, 16, 'section'), heading(3, 30, 'one'), heading(3, 30, 'two'), heading(3, 30, 'three'), body()];
+    const report = headingReport(page(make), { ...config.headings, maxInversions: 2 });
+    expect(report.inversions.map((entry) => entry.selector)).toEqual(['#one', '#two']);
+    expect(report.omittedInversions).toBe(1);
+    const surveyFinding = findings(page(make), { maxInversions: 2 }).find((finding) => finding.rule === 'headings/survey')!;
+    expect(surveyFinding.evidence.flags).toContain('truncated');
+    expect(headingReport(page(make), config.headings).omittedInversions).toBe(0);
+  });
+});
+
+describe('text given to a model and quoted in messages', () => {
+  it('is cut to the configured lengths', () => {
+    const long = 'word '.repeat(80).trim();
+    const headings = page(() => [block(long), title('A title'), block(long), body()]);
+    const found = candidate(headings, 'A title', { contextBeforeMaxChars: 10, contextAfterMaxChars: 20 })!;
+    expect(found.context['textBefore']).toBe(`${long.slice(0, 10)}…`);
+    expect(found.context['textAfter']).toBe(`${long.slice(0, 20)}…`);
+    const titled = page(() => [body(), title('A fairly long title for a message'), body()]);
+    const message = findings(titled, { messageTextMaxChars: 8 }).find((finding) => finding.status === 'likely')!.message;
+    expect(message).toContain('"A fairly…"');
   });
 });

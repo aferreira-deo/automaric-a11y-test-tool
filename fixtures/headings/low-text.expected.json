@@ -1,0 +1,8 @@
+{
+  "description": "A page of links whose only plain text is one line of small print at 11px. That is too little text to say what body text looks like (under baselineMinChars), so nothing measured against it is trusted: the title over the links is a candidate at info, with the flag lowText, and the survey carries the same flag. Nothing is likely.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#title", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["lowText"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey", "flags": ["lowText"] }
+  ]
+}

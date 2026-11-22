@@ -1,3 +1,4 @@
+import { clampInversionStatus } from '../config.js';
 import { fingerprint } from '../fingerprint.js';
 import type { Box, HeadingSurvey, HeadingsConfig, JsonValue, TextBlock, TextContext, TextStyle, WcagRef } from '../types.js';
 
@@ -14,6 +15,11 @@ export const HEADINGS_SC: WcagRef = { sc: '1.3.1', level: 'A' };
 export const UNMARKED_HEADING_RULE = 'headings/unmarked-heading';
 export const HEADING_CANDIDATE_RULE = 'headings/heading-candidate';
 export const LEVEL_INVERSION_RULE = 'headings/level-inversion';
+/**
+ * What a candidate is fingerprinted under, whichever of the two rules reports it: its id stays
+ * the same when its status changes, from one run to the next or after a model's verdict.
+ */
+export const CANDIDATE_FINGERPRINT_RULE = 'headings/candidate';
 
 /** The style of body text: the most common size and weight, by number of characters. */
 export interface BodyBaseline {
@@ -22,8 +28,12 @@ export interface BodyBaseline {
   /** Most common family and colour of the text that has that size and weight. */
   family: string;
   color: string;
-  /** `main`: measured inside main. `page`: no visible text in main, measured on the whole page. */
+  /** `main`: measured inside main. `page`: no text in main, or too little to go by; measured on the whole page. */
   from: 'main' | 'page';
+  /** Characters in that size and weight, white space apart, where it was measured. */
+  chars: number;
+  /** Fewer characters than `baselineMinChars`: too little to say what body text looks like. No candidate is then above `info`. */
+  lowText: boolean;
 }
 
 export type Prominence = 'larger' | 'bolder' | 'matchesHeadingStyle';
@@ -31,8 +41,13 @@ export type Prominence = 'larger' | 'bolder' | 'matchesHeadingStyle';
 /**
  * Why a candidate is not `likely`.
  * - A `TextContext`: all of its text is in a label, a button, a link, a table cell and so on.
- * - `numeric`: a price, a statistic, a date. `quotation`: opens with a quotation mark.
+ * - `numeric`: mostly digits, or with a currency or percent sign: a price, a figure, a date.
+ * - `statistic`: short and opening with a number ("15 years"); it may be a title ("2026 roadmap").
+ * - `quotation`: opens with a quotation mark.
  * - `peersNumeric`: most blocks with its exact style are numbers (see `peerDemotionMinShare`).
+ * - `repeatedText`: the same text in the same style several times on the page: a label, a badge.
+ * - `italic`: larger than body text, of its weight and in italics: a pull quote.
+ * - `sameColourAsBackground`: see `TextBlock.sameColourAsBackground`.
  * - `sentence`, `colon`: how the text ends. `lineBreaks`: lines of text separated by `br`.
  * - `listItem`: the block is the text of a list item (`li`), bold among its siblings.
  * - `sharesLine`: other text sits just before it on its line.
@@ -43,12 +58,21 @@ export type Prominence = 'larger' | 'bolder' | 'matchesHeadingStyle';
  *   any list and not the first of a column of them: a tagline over a call to action rather than
  *   a heading over content.
  * - `tightAbove`: bold text of body size with less space above it than below.
+ * - `shortFollower`: it is only bolder than body text, and what follows it is one plain block
+ *   that is no longer than it or is a single short line that is not a sentence, with nothing of
+ *   that kind after it: a label over a value, a name over a remark.
+ * - `labelSeries`: it is only bolder than body text and stands in a series of label, one such
+ *   line, label again.
  */
 export type HeadingReason =
   | TextContext
   | 'numeric'
+  | 'statistic'
   | 'quotation'
   | 'peersNumeric'
+  | 'repeatedText'
+  | 'italic'
+  | 'sameColourAsBackground'
   | 'sentence'
   | 'colon'
   | 'lineBreaks'
@@ -57,7 +81,9 @@ export type HeadingReason =
   | 'repeated'
   | 'notFollowed'
   | 'headsControl'
-  | 'tightAbove';
+  | 'tightAbove'
+  | 'shortFollower'
+  | 'labelSeries';
 
 /** The feature vector of section 5.3, step 3. Distances are CSS pixels. */
 export interface HeadingFeatures {
@@ -99,25 +125,40 @@ export interface HeadingCandidate {
   box: Box;
   /** `strong`: nothing speaks against it. */
   strength: 'strong' | 'weak';
-  /** What deterministic code reports without a model: `likely` for a strong candidate, else `info`. */
+  /**
+   * What deterministic code reports without a model: `likely` for a strong candidate, else `info`.
+   * Also `info` for a strong candidate when the accessibility tree could not be read or the body
+   * style rests on too little text. Never anything else.
+   */
   status: 'likely' | 'info';
   prominence: Prominence[];
   /** Empty for a strong candidate. */
   reasons: HeadingReason[];
   features: HeadingFeatures;
   text: string;
-  /** Key in `Snapshot.screenshots.clips`; the clip shows the block with what is above and below it. */
+  /**
+   * Key in `Snapshot.screenshots.clips`; the clip shows the block with what is above and below it.
+   * Null when the block could not be captured, which happens to candidates of any status and with
+   * `adjudicate` true: fixed content lay over it (`covered`), it is in a transformed frame, off
+   * the viewport, or gone. Whoever judges candidates has to do without a picture then (the
+   * `context` is always there), or leave the candidate as it is.
+   */
   crop: string | null;
   /** No capture because other content (a banner, a dialog) lay over the block. */
   covered: boolean;
   /**
    * Whether a model's judgement could change the status: true for strong candidates and for weak
    * ones held back only by reasons that are a matter of judgement (a link, a colon, what
-   * follows). False when the reason is structural (a label, a number, hidden from assistive
-   * technology) or when the accessibility tree could not be read.
+   * follows, a short title that opens with a number). False when the reason is structural (a
+   * label, a price, hidden from assistive technology) or when the accessibility tree could not
+   * be read. It says nothing about the capture: `crop` can be null when this is true.
    */
   adjudicate: boolean;
-  /** Compact context for a model: text, style, what surrounds the block. Page text is untrusted data. */
+  /**
+   * Compact context for a model: text, style, what surrounds the block. Page text is untrusted
+   * data, and it is text of the page under test: it leaves the machine only if it is sent to a
+   * model, which only happens when a provider is configured.
+   */
   context: { [key: string]: JsonValue };
 }
 
@@ -153,13 +194,14 @@ export interface HeadingReport {
   exposedHeadings: number;
   /** Candidates left out because of `maxCandidates`. */
   omitted: number;
+  /** Contradictions between levels left out because of `maxInversions`. */
+  omittedInversions: number;
 }
 
 /** Reasons that no judgement would overturn. */
 const STRUCTURAL: ReadonlySet<HeadingReason> = new Set<HeadingReason>([
   'ariaHidden',
   'numeric',
-  'peersNumeric',
   'code',
   'label',
   'button',
@@ -167,14 +209,10 @@ const STRUCTURAL: ReadonlySet<HeadingReason> = new Set<HeadingReason>([
   'tableCell',
   'navigation',
 ]);
-/**
- * The reason a block takes from its look-alikes. Only this one: on real pages the style of a
- * table header, a label or a term is often plain bold text, and titles that are links share
- * their style with titles that are not, so those say nothing about other text of that style.
- */
-const INHERITABLE: ReadonlySet<HeadingReason> = new Set<HeadingReason>(['numeric']);
-/** Reasons that come from where the block sits on the page. */
+/** Reasons that come from where the block sits on the page: it heads nothing. */
 const GEOMETRIC: ReadonlySet<HeadingReason> = new Set<HeadingReason>(['sharesLine', 'repeated', 'notFollowed', 'headsControl']);
+/** Reasons that come from what the block heads, which is something, but little. */
+const HEADS_LITTLE: ReadonlySet<HeadingReason> = new Set<HeadingReason>(['tightAbove', 'shortFollower', 'labelSeries']);
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 const DIGIT = /\p{N}/gu;
@@ -217,17 +255,26 @@ const NOT_BODY: ReadonlySet<TextContext> = new Set<TextContext>(['ariaHidden', '
  * main when main holds text. Headings, and text that is a control, a label, navigation, code or
  * hidden from assistive technology, are left out as long as other text remains.
  */
-export function bodyBaseline(blocks: TextBlock[]): BodyBaseline | null {
+export function bodyBaseline(blocks: TextBlock[], config: Pick<HeadingsConfig, 'baselineMinChars' | 'baselineMainMinShare'>): BodyBaseline | null {
   const counted = blocks.filter((block) => block.chars > 0);
   const plain = counted.filter((block) => !block.heading && !block.contexts.some((context) => NOT_BODY.has(context)));
-  const pools = [plain.filter((block) => block.inMain), plain, counted.filter((block) => block.inMain), counted];
-  const pool = pools.find((candidates) => candidates.length > 0);
-  if (!pool) return null;
-  const inMain = pool.filter((block) => block.inMain);
-  const bySizeAndWeight = new Map<string, number>();
+  const all = plain.length > 0 ? plain : counted;
+  if (all.length === 0) return null;
   const key = (block: TextBlock): string => `${round(block.style.size, 1).toFixed(1).padStart(8, '0')}|${String(block.style.weight).padStart(4, '0')}`;
-  for (const block of pool) bySizeAndWeight.set(key(block), (bySizeAndWeight.get(key(block)) ?? 0) + block.chars);
-  const winner = heaviest(bySizeAndWeight)!;
+  const mostCommon = (pool: TextBlock[]): { winner: string; chars: number } => {
+    const bySizeAndWeight = new Map<string, number>();
+    for (const block of pool) bySizeAndWeight.set(key(block), (bySizeAndWeight.get(key(block)) ?? 0) + block.chars);
+    const winner = heaviest(bySizeAndWeight)!;
+    return { winner, chars: bySizeAndWeight.get(winner)! };
+  };
+  const total = (pool: TextBlock[]): number => pool.reduce((sum, block) => sum + block.chars, 0);
+  // A few words inside main (a note, a date) do not say what body text looks like when the text
+  // of the page is elsewhere: main decides only with enough text, and a fair share of the page's.
+  const inMain = all.filter((block) => block.inMain);
+  const mainDecides =
+    inMain.length > 0 && mostCommon(inMain).chars >= config.baselineMinChars && total(inMain) >= config.baselineMainMinShare * total(all);
+  const pool = mainDecides ? inMain : all;
+  const { winner, chars } = mostCommon(pool);
   const same = pool.filter((block) => key(block) === winner);
   const families = new Map<string, number>();
   const colors = new Map<string, number>();
@@ -241,7 +288,9 @@ export function bodyBaseline(blocks: TextBlock[]): BodyBaseline | null {
     weight: first.style.weight,
     family: heaviest(families) ?? first.style.family,
     color: heaviest(colors) ?? first.style.color,
-    from: inMain.length > 0 ? 'main' : 'page',
+    from: mainDecides ? 'main' : 'page',
+    chars,
+    lowText: chars < config.baselineMinChars,
   };
 }
 
@@ -255,13 +304,21 @@ function isBolder(style: TextStyle, baseline: BodyBaseline, config: HeadingsConf
   return ratio >= config.boldMinSizeRatio || (style.transform === 'uppercase' && ratio >= config.uppercaseBoldMinSizeRatio);
 }
 
-/** A price, a statistic, a date: mostly digits, a currency or percent sign, or a number and a unit. */
-export function isNumericText(text: string, words: number, config: HeadingsConfig): boolean {
+/** A price, a figure, a date: mostly digits, or with a currency or percent sign. No judgement would make it a heading. */
+export function isNumericText(text: string, config: HeadingsConfig): boolean {
   const digits = text.match(DIGIT)?.length ?? 0;
   if (digits === 0) return false;
   const letters = text.match(LETTER)?.length ?? 0;
-  if (digits / (digits + letters) >= config.numericMinDigitShare) return true;
-  if (CURRENCY_OR_PERCENT.test(text)) return true;
+  return digits / (digits + letters) >= config.numericMinDigitShare || CURRENCY_OR_PERCENT.test(text);
+}
+
+/**
+ * A number and a unit ("15 years", "3x faster"): short text that opens with a number and is not
+ * numbered like a title. "2026 roadmap" and "3D rendering" read the same to code, so this is a
+ * reason to hold the text back, not to rule it out.
+ */
+export function isStatisticText(text: string, words: number, config: HeadingsConfig): boolean {
+  if (isNumericText(text, config)) return false;
   return STARTS_WITH_NUMBER.test(text) && words <= config.statisticMaxWords && !new RegExp(config.ordinalStartPattern, 'u').test(text);
 }
 
@@ -275,10 +332,6 @@ function bottom(box: Box): number {
 
 function overlapsHorizontally(a: Box, b: Box, tolerance: number): boolean {
   return a.x < right(b) - tolerance && b.x < right(a) - tolerance;
-}
-
-function capitalise(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function cut(text: string, max: number): string {
@@ -301,10 +354,12 @@ interface Scored {
  */
 export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): HeadingReport {
   const { blocks } = survey;
-  const baseline = bodyBaseline(blocks);
-  const inversions = levelInversions(blocks, config);
+  const baseline = bodyBaseline(blocks, config);
+  const allInversions = levelInversions(blocks, config);
+  const inversions = allInversions.slice(0, config.maxInversions);
+  const omittedInversions = allInversions.length - inversions.length;
   const exposedHeadings = new Set(blocks.filter((block) => block.heading).map((block) => `${block.frame}\u0000${block.heading!.selector}`)).size;
-  if (!baseline) return { baseline, candidates: [], inversions, exposedHeadings, omitted: 0 };
+  if (!baseline) return { baseline, candidates: [], inversions, exposedHeadings, omitted: 0, omittedInversions };
 
   const tolerance = config.boxToleranceCssPx;
   const signatures = blocks.map((block) => styleSignature(block.style));
@@ -327,10 +382,13 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
   const quoteStart = new RegExp(config.quoteStartPattern, 'u');
   const intrinsic: HeadingReason[][] = blocks.map((block) => {
     const reasons: HeadingReason[] = [...block.contexts];
-    if (isNumericText(block.text, block.words, config)) reasons.push('numeric');
+    if (isNumericText(block.text, config)) reasons.push('numeric');
+    else if (isStatisticText(block.text, block.words, config)) reasons.push('statistic');
     if (quoteStart.test(block.text) && !reasons.includes('quote')) reasons.push('quotation');
+    if (block.sameColourAsBackground === true) reasons.push('sameColourAsBackground');
     return reasons;
   });
+  const numberLike = (index: number): boolean => intrinsic[index]!.includes('numeric') || intrinsic[index]!.includes('statistic');
   const bySignature = new Map<string, number[]>();
   signatures.forEach((signature, index) => {
     if (blocks[index]!.heading) return;
@@ -338,20 +396,36 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
     if (members) members.push(index);
     else bySignature.set(signature, [index]);
   });
-  const inherited: HeadingReason[][] = blocks.map((block, index) => {
-    if (block.heading) return [];
+  // What a block takes from its look-alikes. Only that they are numbers for good (a short title
+  // that opens with a number does not make its look-alikes numbers): on real pages the style
+  // of a table header, a label or a term is often plain bold text, and titles that are links
+  // share their style with titles that are not, so those say nothing about other text of that
+  // style.
+  const peersNumeric: boolean[] = blocks.map((block, index) => {
+    if (block.heading || numberLike(index)) return false;
     const peers = (bySignature.get(signatures[index]!) ?? []).filter((peer) => peer !== index);
-    if (peers.length < config.peerDemotionMinPeers) return [];
-    const counts = new Map<HeadingReason, number>();
-    for (const peer of peers) {
-      for (const reason of intrinsic[peer]!) if (INHERITABLE.has(reason)) counts.set(reason, (counts.get(reason) ?? 0) + 1);
-    }
-    return [...counts]
-      .filter(([reason, count]) => count / peers.length >= config.peerDemotionMinShare && !intrinsic[index]!.includes(reason))
-      .map(([reason]) => `peers${capitalise(reason)}` as HeadingReason)
-      .sort();
+    if (peers.length < config.peerDemotionMinPeers) return false;
+    return peers.filter((peer) => intrinsic[peer]!.includes('numeric')).length / peers.length >= config.peerDemotionMinShare;
   });
-  const isNumber = (index: number): boolean => intrinsic[index]!.includes('numeric') || inherited[index]!.includes('peersNumeric');
+  const isNumber = (index: number): boolean => numberLike(index) || peersNumeric[index]!;
+  // The same text in the same style, anywhere on the page.
+  const textKey = (index: number): string => `${signatures[index]!}\u0000${blocks[index]!.text.trim()}`;
+  const textCounts = new Map<string, number>();
+  blocks.forEach((block, index) => {
+    if (!block.heading) textCounts.set(textKey(index), (textCounts.get(textKey(index)) ?? 0) + 1);
+  });
+  const inFrame = (index: number, frame: string): TextBlock | null => (index >= 0 && index < blocks.length && blocks[index]!.frame === frame ? blocks[index]! : null);
+  /** The block after this one has its style and is stacked under it: the first of several items. */
+  const startsSeries = (index: number): boolean => {
+    const first = blocks[index]!;
+    const after = inFrame(index + 1, first.frame);
+    return (
+      after !== null &&
+      signatures[index + 1] === signatures[index] &&
+      after.firstLine.y >= bottom(first.lastLine) - tolerance &&
+      overlapsHorizontally(after.box, first.box, tolerance)
+    );
+  };
 
   const scored: Scored[] = [];
   blocks.forEach((block, index) => {
@@ -370,14 +444,33 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
     const boldOnly = prominence.length === 1 && prominence[0] === 'bolder';
     if (boldOnly && block.words > config.maxBoldOnlyWords) return;
 
-    const previous = index > 0 && blocks[index - 1]!.frame === block.frame ? blocks[index - 1]! : null;
+    const previous = inFrame(index - 1, block.frame);
     // A number set large under a title is a figure, not what the title heads: look past it.
     let next = index + 1;
-    while (next < blocks.length && blocks[next]!.frame === block.frame && isNumber(next) && !isNumber(index)) next++;
-    const follower = next < blocks.length && blocks[next]!.frame === block.frame ? blocks[next]! : null;
-    const direct = index + 1 < blocks.length && blocks[index + 1]!.frame === block.frame ? blocks[index + 1]! : null;
+    while (inFrame(next, block.frame) && isNumber(next) && !isNumber(index)) next++;
+    // So is a button or a link beside it on its line, in another style and no larger: "View all"
+    // at the other end of the row of a title.
+    const besideControl = (other: TextBlock, at: number): boolean => {
+      if (!other.contexts.includes('link') && !other.contexts.includes('button')) return false;
+      if (signatures[at] === signature || other.style.size > block.style.size + config.sizeToleranceCssPx) return false;
+      const a = block.lastLine;
+      const b = other.firstLine;
+      const overlap = Math.min(bottom(a), bottom(b)) - Math.max(a.y, b.y);
+      return overlap >= config.sameLineMinOverlap * Math.min(a.height, b.height) && !overlapsHorizontally(other.box, block.box, tolerance);
+    };
+    for (let passed = 0; passed < config.besideControlsMax; passed++) {
+      const other = inFrame(next, block.frame);
+      if (!other || !besideControl(other, next)) break;
+      next++;
+    }
+    const follower = inFrame(next, block.frame);
+    const direct = inFrame(index + 1, block.frame);
 
-    const reasons: HeadingReason[] = [...intrinsic[index]!, ...inherited[index]!];
+    const reasons: HeadingReason[] = [...intrinsic[index]!];
+    if (peersNumeric[index]) reasons.push('peersNumeric');
+    if ((textCounts.get(textKey(index)) ?? 0) >= config.repeatedTextMinCount) reasons.push('repeatedText');
+    // Large italics of normal weight are how a pull quote is set, with or without quotation marks.
+    if (block.style.italic && prominence.length === 1 && prominence[0] === 'larger') reasons.push('italic');
     const text = block.text.trim();
     if (sentenceEnd.test(text)) reasons.push('sentence');
     if (leadInEnd.test(text)) reasons.push('colon');
@@ -415,15 +508,32 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
       // A plain button or link under the block is a call to action under a tagline. A control
       // set as a title (the link of a teaser) is content, and so are controls of one style
       // stacked under the block (questions that open, a column of links).
-      const at = blocks.indexOf(follower);
-      const after = at + 1 < blocks.length && blocks[at + 1]!.frame === block.frame ? blocks[at + 1]! : null;
-      const series =
-        after !== null &&
-        (after.contexts.includes('button') || after.contexts.includes('link')) &&
-        styleSignature(after.style) === styleSignature(follower.style) &&
-        after.firstLine.y >= bottom(follower.lastLine) - tolerance &&
-        overlapsHorizontally(after.box, follower.box, tolerance);
+      const after = inFrame(next + 1, block.frame);
+      const series = after !== null && (after.contexts.includes('button') || after.contexts.includes('link')) && startsSeries(next);
       if (!series) reasons.push('headsControl');
+    }
+
+    // Text that is only bolder than body text is how labels, names and notices are set as well as
+    // titles. What tells them apart is what follows: a title heads content, a label heads a value.
+    // A value is one short line. A line that reads as a full sentence is content, as a paragraph
+    // of several lines is (a title over a one-line paragraph is common), unless the candidate is
+    // smaller than body text: small print over one line heads nothing, whatever the line says.
+    const smallPrint = block.style.size < baseline.size - config.sizeToleranceCssPx;
+    const value = (other: TextBlock): boolean =>
+      !baselineProminent(other.style) &&
+      other.lines <= config.shortFollowerMaxLines &&
+      other.words <= config.shortFollowerMaxWords &&
+      (smallPrint || !config.sentenceFollowerIsContent || !sentenceEnd.test(other.text.trim()));
+    if (boldOnly && under && !outranked && !baselineProminent(follower.style) && !startsSeries(next) && (follower.chars <= block.chars || value(follower))) {
+      reasons.push('shortFollower');
+    }
+    // Label, value, label again, in either direction: keys and values, names and remarks.
+    if (boldOnly) {
+      const twoAfter = inFrame(index + 2, block.frame);
+      const twoBefore = inFrame(index - 2, block.frame);
+      const forward = twoAfter !== null && signatures[index + 2] === signature;
+      const backward = previous !== null && value(previous) && twoBefore !== null && signatures[index - 2] === signature;
+      if (direct !== null && value(direct) && (forward || backward)) reasons.push('labelSeries');
     }
 
     const stackedAbove =
@@ -464,7 +574,7 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
   const kept = scored.filter(({ reasons }) => {
     const geometric = reasons.filter((reason) => GEOMETRIC.has(reason));
     if (geometric.includes('sharesLine') || geometric.length > 1) return false;
-    return geometric.length === 0 || reasons.every((reason) => GEOMETRIC.has(reason) || reason === 'tightAbove');
+    return geometric.length === 0 || reasons.every((reason) => GEOMETRIC.has(reason) || HEADS_LITTLE.has(reason));
   });
   // Two blocks can have the same lowest common element (bare text around a child block): the
   // first one stands for it, so that finding ids stay unique.
@@ -481,12 +591,14 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
 
   const candidates = ordered.map(({ index, block, prominence, reasons, features, follower, previous }): HeadingCandidate => {
     const isStrong = reasons.length === 0;
-    // Without the accessibility tree, nothing says that the block is not a heading already.
-    const status = isStrong && survey.axComplete ? 'likely' : 'info';
+    // Without the accessibility tree, nothing says that the block is not a heading already; with
+    // too little text to go by, nothing says that it stands out from body text.
+    const status = isStrong && survey.axComplete && !baseline.lowText ? 'likely' : 'info';
     const rule = status === 'likely' ? UNMARKED_HEADING_RULE : HEADING_CANDIDATE_RULE;
     return {
       block: index,
-      findingId: fingerprint({ rule, wcag: HEADINGS_SC, frame: block.frame, selector: block.selector }),
+      // Not from `rule`, which follows the status: see CANDIDATE_FINGERPRINT_RULE.
+      findingId: fingerprint({ rule: CANDIDATE_FINGERPRINT_RULE, wcag: HEADINGS_SC, frame: block.frame, selector: block.selector }),
       rule,
       selector: block.selector,
       frame: block.frame,
@@ -510,12 +622,14 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
         reasons: [...reasons],
         contexts: [...block.contexts],
         region: block.region,
-        textBefore: previous ? cut(previous.text, 160) : null,
-        textAfter: follower ? cut(follower.text, 240) : null,
+        // Blocks of the page with this text in this style, itself included: one judgement can serve them all.
+        sameTextAndStyle: textCounts.get(textKey(index)) ?? 1,
+        textBefore: previous ? cut(previous.text, config.contextBeforeMaxChars) : null,
+        textAfter: follower ? cut(follower.text, config.contextAfterMaxChars) : null,
       },
     };
   });
-  return { baseline, candidates, inversions, exposedHeadings, omitted: unique.length - ordered.length };
+  return { baseline, candidates, inversions, exposedHeadings, omitted: unique.length - ordered.length, omittedInversions };
 }
 
 /** The candidates of a survey: what the adjudicator layer works from. */
@@ -542,6 +656,13 @@ interface ExposedHeading {
  *   of its own level or above in between;
  * - a heading visibly larger than the heading it is coded under.
  * Skipped levels, several h1 and equal sizes are not.
+ *
+ * One oversized heading is one contradiction: it is reported as larger than the heading it is
+ * coded under, and the headings after it are not measured against it, or each well-ordered
+ * heading that follows a promotional block would be reported as smaller than that block.
+ *
+ * All of them, in document order; `headingReport` keeps `maxInversions`. The status is
+ * `advisory` or `likely` whatever the configuration says.
  */
 export function levelInversions(blocks: TextBlock[], config: HeadingsConfig): LevelInversion[] {
   const byRegion = new Map<string, ExposedHeading[]>();
@@ -579,28 +700,37 @@ export function levelInversions(blocks: TextBlock[], config: HeadingsConfig): Le
 
   const ratio = config.inversionMinSizeRatio;
   const found: LevelInversion[] = [];
+  const normalStatus = clampInversionStatus(config.inversionStatus, 'advisory');
+  const extremeStatus = clampInversionStatus(config.extremeInversionStatus, 'likely');
   for (const headings of byRegion.values()) {
+    // The heading each one is coded under, when it is visibly larger than that heading.
+    const smallerParent = headings.map((heading, position): ExposedHeading | null => {
+      for (let before = position - 1; before >= 0; before--) {
+        const candidate = headings[before]!;
+        if (candidate.level >= heading.level) continue;
+        return heading.size >= candidate.size * ratio ? candidate : null;
+      }
+      return null;
+    });
+    const oversized = new Set(headings.filter((_, position) => smallerParent[position] !== null));
     headings.forEach((heading, position) => {
       let other: ExposedHeading | null = null;
       let kind: LevelInversion['kind'] = 'above-smaller';
       for (let before = position - 1; before >= 0; before--) {
         const candidate = headings[before]!;
+        if (candidate.level <= heading.level && candidate.size < heading.size * ratio) break;
+        if (oversized.has(candidate)) {
+          if (candidate.level <= heading.level) break;
+          continue;
+        }
         if (candidate.size >= heading.size * ratio) {
           if (candidate.level > heading.level) other = candidate;
           break;
         }
-        if (candidate.level <= heading.level) break;
       }
-      if (!other) {
-        for (let before = position - 1; before >= 0; before--) {
-          const candidate = headings[before]!;
-          if (candidate.level >= heading.level) continue;
-          if (heading.size >= candidate.size * ratio) {
-            other = candidate;
-            kind = 'below-larger';
-          }
-          break;
-        }
+      if (!other && smallerParent[position]) {
+        other = smallerParent[position]!;
+        kind = 'below-larger';
       }
       if (!other) return;
       const sizeRatio = kind === 'above-smaller' ? other.size / heading.size : heading.size / other.size;
@@ -619,7 +749,7 @@ export function levelInversions(blocks: TextBlock[], config: HeadingsConfig): Le
         sizeRatio: round(sizeRatio),
         levelGap,
         extreme,
-        status: extreme ? config.extremeInversionStatus : config.inversionStatus,
+        status: extreme ? extremeStatus : normalStatus,
         crop: heading.crop,
       });
     });

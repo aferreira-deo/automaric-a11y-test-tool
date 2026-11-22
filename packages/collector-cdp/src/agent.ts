@@ -29,6 +29,8 @@ export interface AgentHeadingsOptions {
   clipMarginCssPx: number;
   clipAboveCssPx: number;
   clipBelowCssPx: number;
+  sameLineMinOverlap: number;
+  mergeMaxGapEm: number;
 }
 
 /** Mirrors TextContext, TextStyle and TextBlock of core (the agent cannot import). */
@@ -73,6 +75,7 @@ export interface AgentTextBlock {
   inListItem: boolean;
   region: string;
   heading: { level: number; selector: string } | null;
+  sameColourAsBackground?: boolean;
 }
 
 export interface AgentHeadingSurvey {
@@ -1726,6 +1729,8 @@ export function agentFactory(options: AgentOptions): Agent {
       visible: boolean;
       style: AgentTextStyle;
       signature: string;
+      /** The text is painted in the colour of the background behind it, as far as styles tell. */
+      blends: boolean;
     }
     interface Piece {
       node: Text;
@@ -1734,6 +1739,14 @@ export function agentFactory(options: AgentOptions): Agent {
       text: string;
       chars: number;
       look: Look;
+      /** Something stands between this text and the text before it in its block: a forced line break, or the edge of a box. */
+      apart?: boolean;
+    }
+    interface Pending {
+      pieces: Piece[];
+      breaks: number;
+      /** Set once the block has taken in a neighbour: the element whose boxes they both are. */
+      home?: Element;
     }
     const places = new Map<Element, Place>();
     const looks = new Map<Element, Look>();
@@ -1741,7 +1754,8 @@ export function agentFactory(options: AgentOptions): Agent {
     const offsets = new Map<Document, { x: number; y: number }>();
     const textCounts = new Map<Element, number>();
     const regionNames = new Map<Element, string>();
-    const pending: { pieces: Piece[]; breaks: number }[] = [];
+    const backdrops = new Map<Element, string | null>();
+    const pending: Pending[] = [];
 
     const outerElement = (element: Element): Element | null => parentElementOf(element) ?? frameElementOf(element);
 
@@ -1784,6 +1798,43 @@ export function agentFactory(options: AgentOptions): Agent {
       return place;
     }
 
+    /**
+     * The opaque colour behind the content of an element, as far as styles tell: the nearest
+     * background colour among its ancestors. Null when they do not tell: a background image or a
+     * translucent colour on the way, a frame (it shows the page that holds it), a root that asks
+     * for a dark canvas. Content positioned behind the element is not looked for.
+     */
+    function backdropOf(element: Element): string | null {
+      const chain: Element[] = [];
+      let found: string | null | undefined;
+      for (let current: Element | null = element; current; current = parentElementOf(current)) {
+        const known = backdrops.get(current);
+        if (known !== undefined) {
+          found = known;
+          break;
+        }
+        chain.push(current);
+        const own = current.ownerDocument.defaultView?.getComputedStyle(current);
+        const color = own && own.backgroundImage === 'none' ? parseColor(own.backgroundColor) : null;
+        if (!own || !color || (color.a > 0 && color.a < 1)) {
+          found = null;
+          break;
+        }
+        if (color.a >= 1) {
+          found = '#' + [color.r, color.g, color.b].map((channel) => channel.toString(16).padStart(2, '0')).join('');
+          break;
+        }
+      }
+      if (found === undefined) {
+        // Nothing painted up to the root: the canvas, which is white unless the page asks otherwise.
+        const root = element.ownerDocument.documentElement;
+        const scheme = element.ownerDocument.defaultView?.getComputedStyle(root).colorScheme ?? '';
+        found = element.ownerDocument === document && !scheme.includes('dark') ? '#ffffff' : null;
+      }
+      for (const current of chain) backdrops.set(current, found);
+      return found;
+    }
+
     function lookOf(holder: Element): Look {
       const known = looks.get(holder);
       if (known) return known;
@@ -1812,6 +1863,13 @@ export function agentFactory(options: AgentOptions): Agent {
           (color ? color.a > 0 : alphaOf(computed.color) > 0),
         style,
         signature: [style.family, Math.round(style.size * 10) / 10, style.weight, style.color, style.transform].join('|'),
+        blends:
+          !!computed &&
+          !!color &&
+          color.a >= 1 &&
+          computed.textShadow === 'none' &&
+          !(parseFloat(computed.webkitTextStrokeWidth) > 0) &&
+          backdropOf(holder) === hex,
       };
       looks.set(holder, look);
       return look;
@@ -1908,7 +1966,11 @@ export function agentFactory(options: AgentOptions): Agent {
       for (const segment of segments) {
         const own = dominant(segment).look.signature;
         if (group.length > 0 && own !== signature) close();
-        else if (group.length > 0) breaks++;
+        else if (group.length > 0) {
+          breaks++;
+          // The two sides of a line break are separate words, with or without white space around it.
+          segment[0]!.apart = true;
+        }
         if (group.length === 0) signature = own;
         group.push(...segment);
       }
@@ -1972,21 +2034,22 @@ export function agentFactory(options: AgentOptions): Agent {
       return name;
     };
 
-    for (const { pieces, breaks } of pending) {
-      const first = pieces[0]!;
-      // Lines, from the painted boxes of the text.
+    const sameLine = (a: AgentRect, b: AgentRect): boolean =>
+      Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) >= limits.sameLineMinOverlap * Math.min(a.height, b.height);
+    /** Lines, from the painted boxes of the text. */
+    const linesOf = (pieces: Piece[]): AgentRect[] => {
       const rects = pieces.flatMap((piece) => piece.rects).sort((a, b) => a.y - b.y || a.x - b.x);
       const lines: AgentRect[] = [];
       for (const rect of rects) {
         const last = lines[lines.length - 1];
-        const overlap = last ? Math.min(last.y + last.height, rect.y + rect.height) - Math.max(last.y, rect.y) : 0;
-        if (last && overlap >= 0.5 * Math.min(last.height, rect.height)) lines[lines.length - 1] = union(last, rect);
+        if (last && sameLine(last, rect)) lines[lines.length - 1] = union(last, rect);
         else lines.push(rect);
       }
-      const offset = offsetOf(first.holder);
-      const page = (rect: AgentRect): AgentRect => toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y });
-
-      let element = first.holder;
+      return lines;
+    };
+    /** The lowest element that holds all the text of a block. */
+    const containerOf = (pieces: Piece[]): Element => {
+      let element = pieces[0]!.holder;
       for (const piece of pieces) {
         while (!composedContains(element, piece.holder)) {
           const parent = parentElementOf(element);
@@ -1994,6 +2057,69 @@ export function agentFactory(options: AgentOptions): Agent {
           element = parent;
         }
       }
+      return element;
+    };
+
+    // One text laid out in several boxes is one block: the words of a title set as inline blocks
+    // or as flex items, text around a word that must not wrap. Two blocks that follow each other
+    // are joined when they have one style, are boxes of one element, and sit on one line no
+    // further apart than words are. Boxes that are something of their own (a link, a button, a
+    // cell, a list item, a heading) are peers, and peers in a row are set further apart.
+    const standsAlone = (element: Element): boolean =>
+      ownContexts(element).length > 0 ||
+      headingMarks.has(element) ||
+      element.localName === 'li' ||
+      (element.getAttribute('role') ?? '').trim().toLowerCase() === 'listitem';
+    const sharedHome = (a: Pending, b: Pending): Element | null => {
+      const inner = containerOf(b.pieces);
+      const outer = parentElementOf(inner);
+      const boxes: Element[] = [];
+      let home: Element | null = null;
+      if (a.home) {
+        home = a.home === inner || a.home === outer ? a.home : null;
+      } else {
+        const own = containerOf(a.pieces);
+        const above = parentElementOf(own);
+        if (own === inner) return null;
+        if (own === outer) home = own;
+        else if (above !== null && (above === inner || above === outer)) home = above;
+        if (home !== null && own !== home) boxes.push(own);
+      }
+      if (home === null) return null;
+      if (inner !== home) boxes.push(inner);
+      return boxes.some(standsAlone) ? null : home;
+    };
+    const blocksToRead: Pending[] = [];
+    for (const entry of pending) {
+      const last = blocksToRead[blocksToRead.length - 1];
+      const look = dominant(entry.pieces).look;
+      if (last && entry.pieces[0]!.holder.ownerDocument === last.pieces[0]!.holder.ownerDocument && dominant(last.pieces).look.signature === look.signature) {
+        const before = linesOf(last.pieces);
+        const a = before[before.length - 1]!;
+        const b = linesOf(entry.pieces)[0]!;
+        const gap = Math.max(b.x - (a.x + a.width), a.x - (b.x + b.width));
+        if (sameLine(a, b) && Math.abs(gap) <= limits.mergeMaxGapEm * look.style.size) {
+          const home = sharedHome(last, entry);
+          if (home) {
+            entry.pieces[0]!.apart = true;
+            last.pieces.push(...entry.pieces);
+            last.breaks += entry.breaks;
+            last.home = home;
+            total--;
+            continue;
+          }
+        }
+      }
+      blocksToRead.push(entry);
+    }
+
+    for (const { pieces, breaks } of blocksToRead) {
+      const first = pieces[0]!;
+      const lines = linesOf(pieces);
+      const offset = offsetOf(first.holder);
+      const page = (rect: AgentRect): AgentRect => toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y });
+
+      let element = containerOf(pieces);
       // An inline wrapper that holds all the text of its parent stands for nothing: name the parent.
       for (;;) {
         const parent = element.parentElement;
@@ -2009,7 +2135,7 @@ export function agentFactory(options: AgentOptions): Agent {
       const isHeading = headingElement !== null && piecePlaces.every((own) => own.heading === headingElement);
       const { look, share } = dominant(pieces);
       const text = pieces
-        .map((piece) => piece.text)
+        .map((piece) => (piece.apart ? ' ' : '') + piece.text)
         .join('')
         .replace(/\s+/g, ' ')
         .trim();
@@ -2033,6 +2159,7 @@ export function agentFactory(options: AgentOptions): Agent {
         inListItem: piecePlaces.every((own) => own.inListItem),
         region: regionName(place.region),
         heading: isHeading ? { level: headingMarks.get(headingElement) ?? 0, selector: selectorOf(headingElement) } : null,
+        ...(pieces.every((piece) => piece.look.blends) ? { sameColourAsBackground: true } : {}),
       });
     }
     return { blocks, total };

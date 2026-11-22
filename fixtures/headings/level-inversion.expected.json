@@ -1,5 +1,5 @@
 {
-  "description": "Heading levels against the visual order, inside one region. An h3 larger than the h2 it is under, and an h2 much smaller than the h3 before it, are advisory. An h4 two levels under an h2 and more than twice its size is likely (extreme). Skipped levels, repeated text, a second h1, and small headings in another region are not reported.",
+  "description": "Heading levels against the visual order, inside one region. An h3 larger than the h2 it is under, and an h2 smaller than a well-ordered h3 before it, are advisory. An h4 two levels under an h2 and more than twice its size is likely (extreme). Skipped levels, repeated text, a second h1, and small headings in another region are not reported.",
   "checks": ["headings"],
   "exact": true,
   "expected": [

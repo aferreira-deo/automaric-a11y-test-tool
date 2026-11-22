@@ -91,7 +91,8 @@ export async function collectHeadings(page: StablePage, config: HeadingsConfig):
   const blocks: TextBlock[] = read.blocks.map((block) => ({ ...block, crop: null }));
   const survey: HeadingSurvey = { blocks, total: read.total, axComplete };
 
-  // Core decides what is reported; only that is captured.
+  // Core decides what is reported; only that is captured: at most `maxCandidates` candidates and
+  // `maxInversions` contradictions between levels, so the number of captures is bounded by both.
   const report = headingReport(survey, config);
   const used = new Set<string>();
   for (const index of new Set([...report.candidates.map((candidate) => candidate.block), ...report.inversions.map((inversion) => inversion.block)])) {
@@ -104,6 +105,7 @@ export async function collectHeadings(page: StablePage, config: HeadingsConfig):
     used.add(id);
     const prepared = await agent<AgentHeadingPrepared>(`prepareHeading(${index})`);
     if (prepared.covered) block.covered = true;
+    // No capture: `crop` stays null, for a candidate of any status (see HeadingCandidate.crop).
     if (!prepared.clip) continue;
     await page.capture(id, prepared.clip);
     block.crop = id;

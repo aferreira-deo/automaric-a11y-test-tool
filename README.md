@@ -36,11 +36,17 @@ Text that functions as a heading without being exposed as one, and heading level
 Candidates come from what is rendered, not from tags:
 
 1. **Text blocks.** Visible text nodes are grouped into blocks: the text laid out together in one block container.
-   A `br` splits a block only where the style changes across it (`<b>Title</b><br>text`). Hidden text is left out:
-   not displayed, clipped, transparent, off screen, of no size.
-2. **Body style.** The most common font size and weight by number of characters, inside `main` when it holds text.
-   Headings, links, buttons, labels, navigation, code and text under `aria-hidden` do not count, so that a wall of
-   links does not set it.
+   A `br` splits a block only where the style changes across it (`<b>Title</b><br>text`); where it does not, the
+   two lines are joined with a space. Boxes of one style that sit on one line inside one parent, no further apart
+   than words are (`mergeMaxGapEm`, 0.4 of the font size), are one block: the words of a title set as inline
+   blocks or as flex items. Boxes that are something of their own (a link, a button, a cell, a list item) are
+   never joined. Hidden text is left out: not displayed, clipped, transparent, off screen, of no size.
+2. **Body style.** The most common font size and weight by number of characters, inside `main` when it holds
+   enough text: at least `baselineMinChars` (200) characters in that style and `baselineMainMinShare` (0.1) of the
+   plain text of the page; otherwise on the whole page. Headings, links, buttons, labels, navigation, code and
+   text under `aria-hidden` do not count, so that a wall of links does not set it. When the whole page has fewer
+   than `baselineMinChars` characters in its most common style, the body style is not trusted: no candidate is
+   above `info`, and candidates and the survey carry the flag `lowText`.
 3. **Exposed headings.** Taken from the accessibility tree of each document (`Accessibility.getFullAXTree`), not from
    tags: an `h2` with `role="presentation"` is not one, a `div` with the role heading is.
 4. **Prominence.** A block that is no heading is looked at when it is larger than body text (`minSizeRatio`, 1.3),
@@ -49,34 +55,65 @@ Candidates come from what is rendered, not from tags:
    (`matchesHeadingStyle`). It must be short (`maxWords` 20, `maxLines` 3; 12 words when it is only bolder) and of
    one style.
 5. **Position, from boxes.** Alone on its line, followed by text that starts under it, and not by something set as
-   a title of its size or larger.
+   a title of its size or larger. Up to `besideControlsMax` (2) buttons or links beside it on its line are passed
+   over ("View all" at the end of the row of a title).
 
 - `likely` (`headings/unmarked-heading`): prominent, in position, and nothing speaks against it.
 - `info` (`headings/heading-candidate`): prominent, with a reason against it as a flag. By markup: `label`
   (also legends), `caption`, `tableHeader`, `tableCell`, `term`, `button`, `link` (all of it is a link), `quote`,
-  `code`, `navigation`, `ariaHidden`, `listItem`. By content: `numeric` (a price, a statistic, a date),
-  `peersNumeric` ("Free" among prices), `quotation`, `sentence`, `colon`, `lineBreaks`. By position: `notFollowed`,
-  `repeated` (a series in one style), `headsControl` (a tagline over a call to action), `tightAbove` (bold text of
-  body size with less space above than below).
+  `code`, `navigation`, `ariaHidden`, `listItem`. By content: `numeric` (mostly digits, or with a currency or
+  percent sign: a price, a figure, a date), `statistic` (short and opening with a number: "15 years", but also
+  "2026 roadmap"), `peersNumeric` ("Free" among prices), `quotation`, `italic` (large italics of normal weight: a
+  pull quote), `sentence`, `colon`, `lineBreaks`, `repeatedText` (the same text in the same style at least
+  `repeatedTextMinCount` (3) times on the page: a badge under every product), `sameColourAsBackground`. By
+  position: `notFollowed`, `repeated` (a series in one style), `headsControl` (a tagline over a call to action),
+  `tightAbove` (bold text of body size with less space above than below), and two for text that is only bolder
+  than body text: `shortFollower` (what follows is one plain block that is no longer than it, or one line of at
+  most `shortFollowerMaxWords` (15) words that is no sentence, and nothing of that style after it: a label over a
+  value) and `labelSeries` (label, such a line, label again: keys and values, names in a feed).
+- Numbered titles are not numbers: "1. Scope", "2) Method", and one or two digits, with or without parts after
+  dots, before a capital letter ("1 Introduction", "1.2 Requirements") (`ordinalStartPattern`).
 - Not reported at all: text beside other text on its line, a row of peers, and text that has a reason by markup or
   content and also heads nothing (a navigation link, a table cell).
 - `advisory` or `likely` (`headings/level-inversion`): inside one region (landmark, `article`, `dialog`), a heading
   coded above a preceding heading that is visibly larger, or visibly larger than the heading it is coded under.
   Visual rank is font size, from a ratio of 1.15. `likely` only when the two are at least 2 levels apart and differ
   by 1.5 in size; both statuses are options (`inversionStatus`, `extremeInversionStatus`), an open decision of the
-  owner. Skipped levels, a missing or repeated `h1`, a page without headings and repeated heading text are never
-  reported.
+  owner. The options take `advisory` or `likely` only: `fail` is turned into `likely`, anything else into the
+  default, when the configuration is resolved and again where the status is computed. One oversized heading is
+  reported once, on itself; the headings after it are not reported as smaller than it. At most `maxInversions`
+  (50) are reported. Skipped levels, a missing or repeated `h1`, a page without headings and repeated heading text
+  are never reported.
 - `info` (`headings/survey`): counts, and the body style that was used.
 
-Every candidate comes with a capture of the block in context, its text, its style and that of body text, and the
-text that follows it. When the accessibility tree cannot be read, nothing is above `info` (`axIncomplete`).
+Every candidate comes with its text, its style and that of body text, the text that follows it, and a capture of
+the block in context when one could be taken. When the accessibility tree cannot be read, nothing is above `info`
+(`axIncomplete`).
 
 The patterns that end a sentence, open a quotation or number a title are options and hold no words of any language.
 
-`headingCandidates(snapshot.headings, config.headings)` in `@a11y-vision/core` gives the candidates as data, for the
-adjudicator layer (M4): each has the id of its finding (`findingId`), the capture (`crop`, a key of the snapshot
-clips; `box` is the part to outline), a compact `context` (text, style, body style, features, text before and
-after) and `adjudicate`, false where a judgement would change nothing (a label, a number, hidden text).
+#### Hand-off to the adjudicator layer (M4)
+
+`headingCandidates(snapshot.headings, config.headings)` in `@a11y-vision/core` gives the candidates as data. Each
+has:
+
+- `findingId`: the id of its finding. It is a fingerprint of the element under one constant key
+  (`headings/candidate`), not of the rule name, which follows the status: the id stays the same when a candidate
+  goes from `info` to `likely` or back, between two runs or after a verdict.
+- `status`: `likely` or `info`, never anything else, and `adjudicate`: false where a judgement would change
+  nothing (a label, a price, text hidden from assistive technology, an accessibility tree that could not be read).
+  Short titles that open with a number, text in the style of prices, repeated text and what the position says are
+  left to a judgement.
+- `crop`: a key of the snapshot clips, **or null**. A candidate with `adjudicate` true can have no capture: under
+  a fixed banner or dialog (`covered`), in a transformed frame, outside the viewport. M4 has to handle that case:
+  judge from `context` alone, or leave the candidate as it is. `box` is the part of the capture to outline.
+- `context`: text, style, body style, features, reasons, the text before and after (cut to
+  `contextBeforeMaxChars` and `contextAfterMaxChars`), and `sameTextAndStyle`, the number of blocks of the page
+  with this text in this style: one judgement can serve them all.
+
+`context` and the captures hold text of the page under test. They leave the machine only when they are sent to a
+model, which happens only when a provider is configured; without one nothing is sent anywhere, and the candidates
+are reported as they are. Page text is untrusted data.
 
 ### What `icon-contrast` reports
 
@@ -161,20 +198,35 @@ it reports into view to capture it. It changes nothing else.
 - One viewport width and one state: the page as it is. Text that shows only at another width, on hover or after an
   interaction is not read. Text inside scroll containers is read; text clipped by `overflow: hidden` is not (the
   slides of a carousel that are off screen).
-- Headings inside images, canvas and SVG are not found.
+- Headings inside images, canvas and SVG are not found. Nor is text generated by CSS (`::before`, `::after`): a
+  title that exists only as `content` is not seen.
 - Bold text of body size, larger text of normal weight under 1.3 times the body size, and titles that are links
-  are common false positives, so they are held back: the first by a word limit and a spacing rule, the second
-  entirely, the third as `info`. Real unmarked headings of those kinds are missed or reported as `info`.
-- On a page with little plain text (a home page of links), the body style may be that of small print.
+  are common false positives, so they are held back: the first by a word limit, a spacing rule and by what
+  follows it (`shortFollower`, `labelSeries`), the second entirely, the third as `info`. Real unmarked headings of
+  those kinds are missed or reported as `info`: a bold title over one short line that is no sentence, a title
+  whose text is on the page three times.
+- Bold text over one line that is a full sentence stays `likely`, because a title over a one-line paragraph looks
+  the same: the title of a callout ("Warning"), the name of an author over one sentence, a term over its
+  definition. `sentenceFollowerIsContent: false` holds those back too, and with them the titles over one-line
+  paragraphs (on the mutation fixtures 22 of 34 stripped headings are then `likely`, against 31).
+- On a page with little plain text (a home page of links), nothing is above `info` (`lowText`): what is there may
+  be small print, and says little about what body text looks like.
 - The site name in a header and a tagline above content can be `likely`: nothing measurable tells them from a
   heading.
+- Two pieces of text of one style a word space apart on one line are read as one text, whatever they are: a key
+  and its value set that close are one block.
+- Text in the exact colour of the background behind it is held back as `info` (`sameColourAsBackground`). The
+  background is the nearest opaque background colour among the ancestors; with a background image, a translucent
+  colour, a text shadow or a frame on the way nothing is concluded, and the text is treated as visible.
 - Whether text is a heading already is decided for the whole block: text half inside a heading is not one.
 - The capture is not taken when fixed or sticky content lies over the middle of the block (`covered`); other covers
-  are not looked for, and the capture is evidence of context only: nothing is measured on it.
+  are not looked for, and the capture is evidence of context only: nothing is measured on it. A finding of any
+  status, `likely` included, can therefore come without a capture.
 - Heading text that is visually hidden takes no part in the comparison of levels. Rank is font size alone: weight,
   colour and capitals are not ranked.
 - Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. At most
-  `maxBlocks` (6000) blocks are read and `maxCandidates` (150) candidates reported.
+  `maxBlocks` (6000) blocks are read, `maxCandidates` (150) candidates and `maxInversions` (50) contradictions
+  between levels reported.
 - Heading markup on text that is not a heading is not looked for yet.
 
 ### Known limits of the icon check

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: labels-and-values</title>
+    <style>
+      body { margin: 32px; font: 15px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 900px; }
+      p { margin: 0 0 12px; }
+      h1 { font-size: 28px; margin: 0 0 16px; }
+      .panel { border: 1px solid #767676; padding: 16px; margin-top: 16px; }
+      .k { font-weight: 700; margin-top: 12px; }
+      .caps { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #595959; margin-top: 12px; }
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .card { border: 1px solid #767676; padding: 16px; }
+      .val { font-size: 28px; font-weight: 700; }
+      .sub { font-size: 12px; color: #595959; }
+      .section { font-size: 18px; font-weight: 700; }
+      .name { font-size: 17px; font-weight: 700; }
+      .callout { border-left: 4px solid #00539b; padding: 8px 12px; margin-top: 16px; }
+      .author { font-size: 18px; font-weight: 700; }
+      .small { font-size: 12px; }
+      .smallcaps { font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      footer { margin-top: 24px; max-width: 900px; }
+      a { color: #00539b; }
+      .links a { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">Atlas project</h1>
+      <p>Body text of the page, long enough to be the most common style by a wide margin. Everything bold below this paragraph is a label over a value, a name over one line, or a short notice, and none of it is the heading of a section of the page.</p>
+
+      <!-- Statistics: a bold label, a figure, one line of small print. -->
+      <div class="cards">
+        <div class="card"><div class="k" id="stat-1">Revenue</div><div class="val">$12,340</div><div class="sub">Compared to last month</div></div>
+        <div class="card"><div class="k" id="stat-2">Active users</div><div class="val">1,204</div><div class="sub">Compared to last month</div></div>
+        <div class="card"><div class="k" id="stat-3">Churn</div><div class="val">2.4%</div><div class="sub">Compared to last month</div></div>
+      </div>
+
+      <!-- Key and value, one under the other. -->
+      <div class="panel">
+        <div class="k" id="kv-1">Owner</div><div>Marketing team</div>
+        <div class="k" id="kv-2">Repository</div><div>acme/atlas-web</div>
+        <div class="k" id="kv-3">Description</div><div>Customer portal for the Atlas product line</div>
+      </div>
+      <div class="panel">
+        <div class="caps" id="caps-1">Assignee</div><div>Jane Doe</div>
+        <div class="caps" id="caps-2">Priority</div><div>High</div>
+        <div class="caps" id="caps-3">Environment</div><div>Production cluster, west region</div>
+      </div>
+
+      <!-- A feed: a real title, then a name over one line, again and again. -->
+      <div class="panel">
+        <div class="section" id="feed-title">Activity</div>
+        <div class="k" id="who-1">Omar Haddad</div><div>Merged the pull request for the new billing page</div>
+        <div class="k" id="who-2">Lina Park</div><div>Commented on the checklist for the release</div>
+        <div class="k" id="who-3">Sam Ortiz</div><div>Changed the priority of the migration task to high</div>
+      </div>
+
+      <!-- A notice, the caption of a figure, the name of an author: bold over one short line that is no sentence. -->
+      <div class="panel"><div class="k" id="toast">Changes saved</div><div>Your settings were updated a moment ago</div></div>
+      <div class="panel"><div style="height: 40px; background: #d9d9d9"></div><div class="k" id="figure-caption">Figure 2 Rollout stages</div><div>Share of traffic at each stage</div></div>
+      <div class="panel"><div class="author" id="author-name">Marta Kowalski</div><div>Infrastructure writer, engineering blog</div></div>
+
+      <!-- Terms and their definitions, without dl. -->
+      <div class="panel">
+        <div id="term-1"><b>Replica</b></div><div>One running copy of the service</div>
+        <div id="term-2"><b>Stage</b></div><div>A step of the rollout</div>
+      </div>
+
+      <!-- Known limit. The same things over one line that is a full sentence cannot be told from a title over a
+           one-line paragraph, which is common, so they stay likely (the option sentenceFollowerIsContent decides). -->
+      <div class="callout"><div class="k" id="callout-title">Warning</div><div>Fewer than three replicas disable automatic failover.</div></div>
+      <div class="panel"><div class="author" id="author-sentence">Jane Doe</div><div>Jane writes about infrastructure for the engineering blog.</div></div>
+
+      <!-- Product names over one line of description. -->
+      <div class="cards" style="margin-top: 16px">
+        <div class="card"><div class="name" id="product-1">Monstera deliciosa</div><div>Easy tropical plant, pot of 17 cm</div><div class="val">$24.90</div></div>
+        <div class="card"><div class="name" id="product-2">Ficus lyrata</div><div>Tall ficus, leaves like a lyre</div><div class="val">$39.00</div></div>
+        <div class="card"><div class="name" id="product-3">Calathea orbifolia</div><div>Striped leaves, likes light shade</div><div class="val">$29.50</div></div>
+      </div>
+
+      <!-- Still headings: bold text of body size over a real paragraph, and over a list of links. -->
+      <div class="k" id="bold-heading" style="margin-top: 24px">How the rollout works</div>
+      <p>A new version is first given to a small share of visitors. When its error rate stays under the limit for an hour, the share is doubled, and so on until every visitor has it. A version that goes over the limit is taken back at once and the team is told.</p>
+      <div class="k" id="links-title" style="margin-top: 24px">Related pages</div>
+      <div class="links"><a href="/a">Deployment checklist</a><a href="/b">Rollback procedure</a><a href="/c">On-call rota</a></div>
+    </main>
+    <footer>
+      <div class="smallcaps" id="footer-name">Example Docs</div>
+      <div class="small">Content available under a permissive licence.</div>
+    </footer>
+  </body>
+</html>

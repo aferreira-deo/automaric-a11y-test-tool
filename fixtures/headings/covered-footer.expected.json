@@ -1,0 +1,10 @@
+{
+  "description": "A cookie banner fixed to the bottom of the window lies over the footer, which is the end of the page and cannot be scrolled out from under it. The unmarked titles of the footer columns are still likely, from their styles and position, but they have no capture (flag covered, no crop): a candidate that a model may judge can come without a crop (e2e/headings.spec.ts checks it).",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#footer-help", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["covered"] },
+    { "selector": "#footer-about", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["covered"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

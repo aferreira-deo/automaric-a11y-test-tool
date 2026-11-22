@@ -1,0 +1,15 @@
+{
+  "description": "Titles that open with a number. A section number is not a figure: \"1 Introduction\", \"1.2 Requirements\" and \"2. Installation\" are likely. A short title that opens with a number and could be a statistic (\"3D rendering options\", \"2026 roadmap\", \"15 years\") is info with the flag statistic, and a word in the style of prices is info with the flag peersNumeric: both are left to a judgement (adjudicate is true, see the unit tests). Such titles do not make the numbered ones in their style numbers by association. Only text that is mostly digits or carries a currency or percent sign is a number for good (flag numeric).",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#number-space", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#number-dotted", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#number-full-stop", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#number-letter", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["statistic"] },
+    { "selector": "#number-unit", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["statistic"] },
+    { "selector": "#year", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["statistic"] },
+    { "selector": "#statistic", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["statistic"] },
+    { "selector": "#price-word", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["peersNumeric"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

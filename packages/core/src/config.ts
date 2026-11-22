@@ -86,6 +86,7 @@ export const defaultConfig: Config = {
     maxBlocks: 6000,
     maxTextChars: 300,
     maxCandidates: 150,
+    maxInversions: 50,
     minVisibleTextCssPx: 2,
     minFontSizeCssPx: 1,
     regionSelector:
@@ -93,6 +94,11 @@ export const defaultConfig: Config = {
     clipMarginCssPx: 16,
     clipAboveCssPx: 48,
     clipBelowCssPx: 96,
+    contextBeforeMaxChars: 160,
+    contextAfterMaxChars: 240,
+    messageTextMaxChars: 80,
+    baselineMinChars: 200,
+    baselineMainMinShare: 0.1,
     minSizeRatio: 1.3,
     minWeightDelta: 200,
     boldMinSizeRatio: 0.95,
@@ -103,12 +109,19 @@ export const defaultConfig: Config = {
     maxBoldOnlyWords: 12,
     uniformStyleMinShare: 0.9,
     maxBreaks: 2,
-    sentenceEndPattern: '([.\\u3002;\\uff1b,\\uff0c\\u3001\\u2026]|\\p{L}[.\\u3002][\\p{N}*\\u2020\\u2021]{1,2})$',
+    sentenceEndPattern:
+      '([.\\u3002\\u06d4\\u0964\\u0965;\\uff1b\\u061b,\\uff0c\\u3001\\u060c\\u2026]|\\p{L}[.\\u3002][\\p{N}*\\u2020\\u2021]{1,2})$',
     leadInEndPattern: '[:\\uff1a]$',
     quoteStartPattern: '^["\\u00ab\\u2039\\u201c\\u201e\\u201a\\u2018\\u300c\\u300e]',
     numericMinDigitShare: 0.5,
     statisticMaxWords: 3,
-    ordinalStartPattern: '^\\p{N}+(\\.\\p{N}+)*[.)]\\s',
+    ordinalStartPattern: '^\\p{N}+(\\.\\p{N}+)*[.)]\\s|^\\p{N}{1,2}(\\.\\p{N}{1,2})*\\s+\\p{Lu}',
+    repeatedTextMinCount: 3,
+    shortFollowerMaxLines: 1,
+    shortFollowerMaxWords: 15,
+    sentenceFollowerIsContent: true,
+    besideControlsMax: 2,
+    mergeMaxGapEm: 0.4,
     peerDemotionMinShare: 0.66,
     peerDemotionMinPeers: 2,
     sameLineMinOverlap: 0.5,
@@ -130,11 +143,25 @@ export type ConfigInput = {
   headings?: Partial<HeadingsConfig>;
 };
 
+/**
+ * The status of a contradiction between heading levels, whatever was configured: whether two
+ * levels contradict the visual order is a judgement, so it is `advisory` or `likely` and never
+ * `fail`. A configured `fail` becomes `likely`, the highest status allowed; anything else that is
+ * not one of the two becomes `fallback`.
+ */
+export function clampInversionStatus(value: unknown, fallback: 'advisory' | 'likely'): 'advisory' | 'likely' {
+  if (value === 'advisory' || value === 'likely') return value;
+  return value === 'fail' ? 'likely' : fallback;
+}
+
 export function resolveConfig(input: ConfigInput = {}): Config {
+  const headings = { ...defaultConfig.headings, ...input.headings };
+  headings.inversionStatus = clampInversionStatus(headings.inversionStatus, defaultConfig.headings.inversionStatus);
+  headings.extremeInversionStatus = clampInversionStatus(headings.extremeInversionStatus, defaultConfig.headings.extremeInversionStatus);
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
-    headings: { ...defaultConfig.headings, ...input.headings },
+    headings,
   };
 }

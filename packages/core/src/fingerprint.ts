@@ -18,6 +18,9 @@ export function fnv1a64(text: string): string {
  * Identity of a finding across runs: which rule fired on which element.
  * Status, measurements and message are deliberately excluded, so a baseline entry
  * survives a change of measured ratio or a status downgrade.
+ *
+ * A check whose rule name follows the status gives one constant name in its place
+ * (`FindingDraft.fingerprintRule`), so that the same holds for it.
  */
 export function fingerprint(draft: Pick<FindingDraft, 'rule' | 'wcag' | 'frame' | 'selector'>): string {
   return fnv1a64([draft.rule, draft.wcag?.sc ?? '', draft.frame, draft.selector].join('\u0000'));

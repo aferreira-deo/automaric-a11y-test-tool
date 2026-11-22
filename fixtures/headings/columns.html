@@ -12,7 +12,7 @@
       .title { font-size: 24px; font-weight: 700; margin: 0 0 8px; }
       .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; margin-top: 24px; }
       .card { font-size: 19px; font-weight: 700; margin: 0 0 4px; }
-      .pair { display: flex; gap: 8px; margin-top: 24px; }
+      .pair { display: flex; gap: 24px; margin-top: 24px; }
       .pair span { font-size: 24px; font-weight: 700; }
     </style>
   </head>
@@ -29,7 +29,8 @@
           <div><div class="card" id="card-2">Second card</div><p>Body text of the second card.</p></div>
           <div><div class="card" id="card-3">Third card</div><p>Body text of the third card.</p></div>
         </div>
-        <!-- Two pieces of text side by side on one line: neither heads what follows. -->
+        <!-- Two pieces of text side by side on one line, further apart than words are: neither heads what follows.
+             (A word space apart they would read as one line of text, and be one block: see split-titles.) -->
         <div class="pair"><span id="pair-key">Total</span><span id="pair-value">Twelve items</span></div>
         <p>Body text under the pair.</p>
       </div>

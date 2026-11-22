@@ -69,3 +69,48 @@ test('without the accessibility tree nothing is reported above info', async ({ p
   expect(findings.find((finding) => finding.selector === '#real-h2')?.evidence.flags).toContain('axIncomplete');
   expect(findings.find((finding) => finding.rule === 'headings/survey')?.evidence.flags).toContain('axIncomplete');
 });
+
+test('a title laid out in several boxes is read as one text, with spaces between its parts', async ({ page }) => {
+  await page.goto('/headings/split-titles.html');
+  const { findings } = await new A11yVision({ page }).withChecks(['headings']).analyze();
+  const textOf = (selector: string) => findings.find((finding) => finding.selector === selector)?.evidence.values?.['text'];
+  expect(textOf('#inline-blocks')).toBe('Split into inline blocks');
+  expect(textOf('#flex-words')).toBe('Flex title words');
+  expect(textOf('#br-title')).toBe('Title on two lines');
+  // The link at the end of the row is not what the title heads.
+  expect(findings.find((finding) => finding.selector === '#title-row')?.evidence.values?.['followedBy']).toContain('Body text under the row');
+});
+
+test('a likely candidate under a fixed banner has no capture', async ({ page }) => {
+  await page.goto('/headings/covered-footer.html');
+  const { result, crops } = await new A11yVision({ page }).withChecks(['headings']).analyzeWithEvidence();
+  const likely = result.findings.filter((finding) => finding.status === 'likely');
+  expect(likely.map((finding) => finding.selector).sort()).toEqual(['#footer-about', '#footer-help']);
+  for (const finding of likely) {
+    expect(finding.evidence.crops).toEqual([]);
+    expect(finding.evidence.flags).toContain('covered');
+  }
+  expect(Object.keys(crops)).toEqual([]);
+});
+
+test('the id of a candidate does not depend on its status', async ({ page }) => {
+  await page.goto('/headings/unmarked-headings.html');
+  const idOf = async () => {
+    const { findings } = await new A11yVision({ page }).withChecks(['headings']).analyze();
+    const finding = findings.find((entry) => entry.selector === '#div-title')!;
+    return { id: finding.id, status: finding.status, rule: finding.rule };
+  };
+  const likely = await idOf();
+  // The same block, now all of it a link: info, under the other rule name.
+  await page.evaluate(() => {
+    const title = document.getElementById('div-title')!;
+    const link = document.createElement('a');
+    link.href = '/somewhere';
+    link.append(...title.childNodes);
+    title.append(link);
+  });
+  const info = await idOf();
+  expect(likely).toMatchObject({ status: 'likely', rule: 'headings/unmarked-heading' });
+  expect(info).toMatchObject({ status: 'info', rule: 'headings/heading-candidate' });
+  expect(info.id).toBe(likely.id);
+});

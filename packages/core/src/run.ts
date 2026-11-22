@@ -27,8 +27,8 @@ export function runChecks(snapshot: Snapshot, config: Config): Finding[] {
   for (const id of config.checks) {
     const check = registry.get(id);
     if (!check) throw new Error(`Unknown check "${id}". Available: ${registeredChecks().join(', ')}`);
-    for (const draft of check.evaluate(snapshot, config)) {
-      findings.push({ id: fingerprint(draft), ...draft });
+    for (const { fingerprintRule, ...draft } of check.evaluate(snapshot, config)) {
+      findings.push({ id: fingerprint({ ...draft, rule: fingerprintRule ?? draft.rule }), ...draft });
     }
   }
   return findings.sort(

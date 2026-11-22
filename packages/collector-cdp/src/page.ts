@@ -221,6 +221,8 @@ export async function withStablePage<T>(
         clipMarginCssPx: config.headings.clipMarginCssPx,
         clipAboveCssPx: config.headings.clipAboveCssPx,
         clipBelowCssPx: config.headings.clipBelowCssPx,
+        sameLineMinOverlap: config.headings.sameLineMinOverlap,
+        mergeMaxGapEm: config.headings.mergeMaxGapEm,
       },
     };
     await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);

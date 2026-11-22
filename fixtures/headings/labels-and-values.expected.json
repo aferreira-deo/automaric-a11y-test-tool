@@ -1,0 +1,33 @@
+{
+  "description": "Bold text of about body size over a single short line that is no sentence: the label of a statistic, keys over values, names in a feed, a notice, a figure caption in a div, the name of an author, terms over definitions without dl, product names, and small print in a footer over one line of any kind. None is likely: each is info with the flag shortFollower (what follows is one short line and nothing more) or labelSeries (label, one line, label again). A title over the feed, bold text over a real paragraph and bold text over a list of links stay likely. Known limit, pinned here: the title of a callout and a name over one line that is a full sentence stay likely too, because a title over a one-line paragraph looks the same.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#stat-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#stat-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#stat-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#kv-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#kv-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#kv-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#caps-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#caps-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#caps-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#feed-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#who-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#who-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#who-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#toast", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#figure-caption", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#author-name", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#term-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#term-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["labelSeries"] },
+    { "selector": "#product-1", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#product-2", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#product-3", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "#callout-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#author-sentence", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#bold-heading", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#links-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#footer-name", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["shortFollower"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

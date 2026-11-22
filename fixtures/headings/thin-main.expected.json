@@ -1,0 +1,9 @@
+{
+  "description": "main holds one short note at 12px and the text of the page sits outside it. So little text does not set the body style (baselineMinChars, baselineMainMinShare): it is measured on the whole page, at 16px. A line at 17px is then no candidate, where against the 12px of the note it would have been reported as larger; the real title is likely.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["larger", "bolder"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

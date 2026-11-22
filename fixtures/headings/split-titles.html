@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: split-titles</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .big { font-size: 24px; font-weight: 700; margin: 24px 0 8px; }
+      .ib { display: inline-block; }
+      .flex { display: flex; gap: 8px; }
+      .row { display: flex; justify-content: space-between; align-items: baseline; margin: 24px 0 8px; }
+      .row .big { margin: 0; }
+      .tabs { display: flex; gap: 20px; margin-top: 24px; }
+      .tabs div { font-size: 24px; font-weight: 700; }
+      a { color: #00539b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Body text that sets the body style of this page. It is long enough to outweigh every other style used below by a wide margin of characters, so that nothing else is taken for body text.</p>
+
+      <!-- One title, each word in a box of its own (animated titles are built this way). -->
+      <div class="big" id="inline-blocks"><span class="ib">Split</span> <span class="ib">into</span> <span class="ib">inline blocks</span></div>
+      <p>Body text under the title made of inline blocks, long enough to be a paragraph of its own.</p>
+
+      <div class="big flex" id="flex-words"><span>Flex</span><span>title words</span></div>
+      <p>Body text under the title made of flex items, long enough to be a paragraph of its own.</p>
+
+      <!-- A forced line break inside a title: its two lines are separate words. -->
+      <div class="big" id="br-title">Title on<br />two lines</div>
+      <p>Body text under the title with a line break, long enough to be a paragraph of its own.</p>
+
+      <!-- A title with a small link at the other end of its row. -->
+      <div class="row"><div class="big" id="title-row">Recent deployments</div><a href="/all">View all</a></div>
+      <p>Body text under the row of the title, long enough to be a paragraph of its own.</p>
+
+      <!-- Not a title: a row of peers, further apart than the words of a title. -->
+      <div class="tabs"><div id="tab-1">Overview</div><div>Details</div><div>Reviews</div></div>
+      <p>Body text under the row of peers, long enough to be a paragraph of its own.</p>
+    </main>
+  </body>
+</html>

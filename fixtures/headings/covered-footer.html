@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: covered-footer</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      /* Taller than any window the tests use, so that the footer is the end of a page that scrolls. */
+      main { max-width: 640px; padding: 32px; min-height: 1200px; }
+      p { margin: 0 0 16px; }
+      footer { background: #f2f2f2; padding: 24px 32px; display: grid; grid-template-columns: repeat(2, 1fr); }
+      .column-title { font-size: 22px; font-weight: 700; }
+      footer a { display: block; color: #00539b; }
+      /* A cookie banner fixed to the bottom of the window: the end of the page cannot be scrolled out from under it. */
+      .banner { position: fixed; left: 0; right: 0; bottom: 0; height: 200px; background: #fff; border-top: 2px solid #1a1a1a; padding: 12px 32px; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Body text of the page, long enough to be the most common style of the page by a wide margin. It goes on for a few sentences so that the count of characters leaves no doubt about it. The footer under it has two columns of links, each under a title that is not marked up as a heading.</p>
+    </main>
+    <footer>
+      <div><div class="column-title" id="footer-help">Help</div><a href="/delivery">Delivery</a><a href="/returns">Returns</a><a href="/contact">Contact us</a></div>
+      <div><div class="column-title" id="footer-about">About</div><a href="/story">Our story</a><a href="/jobs">Jobs</a><a href="/press">Press</a></div>
+    </footer>
+    <div class="banner"><p>We use cookies to measure how many people visit this site and which pages they read.</p><button type="button">Refuse</button> <button type="button">Accept</button></div>
+  </body>
+</html>

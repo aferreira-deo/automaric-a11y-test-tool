@@ -1,8 +1,9 @@
 {
-  "description": "Text styled as a title that cannot be seen: display none, visibility hidden, visually hidden by clipping, opacity 0, off screen, font size 0, transparent, clipped by its container, the hidden attribute, inside a closed details. Candidates come from what is painted, so none is reported.",
+  "description": "Text styled as a title that cannot be seen: display none, visibility hidden, visually hidden by clipping, opacity 0, off screen, font size 0, transparent, clipped by its container, the hidden attribute, inside a closed details. Candidates come from what is painted, so none is reported. Text in the exact colour of the background behind it is painted, and may sit over a picture the styles do not tell of: it is a candidate at info, with the flag sameColourAsBackground.",
   "checks": ["headings"],
   "exact": true,
   "expected": [
+    { "selector": "#same-colour", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["sameColourAsBackground"] },
     { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
   ]
 }

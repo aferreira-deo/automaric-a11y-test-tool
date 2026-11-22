@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: level-inversion-oversized</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      h1, h2, h4 { margin: 24px 0 8px; font-weight: 700; line-height: 1.2; }
+      h1 { font-size: 40px; }
+      h2 { font-size: 22px; }
+      h4 { font-size: 36px; }
+      p { margin: 0 0 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">One oversized heading</h1>
+      <p>Body text of the page, long enough to set the body style. Three sections of one level follow, and a promotional block coded two levels under them is set far larger than they are.</p>
+      <h2 id="section-a">Section A</h2>
+      <p>Body text of section A, which is ordinary.</p>
+      <!-- The one contradiction of this page. -->
+      <h4 id="promo">Big promo</h4>
+      <p>Body text of the promotional block, which is ordinary.</p>
+      <!-- Coded above the oversized heading before it and smaller than it: the fault is that heading's, already reported. -->
+      <h2 id="section-b">Section B</h2>
+      <p>Body text of section B, which is ordinary.</p>
+      <h2 id="section-c">Section C</h2>
+      <p>Body text of section C, which is ordinary.</p>
+    </main>
+  </body>
+</html>

@@ -323,6 +323,13 @@ export interface TextBlock {
   crop: string | null;
   /** Other content lay over the middle of the block when it was to be captured (a banner, a dialog), so it was not. */
   covered?: boolean;
+  /**
+   * The text has exactly the colour of the background behind it, as far as styles tell: the
+   * nearest opaque background colour among its ancestors, with no background image, translucent
+   * colour, text shadow or text stroke on the way. It may still sit over a picture positioned
+   * behind it, so it is read as text and only held back.
+   */
+  sameColourAsBackground?: boolean;
 }
 
 export interface HeadingSurvey {
@@ -398,7 +405,14 @@ export interface Finding {
 }
 
 /** A finding before its fingerprint is computed. */
-export type FindingDraft = Omit<Finding, 'id'>;
+export type FindingDraft = Omit<Finding, 'id'> & {
+  /**
+   * Takes the place of `rule` in the fingerprint, for a check that reports one thing under two
+   * rule names depending on its status (a heading candidate): the id then survives the change.
+   * Not part of the finding.
+   */
+  fingerprintRule?: string;
+};
 
 export interface Check {
   id: CheckId;
@@ -619,6 +633,8 @@ export interface HeadingsConfig {
   maxTextChars: number;
   /** At most this many candidates are reported and captured: likely ones first, then in document order. */
   maxCandidates: number;
+  /** At most this many contradictions between heading levels are reported and captured, in document order. */
+  maxInversions: number;
   /** Text smaller than this on either side, once clipped by its containers, is not visible text. */
   minVisibleTextCssPx: number;
   /** Text of a smaller font size paints nothing worth reading. */
@@ -634,6 +650,22 @@ export interface HeadingsConfig {
   clipAboveCssPx: number;
   /** Captured below a candidate, to show what it heads. */
   clipBelowCssPx: number;
+  /** Text of the block before a candidate that is given as context (`HeadingCandidate.context.textBefore`), in characters. */
+  contextBeforeMaxChars: number;
+  /** Text of the block after a candidate that is given as context and as evidence (`textAfter`, `followedBy`), in characters. */
+  contextAfterMaxChars: number;
+  /** Text of a block quoted in the message of a finding, in characters. */
+  messageTextMaxChars: number;
+
+  /**
+   * Fewest characters (white space apart) in the most common style of a pool of text for that
+   * style to be taken as the body style. Under it inside `main`, the whole page is measured; under
+   * it on the whole page, the body style is not trusted and no candidate is above `info`
+   * (`lowText`).
+   */
+  baselineMinChars: number;
+  /** `main` sets the body style only if it holds at least this share of the plain text of the page. */
+  baselineMainMinShare: number;
 
   /**
    * A block is larger than body text from this ratio of font sizes. Set well above the ratio
@@ -670,10 +702,50 @@ export interface HeadingsConfig {
   quoteStartPattern: string;
   /** Share of digits among letters and digits from which text is a number (a price, a statistic, a date). */
   numericMinDigitShare: number;
-  /** Text that starts with a number and has at most this many words is a statistic ("15 years", "3x faster"). */
+  /**
+   * Text that starts with a number and has at most this many words may be a statistic
+   * ("15 years", "3x faster") as well as a title ("2026 roadmap"): it is held back, and left to
+   * a judgement.
+   */
   statisticMaxWords: number;
-  /** Text opening like this is numbered ("1. Scope", "2) Method"), not a statistic. */
+  /**
+   * Text opening like this is numbered, not a statistic: "1. Scope", "2) Method", and a number
+   * of one or two digits, with or without parts after dots, before a capital letter
+   * ("1 Introduction", "1.2 Requirements"). Scripts without capitals only have the first form.
+   */
   ordinalStartPattern: string;
+  /**
+   * From this many blocks with the same text in the same style on a page, each of them is a label
+   * (a badge under every product, "Read more" over every teaser), not a heading.
+   */
+  repeatedTextMinCount: number;
+  /**
+   * Text that is only bolder than body text heads little when what follows it is one block of at
+   * most this many lines...
+   */
+  shortFollowerMaxLines: number;
+  /** ...and at most this many words. Text no longer than the candidate itself always counts as little. */
+  shortFollowerMaxWords: number;
+  /**
+   * True: one short line that ends like a sentence (`sentenceEndPattern`) is content, as a
+   * paragraph of several lines is, so bold text over it can be `likely`. That keeps titles over
+   * one-line paragraphs, and also the title of a callout or a name over one sentence. False: any
+   * single short line under bold text holds it back, at the price of those titles (on the
+   * mutation fixtures, 22 of 34 stripped headings are then `likely`, against 31).
+   * Bold text smaller than body text is held back either way.
+   */
+  sentenceFollowerIsContent: boolean;
+  /**
+   * At most this many buttons or links that sit beside a candidate on its line (a "View all"
+   * link at the end of the row of a title) are passed over to find what the candidate heads.
+   */
+  besideControlsMax: number;
+  /**
+   * Boxes of one style on one line inside one parent are one block of text when they are no
+   * further apart than this many times the font size: the words of a title set as inline blocks
+   * or flex items. Peers in a row (tabs, a menu) are set further apart.
+   */
+  mergeMaxGapEm: number;
   /**
    * A candidate is taken for a number when at least this share of the other blocks with its
    * exact style are numbers: "Free" among prices, "On request" among statistics.
@@ -681,7 +753,10 @@ export interface HeadingsConfig {
   peerDemotionMinShare: number;
   /** Fewest such look-alikes for that to apply. */
   peerDemotionMinPeers: number;
-  /** Two lines overlap vertically from this share of the lower of the two. */
+  /**
+   * Two boxes are on one line when they overlap vertically by this share of the lower of the two.
+   * Used for the painted lines of a block as well as for blocks that share a line.
+   */
   sameLineMinOverlap: number;
   /**
    * Text before a candidate on its line, and no further from it than this many times its font
