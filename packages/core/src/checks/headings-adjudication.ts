@@ -23,6 +23,7 @@ const PROBLEM_TEXT: Record<AiProblem, string> = {
   refusal: 'the model declined to answer',
   truncated: 'the answer of the model was cut off',
   'too-large': 'the answer of the model was too long to read',
+  stopped: 'adjudication was stopped before this candidate, because the endpoint kept failing or the time allowed for the page ran out',
 };
 
 function count(ai: AiEvidence): string {
@@ -31,7 +32,7 @@ function count(ai: AiEvidence): string {
 
 /** What the verdict adds to the message of deterministic code, which is kept as it is. */
 function note(ai: AiEvidence, before: Finding['status'], after: Finding['status']): string {
-  const basis = ai.inputs === 'text' ? ', from the text alone (no capture was sent)' : '';
+  const basis = (ai.inputs === 'text' ? ', from the text alone (no capture was sent)' : '') + (ai.fromCache === true ? ', read from the cache' : '');
   if (ai.verdict === 'yes') {
     return after === before
       ? ` A model judged the same (${count(ai)}${basis}): it functions as a heading for what follows. That does not replace the confirmation by a tester.`
@@ -39,7 +40,9 @@ function note(ai: AiEvidence, before: Finding['status'], after: Finding['status'
   }
   if (ai.verdict === 'no') {
     return after === before
-      ? ` A model judged (${count(ai)}${basis}) that it does not function as a heading; the status is unchanged.`
+      ? after === 'likely'
+        ? ` A model judged (${count(ai)}${basis}) that it does not function as a heading. It stays ${after}: a verdict of a model is recorded for the tester and does not take a finding off the list.`
+        : ` A model judged the same (${count(ai)}${basis}): it does not function as a heading.`
       : ` Lowered from ${before} to ${after}: a model judged (${count(ai)}${basis}) that it does not function as a heading. The measurements are unchanged.`;
   }
   const why = ai.problems?.length
@@ -54,13 +57,14 @@ function note(ai: AiEvidence, before: Finding['status'], after: Finding['status'
  * Status of a heading candidate after a verdict. It moves between `info` and `likely` and
  * nowhere else: whether text functions as a heading stays a matter for a tester.
  * - `yes`: `likely`, whether it was `likely` or `info`.
- * - `no`: a `likely` becomes `headingNoStatus` (`info` by default); an `info` stays `info`.
+ * - `no`: a `likely` stays `likely` with the verdict recorded, unless `headingNoStatus` is `info`,
+ *   which lowers it; an `info` stays `info`.
  * - `unsure`, which includes every failure: unchanged.
  */
 export function headingStatusAfter(before: Finding['status'], verdict: AiEvidence['verdict'], config: Config): 'likely' | 'info' {
   const start = before === 'likely' ? 'likely' : 'info';
   if (verdict === 'yes') return 'likely';
-  if (verdict === 'no') return start === 'likely' && config.adjudication.headingNoStatus === 'likely' ? 'likely' : 'info';
+  if (verdict === 'no') return start === 'likely' && config.adjudication.headingNoStatus !== 'info' ? 'likely' : 'info';
   return start;
 }
 

@@ -19,6 +19,7 @@ const ai = (over: Partial<AiEvidence> = {}): AiEvidence => ({
   rationale: 'r',
   statusBefore: 'info',
   inputs: 'text+image',
+  fromCache: false,
   ...over,
 });
 
@@ -68,7 +69,8 @@ describe('headingStatusAfter', () => {
   const config = resolveConfig();
   it.each<[Status, AiEvidence['verdict'], Status]>([
     ['likely', 'yes', 'likely'],
-    ['likely', 'no', 'info'],
+    // The default follows the brief to the letter: a no is recorded, and the finding stays on the list.
+    ['likely', 'no', 'likely'],
     ['likely', 'unsure', 'likely'],
     ['info', 'yes', 'likely'],
     ['info', 'no', 'info'],
@@ -80,13 +82,16 @@ describe('headingStatusAfter', () => {
   ])('%s with the verdict %s gives %s', (before, verdict, after) => {
     expect(headingStatusAfter(before, verdict, config)).toBe(after);
   });
-  it('keeps a likely on a no when configured to', () => {
-    const keep = resolveConfig({ adjudication: { headingNoStatus: 'likely' } });
-    expect(headingStatusAfter('likely', 'no', keep)).toBe('likely');
-    expect(headingStatusAfter('info', 'no', keep)).toBe('info');
+  it('lowers a likely on a no only when configured to', () => {
+    expect(resolveAdjudication().headingNoStatus).toBe('likely');
+    const lower = resolveConfig({ adjudication: { headingNoStatus: 'info' } });
+    expect(headingStatusAfter('likely', 'no', lower)).toBe('info');
+    expect(headingStatusAfter('info', 'no', lower)).toBe('info');
+    expect(headingStatusAfter('likely', 'yes', lower)).toBe('likely');
+    expect(headingStatusAfter('info', 'yes', lower)).toBe('likely');
   });
   it('cannot be configured to give a fail', () => {
-    expect(resolveAdjudication({ headingNoStatus: 'fail' as never }).headingNoStatus).toBe('info');
+    expect(resolveAdjudication({ headingNoStatus: 'fail' as never }).headingNoStatus).toBe('likely');
     for (const before of ['likely', 'info'] as const) {
       for (const verdict of ['yes', 'no', 'unsure'] as const) {
         expect(['likely', 'info']).toContain(headingStatusAfter(before, verdict, resolveConfig({ adjudication: { headingNoStatus: 'fail' as never } })));
@@ -152,8 +157,23 @@ describe('applyVerdicts', () => {
     return { ...scan, all, find };
   };
 
-  it('moves candidates between likely and info and keeps what deterministic code found', () => {
+  it('by default records a no without taking the finding off the list', () => {
     const { result, config, all, find } = setup();
+    const target = find(SELECTORS.strong);
+    const after = applyVerdicts(result.findings, all, new Map([[target.id, ai({ verdict: 'no', votes: ['no', 'no'], fromCache: true })]]), config);
+    const kept = after.find((finding) => finding.id === target.id)!;
+    expect(kept.status).toBe('likely');
+    expect(kept.rule).toBe('headings/unmarked-heading');
+    expect(kept.ai).toMatchObject({ verdict: 'no', statusBefore: 'likely', fromCache: true });
+    expect(kept.message.startsWith(target.message)).toBe(true);
+    expect(kept.message).toContain('does not function as a heading');
+    expect(kept.message).toContain('It stays likely');
+    expect(kept.message).toContain('from the cache');
+  });
+
+  it('moves candidates between likely and info when lowering is configured, and keeps what deterministic code found', () => {
+    const { result, all, find } = setup();
+    const config = resolveConfig({ checks: ['headings'], adjudication: { headingNoStatus: 'info' } });
     const verdicts = new Map([
       [find(SELECTORS.strong).id, ai({ verdict: 'no', votes: ['no', 'no'] })],
       [find(SELECTORS.weak).id, ai({ verdict: 'yes' })],
@@ -233,6 +253,28 @@ describe('applyVerdicts', () => {
     const failed = applyHeadingVerdict(finding, ai({ verdict: 'unsure', votes: ['unsure'], problems: ['timeout'], statusBefore: 'likely' }), config);
     expect(failed.status).toBe('likely');
     expect(failed.message).toContain('the model did not answer in time');
+    const stopped = applyHeadingVerdict(finding, ai({ verdict: 'unsure', votes: ['unsure'], problems: ['stopped'], statusBefore: 'likely' }), config);
+    expect(stopped.status).toBe('likely');
+    expect(stopped.message).toContain('adjudication was stopped before this candidate');
+  });
+});
+
+describe('resolveAdjudication', () => {
+  it('keeps every duration within what a timer can hold', () => {
+    const MAX = 2 ** 31 - 1;
+    expect(resolveAdjudication({ timeoutMs: 2 ** 31 }).timeoutMs).toBe(MAX);
+    expect(resolveAdjudication({ timeoutMs: 1e15 }).timeoutMs).toBe(MAX);
+    expect(resolveAdjudication({ timeoutMs: MAX }).timeoutMs).toBe(MAX);
+    expect(resolveAdjudication({ timeoutMs: Infinity }).timeoutMs).toBe(resolveAdjudication().timeoutMs);
+    expect(resolveAdjudication({ retryBaseDelayMs: 1e15, retryMaxDelayMs: 1e15, pageBudgetMs: 1e15 })).toMatchObject({ retryBaseDelayMs: MAX, retryMaxDelayMs: MAX, pageBudgetMs: MAX });
+  });
+
+  it('has a limit on consecutive failures and a time budget per page by default, and both can be switched off', () => {
+    const defaults = resolveAdjudication();
+    expect(defaults.maxConsecutiveFailures).toBeGreaterThan(0);
+    expect(defaults.pageBudgetMs).toBeGreaterThan(defaults.timeoutMs);
+    expect(resolveAdjudication({ maxConsecutiveFailures: 0, pageBudgetMs: 0 })).toMatchObject({ maxConsecutiveFailures: 0, pageBudgetMs: 0 });
+    expect(resolveAdjudication({ maxConsecutiveFailures: -2, pageBudgetMs: 'soon' as never })).toMatchObject({ maxConsecutiveFailures: 0, pageBudgetMs: defaults.pageBudgetMs });
   });
 });
 

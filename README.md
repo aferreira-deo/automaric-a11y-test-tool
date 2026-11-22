@@ -48,7 +48,8 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-model <name>` | `A11Y_VISION_AI_MODEL` | Model name, passed through as it is. |
 | `--ai-key-env <NAME>` | `A11Y_VISION_AI_KEY_ENV` | NAME of the environment variable that holds the API key. The key is never given on the command line or in a file. Leave it out for an endpoint that takes no key. |
 | `--ai-label <text>` | | Name shown in reports for the provider (default `openai-compatible`). |
-| `--ai-allow-remote` | | Allow an endpoint that is not on this machine. |
+| `--ai-allow-remote` | | Allow an endpoint that is not on this machine. It has to be an `https` URL. |
+| `--ai-lower-on-no` | | Lower a `likely` heading candidate to `info` when the model says it is not a heading (`headingNoStatus: "info"`). Off by default, see "What a verdict changes". |
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
@@ -56,6 +57,18 @@ node packages/cli/dist/bin.js scan https://example.com \
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
+
+The two environment variables are enough to switch the model on, with no option on the command line. That is
+convenient in CI and easy to forget in a shell, so whenever a model is asked, whatever switched it on, the CLI
+says so in one line on stderr, with the model, the host and where each of the two settings came from:
+
+```
+A model is asked: Text and captures of the page go to the model <model> on 127.0.0.1 (this machine). Endpoint from the environment variable A11Y_VISION_AI_BASE_URL, model from the environment variable A11Y_VISION_AI_MODEL.
+```
+
+stdout carries the JSON report and nothing else. One of the two variables set without the other (and without the
+matching option) is a usage error that names the variable and the way out (`--no-ai`). A variable set to an empty
+value counts as not set.
 
 ```ts
 const { result, adjudication } = await new A11yVision({ page })
@@ -69,19 +82,37 @@ With the API nothing is cached unless `cacheFile` or `cache` is given; `adjudica
 
 | Deterministic status | `yes` | `no` | `unsure` |
 |---|---|---|---|
-| `likely` | `likely` | `info` (`headingNoStatus: "likely"` keeps it) | `likely` |
+| `likely` | `likely` | `likely`, with the verdict recorded (`headingNoStatus: "info"` or `--ai-lower-on-no` lowers it to `info`) | `likely` |
 | `info`, held back for a reason that is a matter of judgement | `likely` | `info` | `info` |
 | `info`, held back for what it is (a label, a price, hidden from assistive technology) | not sent | not sent | not sent |
 
+- **A `no` does not take a finding off the list (default; open decision of the owner).** The brief says a judged
+  candidate is `likely` at most, and says nothing about a model lowering one, so the default reads it to the
+  letter: the finding stays `likely`, its `ai` part and its message record the `no`, and the HTML report shows
+  "Model: no" beside the status and counts such findings in its introduction, so a tester can skim or search for
+  them. The trade-off:
+  - Keeping it (`headingNoStatus: "likely"`, the default) costs the tester a look at candidates a model would have
+    cleared, and no page text, however persuasive to a model, and no edited cache file can make a finding of
+    deterministic code disappear.
+  - Lowering it (`headingNoStatus: "info"`, `--ai-lower-on-no`) shortens the `likely` list, which is the point of
+    asking a model, and means that whoever controls the text of the page under test (prompt injection) or can
+    write to the verdict cache can move the page's own findings to `info`. The finding is still in the report,
+    with `statusBefore: "likely"`.
+
+  Which of the two is the default is for the owner to decide; until then it is the first. A `yes` raising a
+  held-back `info` to `likely` is not part of the question: it only ever adds to the tester's list.
 - Never `fail`, whatever is configured and whatever the model says. The exit code does not depend on a model.
 - The id of a finding, its selector and its evidence are those of deterministic code. The finding gains an `ai`
   part: provider label, model as configured, prompt version, the votes, the verdict, `confidence` (`high` or
-  `low`), the model's rationale, `statusBefore` (the status without the model), `inputs` (`text` or `text+image`)
-  and, when calls failed, `problems`. The message of deterministic code is kept and one sentence is added.
+  `low`), the model's rationale, `statusBefore` (the status without the model), `inputs` (`text` or `text+image`),
+  `fromCache` (true when the verdict was read from the verdict cache and no model was asked in this run) and,
+  when calls failed, `problems`. The message of deterministic code is kept and one sentence is added. `fromCache`
+  and that sentence are, with the timestamp, what differs between a first run and the next on an unchanged page.
 - `unsure` is also what every failure becomes: a timeout, an HTTP error, an answer that is not the JSON object
   asked for, a refusal, a cut-off answer. The status then stays as it was and `problems` says why (`timeout`,
-  `network`, `http`, `invalid-output`, `refusal`, `truncated`, `too-large`). One candidate failing does not
-  affect the others, and never fails the scan.
+  `network`, `http`, `invalid-output`, `refusal`, `truncated`, `too-large`, and `stopped` for a candidate that
+  was not asked about because adjudication of the page had been stopped, see "Limits and the cache"). One
+  candidate failing never fails the scan.
 - Two votes per candidate (`votes`), at temperature 0. `yes` or `no` needs both votes to agree with high
   confidence; a second vote is not asked for when the first already settles `unsure`.
 - A candidate without a capture (under a banner, for instance) is judged from its text, its style and the text
@@ -92,29 +123,74 @@ With the API nothing is cached unless `cacheFile` or `cache` is given; `adjudica
 JSON (its text, style, measurements, the text before and after it) and, unless `--ai-text-only`, the capture of
 the block with a rectangle drawn around the text. That is text and pictures of the page under test. It goes to the
 endpoint you configured and nowhere else; redirects are refused. An endpoint on another host than this machine
-(anything but `localhost`, `127.0.0.0/8`, `::1`) is refused unless `--ai-allow-remote` (`allowRemote`) is set,
-and the CLI then says on stderr where page content goes. Whether cloud providers should be allowed by default is
-an open decision of the owner; until it is taken the default is the conservative one.
+(anything but `localhost`, a name under `.localhost`, `127.0.0.0/8`, `::1`) is refused unless `--ai-allow-remote`
+(`allowRemote`) is set, and then it has to be an `https` URL: a remote endpoint over plain `http` is always
+refused, with or without a key, because text, captures and the key would cross the network in the clear. Whether
+cloud providers should be allowed by default is an open decision of the owner; until it is taken the default is
+the conservative one.
+
+An endpoint on this machine stays on this machine, as far as this tool can make it so:
+
+- **No proxy.** Node can be told to send its HTTP traffic through a proxy (`NODE_USE_ENV_PROXY=1` or
+  `NODE_OPTIONS=--use-env-proxy` with `HTTP_PROXY`/`HTTPS_PROXY`), and that includes loopback addresses unless
+  `NO_PROXY` lists them. Requests to a loopback endpoint therefore do not use the global `fetch`: they go through
+  `node:http` with an agent of their own, which those settings do not reach (tested on Node 24 with both
+  switches). A remote endpoint, which you allowed explicitly, does use `fetch` and with it the proxy of the
+  environment, as any other outgoing request of the machine would.
+- **A name is checked, not believed.** `localhost` and names under `.localhost` are accepted as this machine by
+  name, and then resolved: before the scan every address the name resolves to has to be loopback (`127.0.0.0/8`,
+  `::1`), or the run stops with exit 2 and a message that gives the address. Each request then resolves the name
+  again inside its own connection, refuses if any address is not loopback, and connects to an address from that
+  same answer, so a resolver that changes its answer between the check and the connection (DNS rebinding) gains
+  nothing. What is not covered: this holds in Node, which is where the CLI and the Playwright API run; code that
+  uses `@a11y-vision/adjudicators` outside Node (the extension, later) relies on the browser, which resolves
+  `localhost` to loopback itself. And something listening on a loopback port of your machine is trusted to be the
+  model server you meant: a local server that forwards to a cloud (see the note on Ollama below) is beyond what
+  this tool can see.
 
 **The key.** Read from the environment variable you name, sent as a bearer token to the endpoint, and used for
 nothing else. It is not written to reports, to the cache, to stderr or to error messages; what an endpoint
 answers when a call fails is not copied anywhere either, only a problem code is.
 
-**Untrusted text.** Page text goes to the model as data: inside JSON strings, between two marker lines derived
-from the data, under instructions that say to judge it and never to follow it, with the task repeated after it.
-No prompt makes a model immune to injected text, so the damage is bounded instead: the answer must be exactly
-`{"verdict", "confidence", "rationale"}` with allowed values or it counts as `unsure`; no selector, colour or
-number is taken from a model; a verdict moves one candidate between `likely` and `info` and can do nothing else.
+**Untrusted text.** Page text goes to the model as data: inside JSON strings, between two marker lines that carry
+128 random bits made for that one request (so the author of a page cannot write the marker in advance; the
+marker is not part of the cache key), under instructions that say to judge it and never to follow it, with the
+task repeated after it. No prompt makes a model immune to injected text, so the damage is bounded instead: the
+answer must be exactly `{"verdict", "confidence", "rationale"}` with allowed values or it counts as `unsure`; no
+selector, colour or number is taken from a model; a verdict can raise one candidate from `info` to `likely`, and
+by default does nothing else to a status (see above for lowering).
 The rationale is the model's own words: reports show it escaped, and it should be read as a hint, not as a fact.
 
 **Limits and the cache.** At most `maxCallsPerPage` (120) requests per page, retries included; candidates
 beyond that are left as they are, and the line on stderr says how many. `concurrency` (2) requests at a time,
 `timeoutMs` (120000) each, up to `maxRetries` (2) retries for network errors and HTTP 408, 425, 429, 500, 502,
-503 and 504 with a doubling wait; timeouts are not retried. Verdicts are cached in a local JSON file under a
+503 and 504 with a doubling wait; timeouts are not retried. `timeoutMs` and the other durations are cut to
+2147483647 ms, the most a timer holds.
+
+An endpoint that hangs or is gone is not asked about every candidate: after `maxConsecutiveFailures` (3) requests
+in a row without any answer (`timeout` or `network`; an HTTP error is an answer) nothing more is sent for that
+page, and neither once `pageBudgetMs` (600000, ten minutes) has passed since adjudication of the page began. The
+candidates not yet asked about keep their status, carry `problems: ["stopped"]`, and the line on stderr says why
+it stopped and how many were left. With the defaults a hanging endpoint costs about four minutes for a page
+instead of two minutes for every pair of candidates. The budget is checked before each request and does not cut
+one short, so a page can take up to `pageBudgetMs` plus `timeoutMs`. `0` switches either limit off.
+
+Verdicts are cached in a local JSON file under a
 SHA-256 of the generator version, the candidate's context, a perceptual hash of its capture, the endpoint, the
 model and its settings, the prompt version and the number of votes, so an unchanged page costs no calls and a
 changed candidate is judged again. Failures are not cached. The file holds verdicts and rationales, which can
-quote the page; it is read back with every entry validated, and it is never sent anywhere. Delete it to start over.
+quote the page; it is never sent anywhere. Delete it to start over.
+
+The cache file is input like any other: whoever can write to it can write verdicts. Every entry is validated
+when the file is read and again when it is used: only `yes`, `no` or `unsure`, the verdict worked out again from
+the votes, and the number of votes the settings in force ask for (a `yes` or `no` with one vote where two are
+required is dropped and the model is asked). A well-formed entry written by hand under the right key cannot be
+told from a real one; that is why each finding says `fromCache` (the HTML report: "read from the cache (no model
+was asked in this run)"), and one of the reasons a `no` does not lower a finding by default. Saving merges with
+what is in the file at that moment and replaces it atomically, under a temporary name of its own; saves of one
+file within one process run one after the other, so parallel scans in a test run lose nothing. Two separate
+processes that save at the same instant can still lose the verdicts one of them added (they are asked for again
+next time); the file is never left half written.
 All of these are settings under `adjudication` in the config file; `packages/core/src/types.ts` documents each.
 
 #### With a local Ollama model
@@ -154,7 +230,9 @@ What the documentation says, and what follows from it here:
   (`maxTokensField`).
 - The default context window is 4096 tokens. If answers come back cut off (`truncated`) or invalid with a
   capture attached, start the server with a larger one (`OLLAMA_CONTEXT_LENGTH=8192 ollama serve`).
-- A model is loaded on first use, which can take longer than a later call: `timeoutMs` allows two minutes.
+- A model is loaded on first use, which can take longer than a later call: `timeoutMs` allows two minutes. If the
+  first calls of a run time out while a large model loads, adjudication of that page stops after three of them
+  (`maxConsecutiveFailures`); run it again once the model is in memory, or raise `timeoutMs`.
 - Requests are handled one at a time per model unless the server is configured otherwise, so `concurrency` above
   1 only queues.
 - Ollama can also serve cloud-hosted models through the same local address. With such a model, page content
@@ -474,7 +552,7 @@ node e2e/support/dump.mjs focus-indicator/gradient
 |---|---|
 | `packages/core` | Types, result schema, pure checks and measurers. No Node or DOM APIs: its tsconfig loads neither. |
 | `packages/collector-cdp` | Builds a `Snapshot` over a minimal CDP session interface. |
-| `packages/adjudicators` | The adjudicator layer: the OpenAI-compatible adapter, the prompt and the validation of answers, votes, retries, limits and the verdict cache. The only package that calls a model, through the global `fetch`. |
+| `packages/adjudicators` | The adjudicator layer: the OpenAI-compatible adapter, the prompt and the validation of answers, votes, retries, limits and the verdict cache. The only package that calls a model: through `node:http` without a proxy for an endpoint on this machine (`./node`, loaded only in Node), through the global `fetch` for a remote one. |
 | `packages/reporters` | JSON report in the axe result shape; our data sits under `a11yVision`. |
 | `packages/playwright` | `new A11yVision({ page }).analyze()` |
 | `packages/cli` | `scan <url>` |

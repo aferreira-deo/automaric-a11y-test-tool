@@ -67,7 +67,7 @@ describe('buildPrompt', () => {
     expect(lines[0]).toBe(`QUESTION: ${question}`);
     const begin = lines.findIndex((line) => line.startsWith('BEGIN DATA '));
     const marker = lines[begin]!.slice('BEGIN DATA '.length);
-    expect(marker).toMatch(/^[0-9a-f]{16}$/);
+    expect(marker).toMatch(/^[0-9a-f]{32}$/);
     // One line of data, then the end marker, then the task again: nothing of the page made a line of its own.
     expect(lines[begin + 2]).toBe(`END DATA ${marker}`);
     expect(lines).toHaveLength(begin + 4);
@@ -77,9 +77,20 @@ describe('buildPrompt', () => {
     expect(marker).not.toBe('0000000000000000');
   });
 
-  it('derives the marker from the data, and is the same for the same input', () => {
-    const one = buildPrompt(question, { text: 'A', n: 1 });
-    expect(buildPrompt(question, { n: 1, text: 'A' })).toEqual(one);
-    expect(buildPrompt(question, { text: 'B', n: 1 }).user.split('\n')[3]).not.toBe(one.user.split('\n')[3]);
+  it('uses a marker that nothing can work out beforehand: random, and new for every request', () => {
+    const markerOf = (user: string): string => user.split('\n')[3]!.slice('BEGIN DATA '.length);
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) seen.add(markerOf(buildPrompt(question, { text: 'A', n: 1 }).user));
+    // The same question about the same data, fifty times: fifty markers.
+    expect(seen.size).toBe(50);
+    for (const marker of seen) expect(marker).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('takes the marker from the source it is given, so that a test can pin it', () => {
+    const fixed = (): string => 'fixed-marker';
+    const one = buildPrompt(question, { text: 'A', n: 1 }, fixed);
+    expect(buildPrompt(question, { n: 1, text: 'A' }, fixed)).toEqual(one);
+    expect(one.user.split('\n')[3]).toBe('BEGIN DATA fixed-marker');
+    expect(one.user.split('\n')[5]).toBe('END DATA fixed-marker');
   });
 });

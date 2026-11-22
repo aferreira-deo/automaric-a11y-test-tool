@@ -41,8 +41,19 @@ export async function verdictKey(request: JudgeRequest, adjudicator: Adjudicator
 
 const VERDICTS: readonly Verdict[] = ['yes', 'no', 'unsure'];
 
-/** An entry read back from storage, or undefined when it is not one: a cache file can be edited by anyone. */
-export function validCachedVerdict(value: unknown, maxRationaleChars: number): CachedVerdict | undefined {
+/**
+ * An entry read back from storage, or undefined when it is not one: a cache file can be edited by anyone.
+ *
+ * With `required`, the number of votes the settings in use ask for, the entry must also be one this
+ * run could have written under them: a `yes` or a `no` carries exactly that many votes, and an
+ * `unsure` at most that many (voting stops at the first vote that settles `unsure`). The number of
+ * votes is part of the key, so an entry that fails this was not written by this tool.
+ *
+ * What this cannot tell is a well-formed entry that someone wrote by hand under the right key.
+ * That is why a verdict read from a cache is marked as such in the finding (`ai.fromCache`), and
+ * why by default no verdict takes a finding off the list.
+ */
+export function validCachedVerdict(value: unknown, maxRationaleChars: number, required?: number): CachedVerdict | undefined {
   if (value === null || typeof value !== 'object') return undefined;
   const { votes, verdict, confidence, rationale, inputs } = value as Record<string, unknown>;
   if (!Array.isArray(votes) || votes.length === 0 || !votes.every((vote) => VERDICTS.includes(vote as Verdict))) return undefined;
@@ -53,6 +64,7 @@ export function validCachedVerdict(value: unknown, maxRationaleChars: number): C
   const all = votes as Verdict[];
   // The verdict is worked out again from the votes: an entry cannot claim more than its votes say.
   const agreed = confidence === 'high' && all[0] !== 'unsure' && all.every((vote) => vote === all[0]);
+  if (required !== undefined && (all.length > required || (agreed && all.length !== required))) return undefined;
   return { votes: [...all], verdict: agreed ? all[0]! : 'unsure', confidence: agreed ? 'high' : 'low', rationale: cleanRationale(rationale, maxRationaleChars), inputs };
 }
 

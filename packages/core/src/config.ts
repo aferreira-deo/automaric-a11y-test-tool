@@ -145,6 +145,8 @@ export const defaultConfig: Config = {
     temperature: 0,
     seed: null,
     timeoutMs: 120000,
+    maxConsecutiveFailures: 3,
+    pageBudgetMs: 600000,
     concurrency: 2,
     maxRetries: 2,
     retryBaseDelayMs: 500,
@@ -163,7 +165,7 @@ export const defaultConfig: Config = {
     outlineColor: '#ff00ff',
     outlineWidthCssPx: 2,
     outlineGapCssPx: 3,
-    headingNoStatus: 'info',
+    headingNoStatus: 'likely',
   },
 };
 
@@ -195,6 +197,14 @@ function atLeast(value: unknown, min: number, fallback: number, whole = true): n
   return Math.max(min, whole ? Math.floor(value) : value);
 }
 
+/** The longest delay a timer takes (2^31 - 1 ms, about 24.8 days). Beyond it, `setTimeout` fires at once. */
+export const MAX_TIMER_MS = 2147483647;
+
+/** A duration in milliseconds that a timer can hold: `atLeast`, cut to `MAX_TIMER_MS`. */
+function duration(value: unknown, min: number, fallback: number): number {
+  return Math.min(MAX_TIMER_MS, atLeast(value, min, fallback));
+}
+
 /**
  * Settings of the adjudicator layer, with anything that is not a usable value put back to its
  * default: a configuration can come from a JSON file. Whatever is configured, a status that
@@ -214,11 +224,13 @@ export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): Ad
     votes: atLeast(merged.votes, 1, base.votes),
     temperature: atLeast(merged.temperature, 0, base.temperature, false),
     seed: typeof merged.seed === 'number' && Number.isInteger(merged.seed) ? merged.seed : null,
-    timeoutMs: atLeast(merged.timeoutMs, 1, base.timeoutMs),
+    timeoutMs: duration(merged.timeoutMs, 1, base.timeoutMs),
+    maxConsecutiveFailures: atLeast(merged.maxConsecutiveFailures, 0, base.maxConsecutiveFailures),
+    pageBudgetMs: duration(merged.pageBudgetMs, 0, base.pageBudgetMs),
     concurrency: atLeast(merged.concurrency, 1, base.concurrency),
     maxRetries: atLeast(merged.maxRetries, 0, base.maxRetries),
-    retryBaseDelayMs: atLeast(merged.retryBaseDelayMs, 0, base.retryBaseDelayMs),
-    retryMaxDelayMs: atLeast(merged.retryMaxDelayMs, 0, base.retryMaxDelayMs),
+    retryBaseDelayMs: duration(merged.retryBaseDelayMs, 0, base.retryBaseDelayMs),
+    retryMaxDelayMs: duration(merged.retryMaxDelayMs, 0, base.retryMaxDelayMs),
     maxCallsPerPage: atLeast(merged.maxCallsPerPage, 0, base.maxCallsPerPage),
     maxOutputTokens: atLeast(merged.maxOutputTokens, 1, base.maxOutputTokens),
     maxTokensField: oneOf(merged.maxTokensField, ['max_tokens', 'max_completion_tokens', 'none'], base.maxTokensField),

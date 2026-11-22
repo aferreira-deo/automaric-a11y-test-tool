@@ -252,6 +252,26 @@ describe('toHtmlReport for findings a model judged', () => {
     expect(page).toContain('never makes one a Fail');
   });
 
+  it('shows the verdict beside the status, says when it was read from the cache, and counts the likely findings a model said no to', () => {
+    const base = { provider: 'p', model: 'm', promptVersion: 'p1/headings-1', votes: ['no', 'no'], verdict: 'no', confidence: 'high', rationale: 'r', statusBefore: 'likely', inputs: 'text' };
+    const kept = judged({ ...base, fromCache: true });
+    kept.findings[0]!.status = 'likely';
+    const page = toHtmlReport(kept);
+    expect(page).toContain('<h2>Likely (1)</h2>');
+    expect(page).toContain('<h3><span class="status">Likely</span> <span class="verdict">Model: no</span> <code>#title</code></h3>');
+    expect(page).toContain('<dt>Model verdict</dt><dd>no, high confidence, from the text alone, read from the cache (no model was asked in this run)</dd>');
+    expect(page).toContain('1 finding(s) under Likely carry &quot;Model: no&quot;');
+
+    const fresh = toHtmlReport(judged({ ...base, verdict: 'yes', votes: ['yes', 'yes'], fromCache: false }));
+    expect(fresh).toContain('<span class="verdict">Model: yes</span>');
+    expect(fresh).toContain('<dt>Model verdict</dt><dd>yes, high confidence, from the text alone</dd>');
+    expect(fresh).toContain('0 finding(s) under Likely carry &quot;Model: no&quot;');
+    // A verdict that is not one of the three words is not repeated as a label.
+    const odd = toHtmlReport(judged({ ...base, verdict: '<b>fail</b>' }));
+    expect(odd).not.toContain('class="verdict"');
+    expect(odd).not.toContain('<b>fail</b>');
+  });
+
   it('copes with a model part that is not what this version writes', () => {
     for (const ai of [{}, { votes: 'yes', problems: 3, model: { toString: () => '<i>' } }, 'yes', 7]) {
       const page = toHtmlReport(judged(ai));

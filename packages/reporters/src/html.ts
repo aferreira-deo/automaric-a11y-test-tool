@@ -62,6 +62,13 @@ function cropLabel(id: string): string {
   return 'Capture';
 }
 
+/** The verdict of a model on a finding when it is one of the three words a verdict can be; otherwise nothing. */
+function modelVerdict(finding: Finding): 'yes' | 'no' | 'unsure' | null {
+  const ai = finding.ai as { verdict?: unknown } | null | undefined;
+  const verdict = ai !== null && typeof ai === 'object' ? ai.verdict : undefined;
+  return verdict === 'yes' || verdict === 'no' || verdict === 'unsure' ? verdict : null;
+}
+
 function renderFinding(finding: Finding, crops: Record<string, Png>): string {
   const evidence = {
     crops: finding.evidence?.crops ?? [],
@@ -102,7 +109,12 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     const votes = Array.isArray(ai.votes) ? ai.votes : [];
     const problems = Array.isArray(ai.problems) ? ai.problems : [];
     rows.push(['Model', `${escape(ai.model)} (${escape(ai.provider)}), prompt ${escape(ai.promptVersion)}`]);
-    rows.push(['Model verdict', `${escape(ai.verdict)}, ${escape(ai.confidence)} confidence, from ${ai.inputs === 'text+image' ? 'the text and the capture' : 'the text alone'}`]);
+    rows.push([
+      'Model verdict',
+      `${escape(ai.verdict)}, ${escape(ai.confidence)} confidence, from ${ai.inputs === 'text+image' ? 'the text and the capture' : 'the text alone'}` +
+        // A cache is a local file: a verdict read from it was not given by a model in this run.
+        (ai.fromCache === true ? ', read from the cache (no model was asked in this run)' : ''),
+    ]);
     rows.push(['Model votes', votes.map(escape).join(', ')]);
     if (problems.length > 0) rows.push(['Model calls failed', problems.map(escape).join(', ')]);
     rows.push(['Model rationale', escape(ai.rationale)]);
@@ -119,8 +131,12 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     })
     .join('');
 
+  // The verdict beside the status, so that a tester can skim a list for what a model said. One of
+  // three fixed words, or nothing.
+  const said = modelVerdict(finding);
+  const verdict = said ? ` <span class="verdict">Model: ${said}</span>` : '';
   return `<article class="finding ${status}">
-<h3><span class="status">${STATUS_TEXT[status].title}</span> <code>${escape(finding.selector)}</code></h3>
+<h3><span class="status">${STATUS_TEXT[status].title}</span>${verdict} <code>${escape(finding.selector)}</code></h3>
 <p>${escape(finding.message)}</p>
 <p class="help">${escape(finding.help)}</p>
 ${figures ? `<div class="crops">${figures}</div>` : ''}
@@ -140,6 +156,7 @@ table{border-collapse:collapse}th,td{border:1px solid var(--line);padding:.3rem 
 .finding{border:1px solid var(--line);border-left-width:.5rem;padding:1rem;margin:1rem 0}
 .finding.fail{border-left-color:var(--fail)}.finding.likely{border-left-color:var(--likely)}.finding.advisory{border-left-color:var(--advisory)}.finding.info{border-left-color:var(--info)}
 .status{font-weight:700;text-transform:uppercase;font-size:.85em}
+.verdict{font-weight:600;font-size:.85em;border:1px solid var(--line);border-radius:.25rem;padding:0 .35em}
 .fail .status{color:var(--fail)}.likely .status{color:var(--likely)}.advisory .status{color:var(--advisory)}.info .status{color:var(--info)}
 .crops{display:flex;flex-wrap:wrap;gap:1rem;margin:.75rem 0}figure{margin:0}figure img{display:block;max-width:100%;height:auto;border:1px solid var(--line);background:#fff}figcaption{font-size:.85rem;color:var(--muted)}
 dl{margin:.5rem 0}dl div{display:flex;flex-wrap:wrap;gap:.5rem}dt{font-weight:600;min-width:11rem}dd{margin:0}
@@ -190,7 +207,9 @@ ${byStatus
 <p class="note">Scanned ${escape(result.timestamp)} with ${escape(result.tool.name)} ${escape(result.tool.version)}. Viewport ${num(viewport?.width)} by ${num(viewport?.height)} CSS px, device pixel ratio ${num(environment?.devicePixelRatio)}, ${colorScheme} colour scheme.</p>
 ${
     result.findings.some((finding) => finding.ai)
-      ? '<p>A model was asked to judge some of the candidates. Its verdict can move a finding between Likely and Info, and never makes one a Fail. Each such finding shows the verdict, the model\u2019s own words and the status it had without the model; the measurements are those of the tool, not of the model.</p>\n'
+      ? `<p>A model was asked to judge some of the candidates. Its verdict is shown beside the status of each such finding (&quot;Model: yes&quot;, &quot;Model: no&quot;, &quot;Model: unsure&quot;) and never makes one a Fail. A yes can raise a candidate from Info to Likely. A no does not take a finding off the Likely list unless the scan was set to lower it: ${
+          result.findings.filter((finding) => statusOf(finding) === 'likely' && modelVerdict(finding) === 'no').length
+        } finding(s) under Likely carry &quot;Model: no&quot;. Each such finding shows the verdict, whether it was read from the cache instead of asked for in this run, the model\u2019s own words and the status it had without the model; the measurements are those of the tool, not of the model.</p>\n`
       : ''
   }<p>This report lists what the tool found and measured to assist a tester. It covers a small set of checks and makes no statement of conformance: a page with no findings here has not been shown to meet WCAG.</p>
 <table>

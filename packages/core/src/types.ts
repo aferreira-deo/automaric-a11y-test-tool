@@ -393,8 +393,10 @@ export type Verdict = 'yes' | 'no' | 'unsure';
  * - `refusal`: the model declined, or a content filter cut the answer.
  * - `truncated`: the answer stopped at the token limit.
  * - `too-large`: the answer is longer than `maxResponseChars`.
+ * - `stopped`: nothing was sent for this vote, because adjudication of the page had been stopped
+ *   (`maxConsecutiveFailures` calls in a row got no answer, or `pageBudgetMs` ran out).
  */
-export type AiProblem = 'timeout' | 'network' | 'http' | 'invalid-output' | 'refusal' | 'truncated' | 'too-large';
+export type AiProblem = 'timeout' | 'network' | 'http' | 'invalid-output' | 'refusal' | 'truncated' | 'too-large' | 'stopped';
 
 /**
  * What a model said about a finding. Present only when a model was asked. The measurements of
@@ -423,6 +425,13 @@ export interface AiEvidence {
   statusBefore: Status;
   /** What was sent: the context alone, or the context with the capture. */
   inputs: 'text' | 'text+image';
+  /**
+   * True when the verdict was read from the verdict cache and no model was asked in this run.
+   * A cache is a local file that anyone can edit: a verdict that came from it is only as good as
+   * that file. With `timestamp`, the one thing in a result that differs between a first run and
+   * the next one on an unchanged page.
+   */
+  fromCache: boolean;
   /** Why votes failed, when some did; sorted, without repeats. */
   problems?: AiProblem[];
 }
@@ -847,7 +856,8 @@ export interface AdjudicationConfig {
    * Open decision (section 10.6 of the brief): whether an endpoint that is not on this machine
    * may be used. False, the conservative choice, refuses every host but loopback (`localhost`,
    * `127.0.0.0/8`, `::1`), so page text and captures cannot leave the machine by a
-   * configuration slip.
+   * configuration slip. True allows another host over https only: plain http to another machine
+   * is refused whatever this says.
    */
   allowRemote: boolean;
   /** Votes per candidate. Votes that disagree give `unsure`. */
@@ -855,8 +865,21 @@ export interface AdjudicationConfig {
   temperature: number;
   /** Sent as `seed` when not null. Left out by default: two votes with one seed would only repeat each other. */
   seed: number | null;
-  /** One request may take this long. */
+  /** One request may take this long. At most 2147483647 (what a timer holds); a larger value is cut to that. */
   timeoutMs: number;
+  /**
+   * Adjudication of a page stops when this many requests in a row got no answer at all (`timeout`
+   * or `network`): an endpoint that hangs or is gone is not asked about every remaining candidate.
+   * The candidates that are left keep their status and say `stopped`. 0 never stops.
+   */
+  maxConsecutiveFailures: number;
+  /**
+   * Time allowed for the adjudication of one page, in milliseconds. It is checked before each
+   * request: once it has run out nothing more is sent, and the candidates that are left keep
+   * their status and say `stopped`. A request already in flight is not cut short, so a page can
+   * take up to this plus `timeoutMs`. 0 sets no limit.
+   */
+  pageBudgetMs: number;
   /** Requests in flight at once. */
   concurrency: number;
   /** A request that failed in a way worth trying again (network, 408, 429, 5xx) is sent again at most this many times. Timeouts are not retried. */
@@ -903,8 +926,13 @@ export interface AdjudicationConfig {
   /** ...this far outside the box of the text, so that it covers none of it. */
   outlineGapCssPx: number;
   /**
-   * Status of a heading candidate that deterministic code reported as `likely` and the model
-   * judged not to be a heading. `info` lowers it (precision before recall); `likely` keeps it.
+   * Open decision of the owner. Status of a heading candidate that deterministic code reported as
+   * `likely` and the model judged not to be a heading.
+   * - `likely` (default): the finding stays in the tester's list, with the verdict recorded in
+   *   `ai` and shown in the report. The brief only says that a judged candidate is `likely` at
+   *   most; it does not say a model may take one off the list.
+   * - `info`: the finding is lowered. Fewer candidates to go through, at a price: a page whose
+   *   text persuades the model, or an edited cache file, then hides the page's own findings.
    */
   headingNoStatus: 'info' | 'likely';
 }
@@ -925,7 +953,10 @@ export interface Config {
 export interface ScanResult {
   tool: { name: string; version: string };
   url: string;
-  /** ISO 8601. The only field allowed to differ between two runs on the same page. */
+  /**
+   * ISO 8601. The only field allowed to differ between two runs on the same page, with one
+   * exception when a model is used: `ai.fromCache` of a finding.
+   */
   timestamp: string;
   environment: Environment;
   findings: Finding[];

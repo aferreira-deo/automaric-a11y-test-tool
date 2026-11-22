@@ -1,4 +1,4 @@
-import { fnv1a64, stableStringify } from '@a11y-vision/core';
+import { stableStringify } from '@a11y-vision/core';
 import type { JsonValue, Verdict } from '@a11y-vision/core';
 
 /**
@@ -44,18 +44,32 @@ export interface Prompt {
 }
 
 /**
+ * 128 random bits as 32 hex digits, from the random source of the platform (`crypto` is a global
+ * in Node and in a service worker alike). New for every request.
+ */
+export function randomNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * The two messages for one question.
  *
  * Page text cannot leave its place in the user message: it is inside JSON strings, where quotes
  * and line breaks are escaped, so it can neither close the document nor write a marker line; the
- * marker carries a number worked out from the document itself, which text inside the document
- * cannot predict; and the task is said again after the data. That keeps injected text from
+ * marker carries a random number made for this one request, which the author of a page can
+ * neither know nor work out (a hash of the data, as it was before, could be computed by whoever
+ * wrote the data); and the task is said again after the data. That keeps injected text from
  * passing for instructions as far as a prompt can. What it cannot do is make a model immune, which
  * is why an answer is only ever one of three words, validated, and never above `likely`.
+ *
+ * The marker is part of the request and of nothing else: the key of the verdict cache is made
+ * from the candidate and the settings (`verdictKey`), not from the text that is sent. `nonce` is
+ * the source of the marker, for a test that needs the same request twice.
  */
-export function buildPrompt(question: string, context: JsonValue): Prompt {
+export function buildPrompt(question: string, context: JsonValue, nonce: () => string = randomNonce): Prompt {
   const data = stableStringify(context);
-  const marker = fnv1a64(`${question}\u0000${data}`);
+  const marker = nonce();
   const user = [
     `QUESTION: ${question}`,
     '',

@@ -6,7 +6,7 @@ import { candidateScan, SELECTORS, statuses } from '../../../e2e/support/candida
 import type { CandidateTexts } from '../../../e2e/support/candidates.js';
 import { completion, dataOf, imageParts, startMockModel, systemText, userText, verdict } from '../../../e2e/support/mock-model.js';
 import type { MockModel, MockReply, MockRequest } from '../../../e2e/support/mock-model.js';
-import { createMemoryCache } from './cache.js';
+import { createMemoryCache, validCachedVerdict } from './cache.js';
 import type { MemoryCache } from './cache.js';
 import { SYSTEM_PROMPT } from './prompt.js';
 import { createAdjudicator } from './provider.js';
@@ -41,6 +41,7 @@ interface RunOptions {
   texts?: CandidateTexts;
   cache?: MemoryCache;
   adjudicator?: Adjudicator;
+  now?: () => number;
 }
 
 async function run(options: RunOptions = {}) {
@@ -60,6 +61,7 @@ async function run(options: RunOptions = {}) {
     config: scan.config,
     adjudicator,
     ...(options.cache ? { cache: options.cache } : {}),
+    ...(options.now ? { now: options.now } : {}),
     sleep: (ms) => {
       waits.push(ms);
       return Promise.resolve();
@@ -70,6 +72,10 @@ async function run(options: RunOptions = {}) {
 }
 
 const newCache = (from?: unknown): MemoryCache => createMemoryCache({ maxEntries: 100, maxRationaleChars: 400, from });
+/** Findings without the one thing a run answered from the cache may differ in. */
+const sameButForCache = (findings: Finding[]): unknown[] =>
+  findings.map((finding) => (finding.ai ? { ...finding, message: finding.message.replace(', read from the cache', ''), ai: { ...finding.ai, fromCache: false } } : finding));
+const CANDIDATES = [SELECTORS.strong, SELECTORS.second, SELECTORS.weak, SELECTORS.noCrop];
 
 describe('verdicts and statuses', () => {
   it('applies yes, no and unsure as the mapping says, and never produces a fail', async () => {
@@ -82,14 +88,16 @@ describe('verdicts and statuses', () => {
     );
     const { findings, before, find, stats } = await run();
     expect(statuses(before)).toEqual(DETERMINISTIC);
+    // The no is recorded and the finding stays on the list; the yes raises the one that was held back.
     expect(statuses(findings)).toEqual({
-      [SELECTORS.strong]: 'info',
+      [SELECTORS.strong]: 'likely',
       [SELECTORS.second]: 'likely',
       [SELECTORS.weak]: 'likely',
       [SELECTORS.label]: 'info',
       [SELECTORS.noCrop]: 'likely',
     });
     expect(findings.some((finding) => finding.status === 'fail')).toBe(false);
+    expect(find(SELECTORS.strong).message).toContain('It stays likely');
 
     expect(find(SELECTORS.strong).ai).toEqual({
       provider: 'openai-compatible',
@@ -101,6 +109,7 @@ describe('verdicts and statuses', () => {
       rationale: 'It is the label of a table of hours.',
       statusBefore: 'likely',
       inputs: 'text+image',
+      fromCache: false,
     });
     expect(find(SELECTORS.weak).ai).toMatchObject({ verdict: 'yes', votes: ['yes', 'yes'], statusBefore: 'info', confidence: 'high' });
     // An unsure first vote settles it: the second is not asked for.
@@ -114,9 +123,9 @@ describe('verdicts and statuses', () => {
     // Ids and evidence are those of deterministic code.
     expect(findings.map((finding) => finding.id).sort()).toEqual(before.map((finding) => finding.id).sort());
     for (const finding of findings) expect(finding.evidence).toEqual(before.find((entry) => entry.id === finding.id)!.evidence);
-    expect(stats).toMatchObject({ provider: 'openai-compatible', model: 'vision-model', candidates: 4, judged: 4, cached: 0, skipped: 0, calls: 7, changed: 2, problems: {} });
+    expect(stats).toMatchObject({ provider: 'openai-compatible', model: 'vision-model', candidates: 4, judged: 4, cached: 0, skipped: 0, calls: 7, changed: 1, problems: {}, stopped: 0, stopReason: null });
     expect(describeStats(stats)).toBe(
-      'Model vision-model (openai-compatible): 4 candidate(s), 4 judged with 7 call(s), 0 from the cache, 0 left out by the limit of calls, 2 status change(s).',
+      'Model vision-model (openai-compatible): 4 candidate(s), 4 judged with 7 call(s), 0 from the cache, 0 left out by the limit of calls, 1 status change(s).',
     );
   });
 
@@ -147,11 +156,17 @@ describe('verdicts and statuses', () => {
     expect(find(SELECTORS.strong)).toMatchObject({ status: 'likely', ai: { votes: ['no'], verdict: 'unsure', confidence: 'low' } });
   });
 
-  it('keeps a likely on a no when configured to', async () => {
+  it('lowers a likely on a no only when configured to', async () => {
     mock.respond(() => verdict('no'));
-    const { find } = await run({ input: { adjudication: { headingNoStatus: 'likely' } } });
-    expect(find(SELECTORS.strong)).toMatchObject({ status: 'likely', ai: { verdict: 'no' } });
-    expect(find(SELECTORS.weak).status).toBe('info');
+    const kept = await run();
+    expect(statuses(kept.findings)).toEqual(DETERMINISTIC);
+    expect(kept.find(SELECTORS.strong)).toMatchObject({ status: 'likely', rule: 'headings/unmarked-heading', ai: { verdict: 'no', votes: ['no', 'no'] } });
+    expect(kept.stats.changed).toBe(0);
+    const lowered = await run({ input: { adjudication: { headingNoStatus: 'info' } } });
+    expect(lowered.find(SELECTORS.strong)).toMatchObject({ status: 'info', rule: 'headings/heading-candidate', ai: { verdict: 'no' } });
+    expect(lowered.find(SELECTORS.strong).message).toContain('Lowered from likely to info');
+    expect(lowered.find(SELECTORS.weak).status).toBe('info');
+    expect(lowered.stats.changed).toBe(3);
   });
 
   it('takes one vote when one is configured', async () => {
@@ -216,7 +231,7 @@ describe('failures', () => {
     let failures = 0;
     mock.respond((request) => (about(request) === 'Opening hours' && failures++ < 2 ? { status: 503 } : verdict('no')));
     const { find, stats } = await run({ input: { adjudication: { concurrency: 1 } } });
-    expect(find(SELECTORS.strong)).toMatchObject({ status: 'info', ai: { verdict: 'no', votes: ['no', 'no'] } });
+    expect(find(SELECTORS.strong)).toMatchObject({ status: 'likely', ai: { verdict: 'no', votes: ['no', 'no'] } });
     expect(find(SELECTORS.strong).ai).not.toHaveProperty('problems');
     expect(stats.problems).toEqual({ http: 2 });
   });
@@ -233,12 +248,85 @@ describe('failures', () => {
     expect(find(SELECTORS.second).ai).toMatchObject({ verdict: 'yes' });
   });
 
-  it('survives an endpoint that is not there', async () => {
+  it('survives an endpoint that is not there, and stops asking it', async () => {
     await mock.close();
-    const { findings, stats } = await run({ input: { adjudication: { maxRetries: 1 } } });
+    const { findings, stats, find } = await run({ input: { adjudication: { maxRetries: 1 } } });
     expect(statuses(findings)).toEqual(DETERMINISTIC);
-    expect(stats.problems).toEqual({ network: 8 });
+    // Three failures in a row stop it; a request that was in flight at that moment may add one.
+    expect(stats.problems.network).toBeGreaterThanOrEqual(3);
+    expect(stats.problems.network).toBeLessThanOrEqual(4);
+    expect(stats.stopReason).toBe('failures');
+    expect(stats.stopped).toBeGreaterThanOrEqual(2);
+    for (const selector of CANDIDATES) expect(find(selector).ai).toMatchObject({ verdict: 'unsure', votes: ['unsure'], confidence: 'low' });
+    expect(CANDIDATES.filter((selector) => find(selector).ai!.problems!.includes('stopped')).length).toBe(stats.stopped);
+
+    // With the limit switched off every candidate is tried, with its retry.
+    const all = await run({ input: { adjudication: { maxRetries: 1, maxConsecutiveFailures: 0 } } });
+    expect(all.stats.problems).toEqual({ network: 8 });
+    expect(all.stats).toMatchObject({ stopped: 0, stopReason: null });
     mock = await startMockModel();
+  });
+});
+
+describe('an endpoint that hangs', () => {
+  it('is given up on after the configured number of timeouts in a row, and the rest says so', async () => {
+    mock.respond(() => ({ hang: true }));
+    const cache = newCache();
+    const started = Date.now();
+    const { findings, find, stats } = await run({ cache, input: { adjudication: { timeoutMs: 100, concurrency: 1, maxConsecutiveFailures: 2 } } });
+    // Two requests, not one for each of the four candidates.
+    expect(mock.requests).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(statuses(findings)).toEqual(DETERMINISTIC);
+    expect(find(SELECTORS.strong).ai).toMatchObject({ verdict: 'unsure', problems: ['timeout'], fromCache: false });
+    expect(find(SELECTORS.second).ai).toMatchObject({ verdict: 'unsure', problems: ['timeout'] });
+    for (const selector of [SELECTORS.weak, SELECTORS.noCrop]) {
+      expect(find(selector).ai).toMatchObject({ verdict: 'unsure', votes: ['unsure'], confidence: 'low', rationale: '', problems: ['stopped'] });
+      expect(find(selector).message).toContain('adjudication was stopped before this candidate');
+    }
+    expect(stats).toMatchObject({ calls: 2, judged: 2, stopped: 2, stopReason: 'failures', changed: 0, problems: { timeout: 2 } });
+    expect(describeStats(stats)).toContain('stopped after 2 call(s) in a row got no answer; 2 candidate(s) were not asked about');
+    // Nothing of this is kept: the next run asks again.
+    expect(cache.toJSON().entries).toEqual({});
+  });
+
+  it('does not count failures that are not in a row, nor answers that are errors', async () => {
+    let index = 0;
+    // No answer, an answer, no answer, an answer...: never two in a row.
+    mock.respond(() => (index++ % 2 === 0 ? { drop: true } : verdict('yes')));
+    const alternating = await run({ input: { adjudication: { concurrency: 1, maxRetries: 0, votes: 1, maxConsecutiveFailures: 2 } } });
+    expect(mock.requests).toHaveLength(4);
+    expect(alternating.stats).toMatchObject({ stopped: 0, stopReason: null, problems: { network: 2 } });
+
+    mock.requests.length = 0;
+    // An endpoint that answers, even with an error, is there.
+    mock.respond(() => ({ status: 401 }));
+    const refused = await run({ input: { adjudication: { concurrency: 1, maxConsecutiveFailures: 1 } } });
+    expect(mock.requests).toHaveLength(4);
+    expect(refused.stats).toMatchObject({ stopped: 0, stopReason: null, problems: { http: 4 } });
+  });
+
+  it('stops at the time allowed for the page, checked before each request', async () => {
+    let clock = 0;
+    mock.respond(() => {
+      // Every answer takes 600 ms by the clock of the test.
+      clock += 600;
+      return verdict('yes');
+    });
+    const { find, stats, findings } = await run({ now: () => clock, input: { adjudication: { concurrency: 1, votes: 1, pageBudgetMs: 1000 } } });
+    // At 0 and at 600 a request is sent; at 1200 the time is up.
+    expect(mock.requests).toHaveLength(2);
+    expect(stats).toMatchObject({ calls: 2, judged: 2, stopped: 2, stopReason: 'budget' });
+    expect(describeStats(stats)).toContain('stopped when the time allowed for the page ran out; 2 candidate(s) were not asked about');
+    expect(find(SELECTORS.strong).ai).toMatchObject({ verdict: 'yes' });
+    expect(find(SELECTORS.noCrop).ai).toMatchObject({ verdict: 'unsure', problems: ['stopped'] });
+    expect(statuses(findings)).toEqual(DETERMINISTIC);
+
+    mock.requests.length = 0;
+    clock = 0;
+    const unlimited = await run({ now: () => clock, input: { adjudication: { concurrency: 1, votes: 1, pageBudgetMs: 0 } } });
+    expect(mock.requests).toHaveLength(4);
+    expect(unlimited.stats.stopReason).toBeNull();
   });
 });
 
@@ -301,14 +389,18 @@ describe('the cache', () => {
 
     const second = await run({ cache });
     expect(mock.requests).toHaveLength(7);
-    expect(second.findings).toEqual(first.findings);
-    expect(second.stats).toMatchObject({ judged: 0, cached: 4, calls: 0, changed: 2 });
+    // The same verdicts and statuses; each finding says that its verdict was not asked for this time.
+    expect(first.findings.filter((finding) => finding.ai).every((finding) => finding.ai!.fromCache === false)).toBe(true);
+    expect(second.findings.filter((finding) => finding.ai).map((finding) => finding.ai!.fromCache)).toEqual([true, true, true, true]);
+    expect(second.find(SELECTORS.strong).message).toContain('read from the cache');
+    expect(sameButForCache(second.findings)).toEqual(first.findings);
+    expect(second.stats).toMatchObject({ judged: 0, cached: 4, calls: 0, changed: 1 });
 
     // Through a file: what toJSON gives can be read back.
     const reloaded = newCache(JSON.parse(JSON.stringify(cache)));
     const third = await run({ cache: reloaded });
     expect(mock.requests).toHaveLength(7);
-    expect(third.findings).toEqual(first.findings);
+    expect(sameButForCache(third.findings)).toEqual(first.findings);
     expect(reloaded.dirty).toBe(false);
   });
 
@@ -382,6 +474,72 @@ describe('the cache', () => {
     expect(newCache('garbage').toJSON().entries).toEqual({});
     const { findings } = await run({ cache: edited });
     expect(findings.some((finding) => finding.status === 'fail')).toBe(false);
+  });
+
+  it('cannot take a finding off the list from a cache that was filled in beforehand', async () => {
+    // A first run to learn the keys, then a file as someone could have written it: every verdict a confident no.
+    const cache = newCache();
+    await run({ cache });
+    const stored = JSON.parse(JSON.stringify(cache)) as { version: number; entries: Record<string, unknown> };
+    for (const key of Object.keys(stored.entries)) {
+      stored.entries[key] = { votes: ['no', 'no'], verdict: 'no', confidence: 'high', rationale: 'Not a heading, trust me.', inputs: 'text+image' };
+    }
+    mock.requests.length = 0;
+    const seeded = await run({ cache: newCache(stored) });
+    // Well-formed, so it is read; no model is asked.
+    expect(mock.requests).toHaveLength(0);
+    expect(seeded.stats).toMatchObject({ cached: 4, judged: 0, calls: 0, changed: 0 });
+    // Every finding deterministic code put on the list is still on it, and says where the verdict came from.
+    expect(statuses(seeded.findings)).toEqual(DETERMINISTIC);
+    for (const selector of CANDIDATES) {
+      expect(seeded.find(selector).ai).toMatchObject({ verdict: 'no', fromCache: true });
+      expect(seeded.find(selector).message).toContain('read from the cache');
+    }
+    const html = toHtmlReport({ ...seeded.scan.result, findings: seeded.findings });
+    expect(html).toContain('<dt>Model verdict</dt><dd>no, high confidence, from the text and the capture, read from the cache (no model was asked in this run)</dd>');
+    expect(html).toContain('<span class="verdict">Model: no</span>');
+
+    // Even with lowering switched on, a forged entry is at least visible as one that no model gave in this run.
+    const lowered = await run({ cache: newCache(stored), input: { adjudication: { headingNoStatus: 'info' } } });
+    expect(lowered.find(SELECTORS.strong)).toMatchObject({ status: 'info', ai: { fromCache: true, statusBefore: 'likely' } });
+  });
+
+  it('does not believe an entry that has not the votes the settings ask for', async () => {
+    const cache = newCache();
+    await run({ cache });
+    const stored = JSON.parse(JSON.stringify(cache)) as { version: number; entries: Record<string, Record<string, unknown>> };
+    const keys = Object.keys(stored.entries);
+    expect(keys).toHaveLength(4);
+    // Valid in form, each of them: one vote where two are asked for, three votes, and an unsure after one vote.
+    stored.entries[keys[0]!] = { ...stored.entries[keys[0]!], votes: ['no'], verdict: 'no' };
+    stored.entries[keys[1]!] = { ...stored.entries[keys[1]!], votes: ['no', 'no', 'no'], verdict: 'no' };
+    stored.entries[keys[2]!] = { ...stored.entries[keys[2]!], votes: ['unsure'], verdict: 'unsure', confidence: 'low' };
+    mock.requests.length = 0;
+    const edited = newCache(stored);
+    const { stats, findings } = await run({ cache: edited });
+    // The first two are judged again, with two votes each; the unsure and the untouched one are read.
+    expect(mock.requests).toHaveLength(4);
+    expect(stats).toMatchObject({ judged: 2, cached: 2, calls: 4 });
+    const judged = findings.filter((finding) => finding.ai);
+    expect(judged.filter((finding) => finding.ai!.fromCache).map((finding) => finding.ai!.verdict).sort()).toEqual(['unsure', 'yes']);
+    expect(judged.filter((finding) => !finding.ai!.fromCache).map((finding) => finding.ai!.votes)).toEqual([
+      ['yes', 'yes'],
+      ['yes', 'yes'],
+    ]);
+
+    const entry = { votes: ['no', 'no'], verdict: 'no', confidence: 'high', rationale: '', inputs: 'text' };
+    expect(validCachedVerdict(entry, 100)).toMatchObject({ verdict: 'no' });
+    expect(validCachedVerdict(entry, 100, 2)).toMatchObject({ verdict: 'no' });
+    expect(validCachedVerdict(entry, 100, 1)).toBeUndefined();
+    expect(validCachedVerdict(entry, 100, 3)).toBeUndefined();
+    expect(validCachedVerdict({ ...entry, votes: ['unsure'], verdict: 'unsure', confidence: 'low' }, 100, 3)).toMatchObject({ verdict: 'unsure' });
+    expect(validCachedVerdict({ ...entry, votes: ['yes', 'no'], verdict: 'unsure', confidence: 'low' }, 100, 2)).toMatchObject({ verdict: 'unsure' });
+    // A cache of one's own is checked the same way when it is read.
+    const loose = { get: () => ({ ...entry, votes: ['no'] }) as never, set: () => undefined };
+    mock.requests.length = 0;
+    const own = await run({ cache: loose as never });
+    expect(mock.requests).toHaveLength(8);
+    expect(own.stats.cached).toBe(0);
   });
 
   it('drops the oldest entries beyond its size', () => {

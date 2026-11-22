@@ -1,5 +1,6 @@
 import { adjudicateFindings, createAdjudicator } from '@a11y-vision/adjudicators';
 import type { Adjudicator, AdjudicationStats, Env, VerdictCache } from '@a11y-vision/adjudicators';
+import { verifyEndpoint } from '@a11y-vision/adjudicators/node';
 import { collectSnapshot } from '@a11y-vision/collector-cdp';
 import type { CdpSession } from '@a11y-vision/collector-cdp';
 import { buildResult, resolveConfig } from '@a11y-vision/core';
@@ -53,8 +54,8 @@ export class A11yVision {
    *   scanner.withAdjudication({ baseUrl: 'http://127.0.0.1:<port>/v1', model: '<model>' })
    *
    * Giving a base URL and a model selects the OpenAI-compatible adapter. An endpoint that is not
-   * on this machine also needs `allowRemote: true`. The key, if the endpoint wants one, is read
-   * from the environment variable named in `apiKeyEnv`.
+   * on this machine also needs `allowRemote: true` and an https URL. The key, if the endpoint
+   * wants one, is read from the environment variable named in `apiKeyEnv`.
    */
   withAdjudication(settings: Partial<AdjudicationConfig>, runtime: AdjudicationRuntime = {}): this {
     const adjudication = { ...this.#config.adjudication, ...settings };
@@ -77,6 +78,9 @@ export class A11yVision {
     const config = resolveConfig(this.#config);
     // Before anything is done to the page: a provider that cannot be used stops the scan here.
     const adjudicator = this.#runtime.adjudicator ?? createAdjudicator(config.adjudication, this.#runtime.env ?? process.env);
+    // A name for this machine (`localhost`, `*.localhost`) has to resolve to this machine. The
+    // requests check that again when they connect; this is the refusal that can be read.
+    if (adjudicator && !this.#runtime.adjudicator) await verifyEndpoint(config.adjudication);
     const session = await this.#page.context().newCDPSession(this.#page);
     // Playwright types `send`/`on` against its own protocol map; the collector speaks plain CDP.
     const cdp: CdpSession = {

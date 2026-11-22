@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AdjudicationConfigError, createAdjudicator, describeStats, isLoopbackHost, redact, secretsOf } from '@a11y-vision/adjudicators';
+import { verifyEndpoint } from '@a11y-vision/adjudicators/node';
 import { defaultConfig, hasFailures, registeredChecks, resolveConfig, TOOL_NAME, TOOL_VERSION } from '@a11y-vision/core';
 import type { AdjudicationConfig, CheckId, ConfigInput } from '@a11y-vision/core';
 import { A11yVision } from '@a11y-vision/playwright';
@@ -38,7 +39,9 @@ Options:
 
 Model (optional). Without a base URL and a model, no model is asked and nothing
 is sent anywhere; every check still runs. A model only judges candidates that
-the checks found, and its verdict never makes a finding a "fail".
+the checks found, and its verdict never makes a finding a "fail". The two
+environment variables below are enough to switch it on; whenever a model is
+asked, one line on stderr names the model and the host it is on.
       --ai-base-url <url>   Base URL of an OpenAI-compatible endpoint, up to /v1
                             (or ${ENV_BASE_URL})
       --ai-model <name>     Model name, as the endpoint knows it (or ${ENV_MODEL})
@@ -47,7 +50,11 @@ the checks found, and its verdict never makes a finding a "fail".
                             the key itself is never given on the command line
       --ai-label <text>     Name shown in reports for the provider
       --ai-allow-remote     Allow an endpoint that is not on this machine: text
-                            and captures of the page are sent to it
+                            and captures of the page are sent to it. It has to
+                            be an https URL
+      --ai-lower-on-no      Lower a "likely" heading candidate to "info" when the
+                            model says it is not a heading. Off by default: the
+                            finding stays listed, with the verdict shown
       --ai-text-only        Send no captures (for a model without vision)
       --ai-cache <file>     Where verdicts are kept between runs
                             (default: ${DEFAULT_CACHE_FILE})
@@ -111,6 +118,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         'ai-key-env': { type: 'string' },
         'ai-label': { type: 'string' },
         'ai-allow-remote': { type: 'boolean' },
+        'ai-lower-on-no': { type: 'boolean' },
         'ai-text-only': { type: 'boolean' },
         'ai-cache': { type: 'string' },
         'no-ai-cache': { type: 'boolean' },
@@ -169,15 +177,18 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   // The model: the config file, then the environment, then the options. Nothing here has a default
   // endpoint or model, so with none of the three no provider is configured.
   const adjudication: Partial<AdjudicationConfig> = { ...fromFile.adjudication };
-  const baseUrl = values['ai-base-url'] ?? env[ENV_BASE_URL];
-  const model = values['ai-model'] ?? env[ENV_MODEL];
-  const keyEnv = values['ai-key-env'] ?? env[ENV_KEY_ENV];
+  // A variable that is set to nothing is not set.
+  const fromEnv = (name: string): string | undefined => (env[name]?.trim() ? env[name] : undefined);
+  const baseUrl = values['ai-base-url'] ?? fromEnv(ENV_BASE_URL);
+  const model = values['ai-model'] ?? fromEnv(ENV_MODEL);
+  const keyEnv = values['ai-key-env'] ?? fromEnv(ENV_KEY_ENV);
   if (baseUrl !== undefined) adjudication.baseUrl = baseUrl;
   if (model !== undefined) adjudication.model = model;
   if (keyEnv !== undefined) adjudication.apiKeyEnv = keyEnv;
   if (values['ai-label'] !== undefined) adjudication.providerLabel = values['ai-label'];
   if (values['ai-allow-remote']) adjudication.allowRemote = true;
   if (values['ai-text-only']) adjudication.sendImages = false;
+  if (values['ai-lower-on-no']) adjudication.headingNoStatus = 'info';
   if (values['no-ai']) adjudication.provider = 'none';
   // Asked for here or in the environment: that selects the adapter, whatever the file says. From
   // the file alone, an endpoint or a model selects it unless the file names a provider itself.
@@ -190,17 +201,42 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   const secrets = secretsOf(settings, env);
   const safe = (text: string): string => redact(text, secrets);
   const withModel = settings.provider !== 'none';
+  /** Where a setting of the model came from, for the messages below. */
+  const origin = (option: 'ai-base-url' | 'ai-model', variable: string): string =>
+    values[option] !== undefined ? `--${option}` : fromEnv(variable) !== undefined ? `the environment variable ${variable}` : 'the config file';
+  if (withModel) {
+    // Half a model from the environment: a variable left over from another session should give a
+    // message that names it, not one about a setting the user never typed.
+    const off = 'or pass --no-ai to scan without a model';
+    if (settings.baseUrl === '' && settings.model !== '' && values['ai-model'] === undefined && fromEnv(ENV_MODEL) !== undefined) {
+      io.stderr(`${ENV_MODEL} is set in the environment, which asks for a model, but no endpoint is given. Set ${ENV_BASE_URL} or pass --ai-base-url <url> as well, ${off}.\n`);
+      return EXIT_ERROR;
+    }
+    if (settings.model === '' && settings.baseUrl !== '' && values['ai-base-url'] === undefined && fromEnv(ENV_BASE_URL) !== undefined) {
+      io.stderr(`${ENV_BASE_URL} is set in the environment, which asks for a model, but no model is named. Set ${ENV_MODEL} or pass --ai-model <name> as well, ${off}.\n`);
+      return EXIT_ERROR;
+    }
+  }
   try {
     createAdjudicator(settings, env);
+    await verifyEndpoint(settings);
   } catch (error) {
     if (!(error instanceof AdjudicationConfigError)) throw error;
     io.stderr(`${safe(error.message)}\n`);
     return EXIT_ERROR;
   }
   if (withModel) {
-    // Said every time, not only once: where page content goes is not something to find out later.
+    // Said every time a model is asked, on stderr, whether flags, a file or the environment
+    // alone switched it on: where page content goes is not something to find out later.
     const { hostname } = new URL(settings.baseUrl);
-    if (!isLoopbackHost(hostname)) io.stderr(`Text and captures of the page will be sent to the model endpoint on ${hostname}.\n`);
+    const where = isLoopbackHost(hostname) ? 'this machine' : 'not this machine';
+    const what = settings.sendImages ? 'Text and captures' : 'Text';
+    io.stderr(
+      safe(
+        `A model is asked: ${what} of the page go to the model ${settings.model} on ${hostname} (${where}). ` +
+          `Endpoint from ${origin('ai-base-url', ENV_BASE_URL)}, model from ${origin('ai-model', ENV_MODEL)}.\n`,
+      ),
+    );
   }
 
   const browser = await chromium.launch();

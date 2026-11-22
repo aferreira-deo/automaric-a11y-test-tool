@@ -1,3 +1,4 @@
+import { MAX_TIMER_MS } from '@a11y-vision/core';
 import type { AdjudicationConfig, AiProblem, Png } from '@a11y-vision/core';
 import { buildPrompt, parseVerdict, PROMPT_VERSION, VERDICT_SCHEMA } from './prompt.js';
 import type { Adjudicator, JudgeInput, JudgeResult } from './types.js';
@@ -19,8 +20,10 @@ export interface OpenAiCompatibleOptions {
     AdjudicationConfig,
     'temperature' | 'seed' | 'timeoutMs' | 'maxOutputTokens' | 'maxTokensField' | 'responseFormat' | 'imageUrlShape' | 'maxResponseChars' | 'maxRationaleChars'
   >;
-  /** For tests. Defaults to the global `fetch`. */
+  /** What sends the request. Defaults to the global `fetch`; `createAdjudicator` gives another one for an endpoint on this machine. */
   fetch?: typeof fetch;
+  /** Source of the marker around the data, for tests. Defaults to a random one for every request. */
+  nonce?: () => string;
 }
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -46,9 +49,9 @@ function imagePart(png: Png, shape: AdjudicationConfig['imageUrlShape']): Record
 }
 
 /** The request body of POST {baseUrl}/chat/completions. Exported for the tests that pin its shape. */
-export function chatCompletionsBody(input: JudgeInput, options: Pick<OpenAiCompatibleOptions, 'model' | 'settings'>): Record<string, unknown> {
+export function chatCompletionsBody(input: JudgeInput, options: Pick<OpenAiCompatibleOptions, 'model' | 'settings' | 'nonce'>): Record<string, unknown> {
   const { settings } = options;
-  const prompt = buildPrompt(input.question, input.context);
+  const prompt = options.nonce ? buildPrompt(input.question, input.context, options.nonce) : buildPrompt(input.question, input.context);
   const body: Record<string, unknown> = {
     model: options.model,
     messages: [
@@ -143,6 +146,9 @@ function readCompletion(text: string, maxRationaleChars: number): JudgeResult {
 export function createOpenAiCompatibleAdjudicator(options: OpenAiCompatibleOptions): Adjudicator {
   const { settings } = options;
   const send = options.fetch ?? fetch;
+  // Cut to what a timer holds, also for settings that did not come through resolveAdjudication: a
+  // longer delay would fire at once, and every call would be a timeout before it was sent.
+  const timeoutMs = Math.max(1, Math.min(settings.timeoutMs, MAX_TIMER_MS));
   const url = `${options.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' };
   if (options.apiKey !== '') headers['authorization'] = `Bearer ${options.apiKey}`;
@@ -168,7 +174,7 @@ export function createOpenAiCompatibleAdjudicator(options: OpenAiCompatibleOptio
       const timer = setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, settings.timeoutMs);
+      }, timeoutMs);
       try {
         const response = await send(url, {
           method: 'POST',

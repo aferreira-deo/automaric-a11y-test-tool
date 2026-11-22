@@ -81,6 +81,35 @@ describe('the request', () => {
   });
 });
 
+describe('the marker around the data', () => {
+  const markerOf = (index: number): string =>
+    userText(mock.requests[index]!.body)
+      .split('\n')
+      .find((line) => line.startsWith('BEGIN DATA '))!
+      .slice('BEGIN DATA '.length);
+
+  it('is random for every request, and no part of what tells one endpoint from another', async () => {
+    const one = adapter();
+    await one.judge(input);
+    await one.judge(input);
+    await adapter().judge(input);
+    const markers = [0, 1, 2].map(markerOf);
+    expect(new Set(markers).size).toBe(3);
+    for (const marker of markers) expect(marker).toMatch(/^[0-9a-f]{32}$/);
+    // The cache key is made from this and from the candidate: the same for every request.
+    expect(adapter().cacheIdentity).toBe(one.cacheIdentity);
+    for (const marker of markers) expect(one.cacheIdentity).not.toContain(marker);
+  });
+
+  it('comes from the source that is given, for a test that needs the request to be the same twice', async () => {
+    const pinned = createOpenAiCompatibleAdjudicator({ baseUrl: mock.baseUrl, model: 'm', apiKey: '', label: '', settings: resolveAdjudication(), nonce: () => 'pinned' });
+    await pinned.judge(input);
+    await pinned.judge(input);
+    expect(markerOf(0)).toBe('pinned');
+    expect(mock.requests[1]!.raw).toBe(mock.requests[0]!.raw);
+  });
+});
+
 describe('the answer', () => {
   it.each([
     ['yes', 'high'],
@@ -175,6 +204,14 @@ describe('failures of the endpoint', () => {
     }
   });
 
+  it('waits as long as it is told to, however long that is', async () => {
+    // A delay beyond what a timer holds used to fire at once: the call was a timeout before it was sent.
+    for (const timeoutMs of [2 ** 31, 1e13, Number.MAX_SAFE_INTEGER]) {
+      mock.respond(() => ({ ...verdict('yes'), delayMs: 30 }));
+      expect(await adapter({ timeoutMs }).judge(input)).toMatchObject({ verdict: 'yes' });
+    }
+  });
+
   it('never throws, whatever fetch does', async () => {
     const broken = createOpenAiCompatibleAdjudicator({
       baseUrl: 'http://127.0.0.1:9/v1',
@@ -214,7 +251,7 @@ describe('createAdjudicator', () => {
   });
 
   it('refuses an endpoint that is not on this machine unless that is allowed', () => {
-    for (const baseUrl of ['https://api.example.com/v1', 'http://192.168.1.20:11434/v1', 'http://10.0.0.5/v1', 'http://localhost.example.com/v1', 'http://[2001:db8::1]/v1']) {
+    for (const baseUrl of ['https://api.example.com/v1', 'https://192.168.1.20:11434/v1', 'https://10.0.0.5/v1', 'https://localhost.example.com/v1', 'https://[2001:db8::1]/v1']) {
       expect(() => createAdjudicator(settings({ baseUrl }), {})).toThrow(/not this machine/);
       expect(createAdjudicator(settings({ baseUrl, allowRemote: true }), {})).not.toBeNull();
     }
@@ -223,6 +260,37 @@ describe('createAdjudicator', () => {
     }
     expect(isLoopbackHost('LOCALHOST')).toBe(true);
     expect(isLoopbackHost('127.0.0.1.example.com')).toBe(false);
+  });
+
+  it('never talks plain http to another machine, allowed or not, with a key or without', async () => {
+    let sent = 0;
+    const spy = (() => {
+      sent++;
+      return Promise.resolve(new Response('{}'));
+    }) as unknown as typeof fetch;
+    for (const baseUrl of ['http://api.example.com/v1', 'http://192.168.1.20:11434/v1', 'http://10.0.0.5/v1', 'http://localhost.example.com/v1', 'http://[2001:db8::1]/v1', 'http://0.0.0.0:1/v1']) {
+      for (const over of [{ allowRemote: true }, { allowRemote: true, apiKeyEnv: 'MY_MODEL_KEY' }]) {
+        let message = '';
+        try {
+          createAdjudicator(settings({ baseUrl, ...over }), { MY_MODEL_KEY: KEY }, { fetch: spy });
+        } catch (error) {
+          expect(error).toBeInstanceOf(AdjudicationConfigError);
+          message = (error as Error).message;
+        }
+        expect(message).toMatch(/https/);
+        expect(message).toMatch(/would travel unencrypted/);
+        expect(message).not.toContain(KEY);
+      }
+      // Without allowRemote the first thing said is that the host is another machine.
+      expect(() => createAdjudicator(settings({ baseUrl }), {})).toThrow(/not this machine/);
+    }
+    expect(sent).toBe(0);
+    // Plain http stays fine for this machine, and https for another one that was allowed.
+    const local = createAdjudicator(settings({ baseUrl: mock.baseUrl, apiKeyEnv: 'MY_MODEL_KEY' }), { MY_MODEL_KEY: KEY })!;
+    expect((await local.judge(input)).verdict).toBe('yes');
+    const remote = createAdjudicator(settings({ baseUrl: 'https://api.example.com/v1', allowRemote: true, apiKeyEnv: 'MY_MODEL_KEY' }), { MY_MODEL_KEY: KEY }, { fetch: spy })!;
+    await remote.judge(input);
+    expect(sent).toBe(1);
   });
 
   it('refuses a base URL it cannot use, without echoing credentials', () => {
