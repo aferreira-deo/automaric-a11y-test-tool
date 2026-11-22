@@ -1,0 +1,8 @@
+{
+  "description": "style-src with a nonce blocks injected <style> elements. The stabiliser must still apply: the caret is not an indicator and a slow transition is measured at its end state.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#field", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" },
+    { "selector": "#slow", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

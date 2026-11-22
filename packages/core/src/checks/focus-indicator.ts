@@ -4,7 +4,17 @@ import { decodePng } from '../measure/image.js';
 import type { PixelBox } from '../measure/image.js';
 import { measureComponent } from '../measure/indicator.js';
 import type { ComponentMeasurement } from '../measure/indicator.js';
-import type { Check, Evidence, FindingDraft, FocusConfig, FocusStop, Snapshot, Status, WcagRef } from '../types.js';
+import type {
+  Check,
+  Evidence,
+  FindingDraft,
+  FocusConfig,
+  FocusStop,
+  FocusWalk,
+  Snapshot,
+  Status,
+  WcagRef,
+} from '../types.js';
 
 const FOCUS_VISIBLE: WcagRef = { sc: '2.4.7', level: 'AA' };
 const NON_TEXT_CONTRAST: WcagRef = { sc: '1.4.11', level: 'AA' };
@@ -23,11 +33,25 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig): FindingDraft[] {
+/** Why an element was measured with a forced state: what kept the Tab walk from reaching it. */
+const UNREACHED: Record<FocusWalk['stoppedBy'], string> = {
+  cycle: 'The Tab walk completed without reaching this element',
+  'no-focusable': 'The Tab walk completed without reaching this element',
+  limit: 'The Tab walk stopped at a configured limit before reaching this element',
+  'opaque-frame': 'The Tab walk could not get past a cross-origin iframe and never reached this element',
+};
+
+function evaluateStop(
+  stop: FocusStop,
+  snapshot: Snapshot,
+  config: FocusConfig,
+  stoppedBy: FocusWalk['stoppedBy'],
+): FindingDraft[] {
   const drafts: FindingDraft[] = [];
   const flags: string[] = [];
   if (stop.reachedBy === 'forced') flags.push('forced');
   if (stop.authorModified) flags.push('authorModified');
+  if (stop.unstabilised) flags.push('unstabilised');
 
   const emit = (
     rule: string,
@@ -68,8 +92,25 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
     return drafts;
   }
 
-  if (stop.obscured && stop.obscured.sampled > 0 && stop.obscured.covered > 0) {
-    const { covered, sampled, by } = stop.obscured;
+  const cover = stop.obscured && stop.obscured.sampled > 0 && stop.obscured.covered > 0 ? stop.obscured : null;
+  const fullyCovered = cover !== null && cover.covered === cover.sampled;
+  // Hit-testing shows that something lies in front of the element, not that it hides it: a
+  // translucent backdrop does not. Only content known to be opaque at every point can fail.
+  const coverUnproven = cover !== null && fullyCovered && cover.opaque < cover.sampled;
+  const emitUnprovenCover = (nothingShows: boolean): void => {
+    emit(
+      'obscured',
+      'likely',
+      FOCUS_NOT_OBSCURED,
+      `When it received focus, the element was entirely under fixed or sticky content (${cover?.by ?? ''}) that could not be shown to be opaque` +
+        (nothingShows ? ', and no focus change was visible through it' : '') +
+        '. Confirm whether it hides the element.',
+      HELP.obscured,
+    );
+  };
+
+  if (cover && !coverUnproven) {
+    const { covered, sampled, by } = cover;
     if (covered === sampled) {
       emit(
         'obscured',
@@ -90,18 +131,29 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
   }
 
   if (!stop.crops) {
-    // An element that stays fully covered has already been reported above.
-    if (stop.notCaptured !== 'obscured') {
-      emit(
-        'not-captured',
-        'info',
-        null,
-        stop.notCaptured === 'no-box'
-          ? 'The focused element has no box, so its focus indicator was not measured.'
-          : 'The focused element could not be brought into the viewport, so its focus indicator was not measured.',
-        HELP.inventory,
-      );
+    if (coverUnproven) emitUnprovenCover(false);
+    // An element that was covered when it took focus and stays covered has been reported above.
+    if (stop.notCaptured !== 'obscured' || !fullyCovered) {
+      const why = {
+        'no-box': 'The focused element has no box',
+        'outside-viewport': 'The focused element could not be brought into the viewport',
+        obscured:
+          'The element was not entirely covered when it received focus, but once scrolled to the centre of the viewport for capture it was entirely under opaque fixed or sticky content',
+      }[stop.notCaptured ?? 'outside-viewport'];
+      emit('not-captured', 'info', null, `${why}, so its focus indicator was not measured.`, HELP.inventory);
     }
+    return drafts;
+  }
+
+  if (stop.unfocusedNotCaptured) {
+    if (coverUnproven) emitUnprovenCover(false);
+    emit(
+      'unfocused-not-captured',
+      'info',
+      FOCUS_VISIBLE,
+      'The element was still focused after it was blurred (a script gives it focus back), so its unfocused state could not be captured and its focus indicator was not measured.',
+      HELP.inventory,
+    );
     return drafts;
   }
 
@@ -117,7 +169,32 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
   const minArea = Math.max(1, Math.round(config.minComponentAreaCssPx2 * scale * scale));
   const components = connectedComponents(mask, minArea);
 
+  if (coverUnproven) {
+    if (stop.coveredAtCapture && components.length > 0) {
+      emit(
+        'covered-not-hidden',
+        'info',
+        FOCUS_NOT_OBSCURED,
+        `When it received focus, the element was entirely under fixed or sticky content (${cover.by}), but that content is not opaque: the focus change is visible through it.`,
+        HELP.inventory,
+      );
+    } else {
+      emitUnprovenCover(stop.coveredAtCapture === true);
+      // Nothing visible through the cover is what 2.4.11 is about; it says nothing on 2.4.7.
+      if (stop.coveredAtCapture) return drafts;
+    }
+  }
+
   if (components.length === 0) {
+    // Precision before recall: what could have kept a real indicator out of the captures.
+    const unseen: string[] = [];
+    if (stop.clippedByViewport) {
+      unseen.push('the element reaches beyond the viewport, so an indicator along its edges would be off screen');
+    }
+    if (stop.unstabilised) {
+      unseen.push('transitions and animations could not be switched off on it, so a change may not have started yet');
+    }
+
     if (stop.textEntry) {
       emit(
         'caret-only',
@@ -140,7 +217,15 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
         'no-visible-change',
         'likely',
         FOCUS_VISIBLE,
-        'No pixel changed when the focus state was forced on this element. It is not in the Tab order, so the state was simulated; confirm with real focus.',
+        `No pixel changed when the focus state was forced on this element. ${UNREACHED[stoppedBy]}, so the state was simulated; confirm with real focus.`,
+        HELP.visible,
+      );
+    } else if (unseen.length > 0) {
+      emit(
+        'no-visible-change',
+        'likely',
+        FOCUS_VISIBLE,
+        `No pixel changed in the viewport when this element received keyboard focus. Reported as likely because ${unseen.join('; ')}.`,
         HELP.visible,
       );
     } else {
@@ -247,7 +332,10 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
       'measured',
       'info',
       NON_TEXT_CONTRAST,
-      `Focus indicator ${indicator} measured at ${ratio}:1 against the adjacent colour ${adjacent}.`,
+      `Focus indicator ${indicator} measured at ${ratio}:1 against the adjacent colour ${adjacent}.` +
+        (stop.unstabilised && stop.textEntry
+          ? ' The text caret could not be hidden on this field and may be part of what was measured.'
+          : ''),
       HELP.inventory,
       evidence,
     );
@@ -264,8 +352,22 @@ function evaluateStop(stop: FocusStop, snapshot: Snapshot, config: FocusConfig):
   }
   if (best.noisy) doubts.push('the surrounding colours are too varied to sample reliably');
   if (stop.reachedBy === 'forced') doubts.push('the focus state was simulated');
+  if (stop.unstabilised) {
+    doubts.push('transitions and animations could not be switched off on it, so the capture may show an intermediate state');
+  }
+  if (coverUnproven && stop.coveredAtCapture) doubts.push('it was measured through the content that covers the element');
+  const capped = components.length > config.maxComponents;
+  if (capped) {
+    doubts.push(
+      `only the ${config.maxComponents} largest of ${components.length} changed regions were measured, and a smaller one may reach ${config.contrastThreshold}:1`,
+    );
+  }
 
-  const measuredText = `Focus indicator ${indicator} measures ${ratio}:1 against the adjacent colour ${adjacent}, and no part of it reaches ${config.contrastThreshold}:1.`;
+  const measuredText =
+    `Focus indicator ${indicator} measures ${ratio}:1 against the adjacent colour ${adjacent}` +
+    (capped
+      ? `, the best of the regions measured, and under ${config.contrastThreshold}:1.`
+      : `, and no part of it reaches ${config.contrastThreshold}:1.`);
   emit(
     'low-contrast',
     doubts.length > 0 ? 'likely' : 'fail',
@@ -283,12 +385,13 @@ export const focusIndicatorCheck: Check = {
     const walk = snapshot.focus;
     if (!walk) throw new Error('The focus-indicator check needs a snapshot collected with the focus walk.');
 
-    const drafts = walk.stops.flatMap((stop) => evaluateStop(stop, snapshot, config.focus));
+    const drafts = walk.stops.flatMap((stop) => evaluateStop(stop, snapshot, config.focus, walk.stoppedBy));
 
     const tabbed = walk.stops.filter((stop) => stop.reachedBy === 'tab').length;
     const reason = {
       cycle: 'focus returned to an element already visited',
       limit: 'a configured limit was reached',
+      'opaque-frame': 'focus could not be moved past a cross-origin iframe',
       'no-focusable': 'nothing on the page takes focus',
     }[walk.stoppedBy];
     const unreached =

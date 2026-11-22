@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="style-src 'nonce-fixture'" />
+    <title>focus-indicator: csp-style-nonce</title>
+    <style nonce="fixture">
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      input { font: inherit; padding: 6px 8px; border: 1px solid #595959; }
+      #field:focus { outline: none; }
+      #slow { outline: 2px solid transparent; outline-offset: 2px; transition: outline-color 5s linear; }
+      #slow:focus-visible { outline-color: #005fcc; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><label for="field">Name</label> <input id="field" type="text" /></p>
+    <p class="row"><button id="slow">Slow transition</button></p>
+  </body>
+</html>

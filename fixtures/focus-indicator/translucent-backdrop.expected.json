@@ -1,0 +1,9 @@
+{
+  "description": "Controls behind a translucent fixed backdrop stay visible through it: covered, but not hidden, and their indicator is still measured.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#behind", "check": "focus-indicator", "status": "info", "wcag": "2.4.11", "rule": "focus-indicator/covered-not-hidden" },
+    { "selector": "#behind", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#ok", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

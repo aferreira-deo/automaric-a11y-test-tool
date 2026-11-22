@@ -1,0 +1,9 @@
+{
+  "description": "A fixed layer with opacity 0 covers the page. It hides nothing, so 2.4.11 reports nothing at all.",
+  "checks": ["focus-indicator"],
+  "exact": true,
+  "expected": [
+    { "selector": "#a", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "html", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/walk" }
+  ]
+}

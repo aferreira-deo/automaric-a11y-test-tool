@@ -32,6 +32,8 @@ export const defaultConfig: Config = {
     fillMinCoverage: 0.5,
     defaultRingMaxCssPx: 6,
     obscuredGrid: 5,
+    opaqueCoverMinAlpha: 1,
+    invisibleCoverMaxOpacity: 0,
     geometryToleranceCssPx: 1,
   },
 };

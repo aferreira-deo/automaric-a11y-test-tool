@@ -1,0 +1,7 @@
+{
+  "description": "A button with a good outline takes focus back as soon as it loses it, so no unfocused capture exists. It must not be reported as having no indicator.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#grabs", "check": "focus-indicator", "status": "info", "wcag": "2.4.7", "rule": "focus-indicator/unfocused-not-captured" }
+  ]
+}

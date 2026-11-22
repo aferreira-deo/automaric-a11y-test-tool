@@ -1,0 +1,9 @@
+{
+  "description": "Tabbing into a field with a value selects its text. The selection highlight is not a focus indicator: with outline: none these fields have the caret only.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#text", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" },
+    { "selector": "#email", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" },
+    { "selector": "#area", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" }
+  ]
+}

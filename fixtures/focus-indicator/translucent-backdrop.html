@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: translucent-backdrop</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      #backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.3); }
+      #dialog { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; padding: 16px; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><button id="behind" class="good">Behind the backdrop</button></p>
+    <div id="backdrop"></div>
+    <div id="dialog" role="dialog" aria-label="Example"><button id="ok" class="good">OK</button></div>
+  </body>
+</html>

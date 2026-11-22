@@ -1,0 +1,7 @@
+{
+  "description": "The page redefines innerWidth, innerHeight and devicePixelRatio. The collector must not read them from the page world.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#a", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

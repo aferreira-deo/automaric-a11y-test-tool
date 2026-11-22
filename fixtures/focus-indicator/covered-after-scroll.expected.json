@@ -1,0 +1,7 @@
+{
+  "description": "A button is in plain view when it receives focus, but lands under a fixed panel once the collector scrolls it to the centre. It cannot be captured, and that must be said.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#a", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/not-captured" }
+  ]
+}

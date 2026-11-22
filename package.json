@@ -18,6 +18,7 @@
     "@a11y-vision/cli": "workspace:*",
     "@a11y-vision/core": "workspace:*",
     "@a11y-vision/playwright": "workspace:*",
+    "@a11y-vision/reporters": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.65.1",
     "@types/node": "^24.0.0",

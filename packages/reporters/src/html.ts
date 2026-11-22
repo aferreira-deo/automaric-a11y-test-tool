@@ -26,12 +26,32 @@ export function toBase64(bytes: Uint8Array): string {
   return out;
 }
 
-function escape(text: string): string {
+/**
+ * Everything written into the report goes through `escape` or `num`, whatever its declared type:
+ * selectors, messages and URLs come from the page under test, and a report can also be built
+ * from JSON that this version of the tool did not write.
+ */
+function escape(value: unknown): string {
+  // String() is not used: it would call a toString supplied by the value.
+  const text = typeof value === 'string' ? value : typeof value === 'number' ? num(value) : '';
   return text
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function num(value: unknown, round = false): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'unknown';
+  return String(round ? Math.round(value) : value);
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function statusOf(finding: Finding): Status {
+  // An unknown status is shown as inventory, never as a failure.
+  return STATUS_ORDER.includes(finding.status) ? finding.status : 'info';
 }
 
 function cropLabel(id: string): string {
@@ -41,34 +61,40 @@ function cropLabel(id: string): string {
 }
 
 function renderFinding(finding: Finding, crops: Record<string, Png>): string {
-  const { evidence } = finding;
+  const evidence = {
+    crops: finding.evidence?.crops ?? [],
+    colors: finding.evidence?.colors ?? {},
+    ratios: finding.evidence?.ratios ?? {},
+    flags: finding.evidence?.flags ?? [],
+  };
+  const status = statusOf(finding);
   const rows: [string, string][] = [
-    ['Success criterion', finding.wcag ? `${escape(finding.wcag.sc)} (Level ${finding.wcag.level})` : 'None'],
+    ['Success criterion', finding.wcag ? `${escape(finding.wcag.sc)} (Level ${escape(finding.wcag.level)})` : 'None'],
     ['Rule', `<code>${escape(finding.rule)}</code>`],
     ['Selector', `<code>${escape(finding.selector)}</code>`],
   ];
   if (finding.frame) rows.push(['Frame', `<code>${escape(finding.frame)}</code>`]);
   for (const [role, ratio] of Object.entries(evidence.ratios)) {
-    rows.push([`Measured ${escape(role)}`, `${ratio}:1`]);
+    rows.push([`Measured ${escape(role)}`, `${num(ratio)}:1`]);
   }
   for (const [role, color] of Object.entries(evidence.colors)) {
-    rows.push([
-      `Colour: ${escape(role)}`,
-      `<span class="swatch" style="background:${escape(color)}"></span><code>${escape(color)}</code>`,
-    ]);
+    // Only a plain hex colour goes into a style attribute: anything else could carry a url().
+    const swatch = HEX_COLOR.test(color) ? `<span class="swatch" style="background:${escape(color)}"></span>` : '';
+    rows.push([`Colour: ${escape(role)}`, `${swatch}<code>${escape(color)}</code>`]);
   }
-  if (evidence.flags.length > 0) rows.push(['Flags', escape(evidence.flags.join(', '))]);
+  if (evidence.flags.length > 0) rows.push(['Flags', evidence.flags.map(escape).join(', ')]);
   if (finding.box) {
     const { x, y, width, height } = finding.box;
-    rows.push(['Box (CSS px)', `${Math.round(width)} by ${Math.round(height)} at ${Math.round(x)}, ${Math.round(y)}`]);
+    rows.push(['Box (CSS px)', `${num(width, true)} by ${num(height, true)} at ${num(x, true)}, ${num(y, true)}`]);
   }
   if (finding.ai) {
     rows.push(['Model', `${escape(finding.ai.model)}, prompt ${escape(finding.ai.promptVersion)}`]);
-    rows.push(['Model votes', escape(finding.ai.votes.join(', '))]);
+    rows.push(['Model votes', finding.ai.votes.map(escape).join(', ')]);
     rows.push(['Model rationale', escape(finding.ai.rationale)]);
   }
 
   const figures = evidence.crops
+    .filter((id) => typeof id === 'string')
     .map((id) => {
       const png = crops[id];
       if (!png) return '';
@@ -77,8 +103,8 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     })
     .join('');
 
-  return `<article class="finding ${finding.status}">
-<h3><span class="status">${STATUS_TEXT[finding.status].title}</span> <code>${escape(finding.selector)}</code></h3>
+  return `<article class="finding ${status}">
+<h3><span class="status">${STATUS_TEXT[status].title}</span> <code>${escape(finding.selector)}</code></h3>
 <p>${escape(finding.message)}</p>
 <p class="help">${escape(finding.help)}</p>
 ${figures ? `<div class="crops">${figures}</div>` : ''}
@@ -110,7 +136,7 @@ dl{margin:.5rem 0}dl div{display:flex;flex-wrap:wrap;gap:.5rem}dt{font-weight:60
  */
 export function toHtmlReport(result: ScanResult, crops: Record<string, Png> = {}): string {
   const byStatus = new Map<Status, Finding[]>(STATUS_ORDER.map((status) => [status, []]));
-  for (const finding of result.findings) byStatus.get(finding.status)!.push(finding);
+  for (const finding of result.findings) byStatus.get(statusOf(finding))!.push(finding);
 
   const summary = STATUS_ORDER.map(
     (status) =>
@@ -129,7 +155,10 @@ ${byStatus
     )
     .join('\n');
 
-  const { viewport, devicePixelRatio, colorScheme } = result.environment;
+  // Optional chaining on a non-optional type: see the note on `escape`.
+  const environment = result.environment as Partial<ScanResult['environment']> | undefined;
+  const viewport = environment?.viewport as Partial<ScanResult['environment']['viewport']> | undefined;
+  const colorScheme = environment?.colorScheme === 'dark' ? 'dark' : 'light';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -142,7 +171,7 @@ ${byStatus
 <main>
 <h1>Evidence report</h1>
 <p><code>${escape(result.url)}</code></p>
-<p class="note">Scanned ${escape(result.timestamp)} with ${escape(result.tool.name)} ${escape(result.tool.version)}. Viewport ${viewport.width} by ${viewport.height} CSS px, device pixel ratio ${devicePixelRatio}, ${colorScheme} colour scheme.</p>
+<p class="note">Scanned ${escape(result.timestamp)} with ${escape(result.tool.name)} ${escape(result.tool.version)}. Viewport ${num(viewport?.width)} by ${num(viewport?.height)} CSS px, device pixel ratio ${num(environment?.devicePixelRatio)}, ${colorScheme} colour scheme.</p>
 <p>This report lists what the tool found and measured to assist a tester. It covers a small set of checks and makes no statement of conformance: a page with no findings here has not been shown to meet WCAG.</p>
 <table>
 <caption>Findings by status</caption>

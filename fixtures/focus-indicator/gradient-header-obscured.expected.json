@@ -1,0 +1,8 @@
+{
+  "description": "A link sits under a fixed header painted with a gradient image. Hit-testing cannot show that an image is opaque, so this is likely, not fail, and 2.4.7 is not reported for it.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#under", "check": "focus-indicator", "status": "likely", "wcag": "2.4.11", "rule": "focus-indicator/obscured" },
+    { "selector": "#visible", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "description": "A cross-origin iframe (sandboxed, so its origin is opaque) with 60 stops, more than the walk spends in one frame. The walk steps past it and still reaches the button after it with real focus.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#before", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#frame", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/frame-not-measured" },
+    { "selector": "#after", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" },
+    { "selector": "html", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/walk", "flags": ["cycle"] }
+  ]
+}

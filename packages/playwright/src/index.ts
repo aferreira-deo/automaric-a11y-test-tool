@@ -54,7 +54,25 @@ export class A11yVision {
       return { result, crops };
     } finally {
       await session.detach();
+      await this.#restoreEmulation();
     }
+  }
+
+  /**
+   * Chrome keeps one device-metrics override and one emulated media type per page. The collector
+   * replaces them through its own session and can only clear them, which also wipes what
+   * Playwright had applied for the context (viewport, deviceScaleFactor, isMobile) and for the
+   * page (emulateMedia). Both calls below make Playwright send its current state again; neither
+   * changes that state.
+   *
+   * Not restored, because Playwright has no call that sends it again: the context's `screen`
+   * option. After a scan `screen.width` and `screen.height` equal the viewport size.
+   */
+  async #restoreEmulation(): Promise<void> {
+    if (this.#page.isClosed()) return;
+    await this.#page.emulateMedia({});
+    const viewport = this.#page.viewportSize();
+    if (viewport) await this.#page.setViewportSize(viewport);
   }
 }
 

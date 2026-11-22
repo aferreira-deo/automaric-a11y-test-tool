@@ -19,13 +19,50 @@ import { A11yVision } from '@a11y-vision/playwright';
 const result = await new A11yVision({ page }).analyze();
 ```
 
-Chromium only. While it runs, the scan changes the page (device scale factor 2, reduced motion, a style sheet that
-removes transitions and the caret, focus and scroll position) and restores it afterwards. Focus and blur events do
-reach page scripts.
+Chromium only.
 
-Known limits of the focus check: content inside cross-origin iframes and closed shadow roots is not measured; an
-overlay in a parent document covering an iframe is not seen by the 2.4.11 test; elements outside the Tab order are
-measured with a forced pseudo-state and never reported above `likely`.
+### What a scan does to the page
+
+While it runs, the scan changes the page: device scale factor 2, reduced motion, an adopted style sheet that
+removes transitions, animations, the caret and the selection highlight, keyboard focus, scroll positions, and the
+text selection of fields it tabs into. Focus and blur events reach page scripts, as they would for a keyboard user.
+
+Put back afterwards:
+
+- keyboard focus, on the element that had it (set from script, so `:focus-visible` may differ from before);
+- scroll position of the window, of same-origin iframes and of every scroll container;
+- the style sheet, and any `tabindex` the walk had to set on a cross-origin iframe (see below);
+- through the Playwright API and the CLI: the emulation Playwright applies for the context and the page, that is
+  viewport, `deviceScaleFactor`, `isMobile`, and everything set with `emulateMedia` or the matching context options.
+
+Not put back:
+
+- text selection inside fields, and anything page scripts did in response to focus and blur;
+- the `screen` context option of Playwright: after a scan `screen.width` and `screen.height` equal the viewport size;
+- with a bare CDP session (`collectSnapshot`): Chrome holds one device-metrics override and one emulated media type
+  per page and cannot report them, so the collector clears both when it ends. A caller that had set them through
+  another session must set them again.
+
+During the scan a context created with `isMobile` is measured with mobile emulation off, in a viewport of the page's
+layout size (`innerWidth` by `innerHeight`). The layout width is kept, but for a page without a viewport meta tag
+that is larger than the device screen, so more of the page counts as on screen than on the device.
+
+### Known limits of the focus check
+
+- Content inside cross-origin iframes and closed shadow roots is not measured. The walk tabs through a cross-origin
+  iframe; after `maxTabsInOpaqueFrame` presses (50) it sets `tabindex="-1"` on the iframe for the rest of the walk to
+  step past it, which page scripts can observe.
+- 2.4.11 is hit-tested inside the element's own document: an overlay in a parent document covering an iframe is not
+  seen, nor is an overlay with `pointer-events: none`. It is a `fail` only when every sampled point is under fixed or
+  sticky content with full opacity and a solid background colour. Under a translucent colour, an image or a gradient
+  it is `likely`, or `info` when the focus change is visible through the cover.
+- Elements the Tab walk did not reach are measured with a forced pseudo-state and never reported above `likely`.
+- No `fail` is reported, only `likely` or `info`, when the evidence is incomplete: the element takes focus back on
+  blur (no unfocused capture), it reaches beyond the viewport (its edges are off screen), more changed regions were
+  found than `maxComponents` (the smaller ones are not measured), or an author `!important` rule keeps a transition
+  or animation running (flag `unstabilised`).
+- The stabilising style sheet is a constructed sheet, which a Content-Security-Policy does not block. Pseudo-elements
+  and labels are not checked for author rules that outweigh it.
 
 ## Development
 

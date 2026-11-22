@@ -1,17 +1,12 @@
 import { connectedComponents, decodePng, diffMask, fnv1a64, unionBox } from '@a11y-vision/core';
 import type { Box, FocusConfig, FocusStop, FocusWalk, Png, Screenshot } from '@a11y-vision/core';
 import { AGENT_GLOBAL, agentFactory } from './agent.js';
-import type { AgentElementInfo, AgentOptions, AgentPrepared, AgentRect } from './agent.js';
+import type { AgentBlurred, AgentElementInfo, AgentOptions, AgentPrepared, AgentRect } from './agent.js';
+import type { PageEnvironment, World } from './environment.js';
 import type { CdpSession } from './session.js';
 
-const WORLD_NAME = 'a11y-vision';
 const TAB_KEY = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 };
 const NO_BOX: Box = { x: 0, y: 0, width: 0, height: 0 };
-
-interface EvaluateResponse {
-  result: { value?: unknown; objectId?: string };
-  exceptionDetails?: { text: string; exception?: { description?: string } };
-}
 
 interface MatchedStyles {
   inlineStyle?: { cssProperties: { name: string; disabled?: boolean }[] };
@@ -24,24 +19,6 @@ interface MatchedStyles {
     };
   }[];
 }
-
-interface MediaState {
-  width: number;
-  height: number;
-  devicePixelRatio: number;
-  colorScheme: string;
-  reducedMotion: string;
-  forcedColors: string;
-}
-
-const MEDIA_EXPRESSION = `({
-  width: window.innerWidth,
-  height: window.innerHeight,
-  devicePixelRatio: window.devicePixelRatio,
-  colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduce' : 'no-preference',
-  forcedColors: matchMedia('(forced-colors: active)').matches ? 'active' : 'none',
-})`;
 
 function decodeBase64(data: string): Png {
   return Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
@@ -61,50 +38,36 @@ function moved(a: AgentRect | null, b: AgentRect | null, tolerance: number): boo
  * Walks the page with real Tab presses and captures every stop focused and unfocused.
  * Measurement happens later, in core, from the captures stored in `clips`.
  *
- * The page is modified while this runs (device scale factor, reduced motion, a stabilising
- * style sheet, focus and scroll position) and restored afterwards.
+ * While this runs the page is changed: device scale factor, reduced motion, an adopted style
+ * sheet, focus, scroll positions, text selection in fields, and `tabindex` on cross-origin
+ * iframes the walk had to step past. Afterwards the style sheet and the `tabindex` values are
+ * removed, focus goes back to the element that had it, and the scroll positions of the window,
+ * of same-origin frames and of scroll containers are put back.
+ *
+ * Emulation is the part that cannot be restored from here. Chrome keeps one device-metrics
+ * override and one emulated media type per page, not per session, and offers no way to read
+ * them: this function replaces them while it runs and clears them at the end, which is the
+ * original state only if nobody else had set them. A caller that emulates through another
+ * session (Playwright does) has to apply its own emulation again; the Playwright wrapper does so.
+ * Media features are different: only `prefers-reduced-motion` is touched, the others keep
+ * whatever value another session gave them. `cdp` itself should carry no media emulation.
  */
 export async function collectFocus(
   cdp: CdpSession,
+  world: World,
+  original: PageEnvironment,
   config: FocusConfig,
   clips: Record<string, Screenshot>,
 ): Promise<FocusWalk> {
-  const evaluateIn = async (contextId: number | undefined, expression: string, byValue = true): Promise<EvaluateResponse> => {
-    const response = (await cdp.send('Runtime.evaluate', {
-      expression,
-      returnByValue: byValue,
-      awaitPromise: true,
-      ...(contextId === undefined ? {} : { contextId }),
-    })) as EvaluateResponse;
-    if (response.exceptionDetails) {
-      const { text, exception } = response.exceptionDetails;
-      throw new Error(`Page evaluation failed: ${exception?.description ?? text}`);
-    }
-    return response;
-  };
-
-  const original = (await evaluateIn(undefined, MEDIA_EXPRESSION)).result.value as MediaState;
   const overrideScale = original.devicePixelRatio !== config.deviceScaleFactor;
-  const setMetrics = (deviceScaleFactor: number): Promise<unknown> =>
-    cdp.send('Emulation.setDeviceMetricsOverride', {
-      width: original.width,
-      height: original.height,
-      deviceScaleFactor,
-      mobile: false,
-    });
-  // setEmulatedMedia replaces the whole set, so the features already in effect are sent back with it.
-  const setMedia = (reducedMotion: string): Promise<unknown> =>
-    cdp.send('Emulation.setEmulatedMedia', {
-      features: [
-        { name: 'prefers-color-scheme', value: original.colorScheme },
-        { name: 'forced-colors', value: original.forcedColors },
-        { name: 'prefers-reduced-motion', value: reducedMotion },
-      ],
-    });
+  const overrideMotion = !original.reducedMotion;
+  // Sending a media feature list also resets the media type, so the one in effect is sent along.
+  const setMedia = (features: { name: string; value: string }[]): Promise<unknown> =>
+    cdp.send('Emulation.setEmulatedMedia', { media: original.mediaType === 'print' ? 'print' : '', features });
 
-  let contextId: number | undefined;
+  let agentReady = false;
   const agent = async <T>(call: string): Promise<T> =>
-    (await evaluateIn(contextId, `${AGENT_GLOBAL}.${call}`)).result.value as T;
+    (await world.evaluate(`${AGENT_GLOBAL}.${call}`)).result.value as T;
 
   const capture = async (id: string, clip: Box): Promise<Png> => {
     const { data } = (await cdp.send('Page.captureScreenshot', {
@@ -119,7 +82,7 @@ export async function collectFocus(
   };
 
   const nodeIdOf = async (key: number): Promise<number> => {
-    const { result } = await evaluateIn(contextId, `${AGENT_GLOBAL}.element(${key})`, false);
+    const { result } = await world.evaluate(`${AGENT_GLOBAL}.element(${key})`, false);
     const { nodeId } = (await cdp.send('DOM.requestNode', { objectId: result.objectId })) as { nodeId: number };
     return nodeId;
   };
@@ -166,6 +129,13 @@ export async function collectFocus(
     crops: null,
   });
 
+  /** What prepare() learned about the conditions of the capture. Only set when true, to keep stops small. */
+  const noteConditions = (stop: FocusStop, prepared: AgentPrepared): void => {
+    if (prepared.covered) stop.coveredAtCapture = true;
+    if (prepared.clipped) stop.clippedByViewport = true;
+    if (!prepared.stable) stop.unstabilised = true;
+  };
+
   const measureTabStop = async (info: AgentElementInfo): Promise<FocusStop> => {
     if (info.opaqueFrame) return baseStop(info, 'tab');
     const prepared = await agent<AgentPrepared>(`prepare(${info.key})`);
@@ -174,16 +144,19 @@ export async function collectFocus(
       if (prepared.reason) stop.notCaptured = prepared.reason;
       return stop;
     }
+    noteConditions(stop, prepared);
     const crops = cropIds(info);
     const focused = await capture(crops.focused, prepared.clip);
     stop.authorModified = await authorModified(await nodeIdOf(info.key));
-    const unfocusedBox = await agent<AgentRect | null>(`blur(${info.key})`);
+    const blurred = await agent<AgentBlurred>(`blur(${info.key})`);
     const unfocused = await capture(crops.unfocused, prepared.clip);
     stop.crops = crops;
-    stop.geometryChanged = moved(prepared.box, unfocusedBox, config.geometryToleranceCssPx);
+    stop.geometryChanged = moved(prepared.box, blurred.box, config.geometryToleranceCssPx);
+    // Checked on both sides of the capture: a script can hand the focus back at any moment.
+    if (!blurred.blurred || (await agent<boolean>(`isActive(${info.key})`))) stop.unfocusedNotCaptured = true;
 
     let refocused = false;
-    if (isUnchanged(focused, unfocused)) {
+    if (!stop.unfocusedNotCaptured && isUnchanged(focused, unfocused)) {
       // Nothing changed near the element. Before that becomes a failure, look at the whole viewport.
       const viewport = await agent<AgentRect>('viewport()');
       const shot = async (): Promise<Png> => {
@@ -223,6 +196,7 @@ export async function collectFocus(
       if (prepared.reason) stop.notCaptured = prepared.reason;
       return stop;
     }
+    noteConditions(stop, prepared);
     const crops = cropIds(info);
     await capture(crops.unfocused, prepared.clip);
     const nodeId = await nodeIdOf(info.key);
@@ -244,31 +218,31 @@ export async function collectFocus(
   let stoppedBy: FocusWalk['stoppedBy'] = 'limit';
 
   try {
-    if (overrideScale) await setMetrics(config.deviceScaleFactor);
-    await setMedia('reduce');
-    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    await cdp.send('DOM.enable');
-    await cdp.send('CSS.enable');
-    await cdp.send('DOM.getDocument', { depth: 0 });
-
-    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: { frame: { id: string } } };
-    const world = (await cdp.send('Page.createIsolatedWorld', {
-      frameId: frameTree.frame.id,
-      worldName: WORLD_NAME,
-    })) as { executionContextId: number };
-    contextId = world.executionContextId;
-
+    // The agent goes in first: it records focus and scroll positions before anything moves them.
     const options: AgentOptions = {
       settleFrames: config.settleFrames,
       settleTimeoutMs: config.settleTimeoutMs,
       fontsTimeoutMs: config.fontsTimeoutMs,
       clipMarginCssPx: config.clipMarginCssPx,
       obscuredGrid: config.obscuredGrid,
+      opaqueCoverMinAlpha: config.opaqueCoverMinAlpha,
+      invisibleCoverMaxOpacity: config.invisibleCoverMaxOpacity,
     };
-    await evaluateIn(
-      contextId,
-      `globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`,
-    );
+    await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);
+    agentReady = true;
+
+    if (overrideScale) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        ...original.viewport,
+        deviceScaleFactor: config.deviceScaleFactor,
+        mobile: false,
+      });
+    }
+    if (overrideMotion) await setMedia([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    await cdp.send('DOM.getDocument', { depth: 0 });
     await agent('stabilise()');
 
     // The starting point of sequential navigation cannot be reset from script, so the walk
@@ -277,6 +251,10 @@ export async function collectFocus(
     let emptyStreak = 0;
     let opaqueKey: number | undefined;
     let opaqueStreak = 0;
+    const opaqueKeys: number[] = [];
+    const skipped = new Set<number>();
+    /** The last stop that is not a cross-origin frame: where the walk restarts from to step past one. */
+    let lastOwnStop: number | null = null;
     for (;;) {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB_KEY });
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB_KEY });
@@ -293,9 +271,20 @@ export async function collectFocus(
       }
       emptyStreak = 0;
 
+      if (info.opaqueFrame && skipped.has(info.key)) {
+        // Taken out of the Tab order and focus is in it again: there is no getting past it.
+        stoppedBy = 'opaque-frame';
+        break;
+      }
       if (info.opaqueFrame && info.key === opaqueKey) {
         // Still inside the same cross-origin frame; its inner stops are invisible from here.
-        if (++opaqueStreak > config.maxTabsInOpaqueFrame) break;
+        if (++opaqueStreak > config.maxTabsInOpaqueFrame) {
+          // It has more stops than the walk will spend on it, or it traps focus. Every
+          // cross-origin frame met so far is skipped, or restarting would walk into them again.
+          for (const key of opaqueKeys) skipped.add(key);
+          await agent(`skipFrames(${JSON.stringify(opaqueKeys)}, ${lastOwnStop})`);
+          opaqueKey = undefined;
+        }
         continue;
       }
       if (visited.has(info.key)) {
@@ -305,6 +294,8 @@ export async function collectFocus(
       visited.add(info.key);
       opaqueKey = info.opaqueFrame ? info.key : undefined;
       opaqueStreak = 0;
+      if (info.opaqueFrame) opaqueKeys.push(info.key);
+      else lastOwnStop = info.key;
 
       stops.push(await measureTabStop(info));
       if (stops.length >= config.maxTabStops) break;
@@ -315,11 +306,11 @@ export async function collectFocus(
     for (const info of rest.items) stops.push(await measureForced(info));
     return { stops, stoppedBy, unreached: rest.total, forced: rest.items.length };
   } finally {
-    if (contextId !== undefined) await agent('cleanup()').catch(() => undefined);
+    if (agentReady) await agent('cleanup()').catch(() => undefined);
     await cdp.send('CSS.disable').catch(() => undefined);
     await cdp.send('DOM.disable').catch(() => undefined);
     await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
-    await setMedia(original.reducedMotion).catch(() => undefined);
-    if (overrideScale) await setMetrics(original.devicePixelRatio).catch(() => undefined);
+    if (overrideMotion) await setMedia([]).catch(() => undefined);
+    if (overrideScale) await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => undefined);
   }
 }

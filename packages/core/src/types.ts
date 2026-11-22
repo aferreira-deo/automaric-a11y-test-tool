@@ -88,9 +88,28 @@ export interface FocusStop {
   opaqueFrame: boolean;
   /**
    * Where the browser left the element when it received focus, before collection scrolled it:
-   * how many of the sampled points were covered by fixed or sticky content. Null when not sampled.
+   * how many of the sampled points were covered by fixed or sticky content, and under how many
+   * of those the covering content is demonstrably opaque (see `obscuredInfo` in the collector).
+   * Null when not sampled.
    */
-  obscured: { covered: number; sampled: number; by: string } | null;
+  obscured: { covered: number; sampled: number; by: string; opaque: number } | null;
+  /**
+   * While it was captured, after scrolling, the element was entirely under fixed or sticky
+   * content that is not demonstrably opaque. The captures then show what gets through that content.
+   */
+  coveredAtCapture?: boolean;
+  /**
+   * The element was still focused after it was blurred (a script gives focus back), so the
+   * "unfocused" capture does not show the unfocused state and nothing can be concluded from the pair.
+   */
+  unfocusedNotCaptured?: boolean;
+  /** Once scrolled for capture, the border box still reached beyond the viewport on at least one side. */
+  clippedByViewport?: boolean;
+  /**
+   * The stabilising styles (no transitions, no animations, no caret) did not take effect on this
+   * element: an author `!important` rule outweighs them, or the style sheet could not be attached.
+   */
+  unstabilised?: boolean;
   /** The box moved or resized between the unfocused and the focused state. */
   geometryChanged: boolean;
   /** Crop ids of the two captures of the same region; null when the element could not be captured. */
@@ -106,8 +125,11 @@ export interface FocusStop {
 
 export interface FocusWalk {
   stops: FocusStop[];
-  /** `cycle`: focus came back to a visited element. `limit`: a configured maximum was hit. */
-  stoppedBy: 'cycle' | 'limit' | 'no-focusable';
+  /**
+   * `cycle`: focus came back to a visited element. `limit`: `maxTabStops` was hit.
+   * `opaque-frame`: focus stayed inside a cross-origin iframe and could not be moved past it.
+   */
+  stoppedBy: 'cycle' | 'limit' | 'opaque-frame' | 'no-focusable';
   /** Focusable elements the Tab walk never reached. */
   unreached: number;
   /** How many of those were measured with a forced state. */
@@ -188,7 +210,7 @@ export interface FocusConfig {
   maxTabStops: number;
   /** At most this many unreached focusable elements are measured with a forced state. */
   maxForced: number;
-  /** Tab presses allowed inside one cross-origin iframe before the walk gives up. */
+  /** Tab presses spent inside one cross-origin iframe before the walk moves focus past it. */
   maxTabsInOpaqueFrame: number;
   /** Animation frames to wait after each state change before capturing. */
   settleFrames: number;
@@ -228,6 +250,13 @@ export interface FocusConfig {
   defaultRingMaxCssPx: number;
   /** Points per side of the grid sampled for 2.4.11. */
   obscuredGrid: number;
+  /**
+   * Alpha of a background colour, and cumulated opacity of an element and its ancestors, from
+   * which fixed or sticky content counts as opaque. Only opaque content can `fail` 2.4.11.
+   */
+  opaqueCoverMinAlpha: number;
+  /** Cumulated opacity at or below which covering content is invisible and ignored. */
+  invisibleCoverMaxOpacity: number;
   /** Box movement below this is not a geometry change. */
   geometryToleranceCssPx: number;
 }

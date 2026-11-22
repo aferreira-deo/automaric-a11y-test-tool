@@ -137,24 +137,110 @@ describe('focus-indicator scoring', () => {
   });
   it('fails 2.4.11 only when every sampled point is covered', () => {
     const good = page('#ffffff', ring('#005fcc'));
-    expect(verdicts({ obscured: { covered: 25, sampled: 25, by: 'header' } }, good, plain)).toContainEqual({
+    expect(verdicts({ obscured: { covered: 25, sampled: 25, by: 'header', opaque: 25 } }, good, plain)).toContainEqual({
       rule: 'obscured',
       status: 'fail',
       sc: '2.4.11',
     });
-    expect(verdicts({ obscured: { covered: 10, sampled: 25, by: 'header' } }, good, plain)).toContainEqual({
+    expect(verdicts({ obscured: { covered: 10, sampled: 25, by: 'header', opaque: 10 } }, good, plain)).toContainEqual({
       rule: 'partly-obscured',
       status: 'info',
       sc: '2.4.11',
     });
-    expect(verdicts({ obscured: { covered: 0, sampled: 25, by: '' } }, good, plain)).toEqual([
+    expect(verdicts({ obscured: { covered: 0, sampled: 25, by: '', opaque: 0 } }, good, plain)).toEqual([
       { rule: 'measured', status: 'info', sc: '1.4.11' },
     ]);
   });
   it('reports an element that stays covered once, not also as having no indicator', () => {
     expect(
-      verdicts({ obscured: { covered: 25, sampled: 25, by: 'header' }, crops: null, notCaptured: 'obscured' }, plain, plain),
+      verdicts({ obscured: { covered: 25, sampled: 25, by: 'header', opaque: 25 }, crops: null, notCaptured: 'obscured' }, plain, plain),
     ).toEqual([{ rule: 'obscured', status: 'fail', sc: '2.4.11' }]);
+  });
+  it('never fails 2.4.11 on a cover that is not known to be opaque', () => {
+    const good = page('#ffffff', ring('#005fcc'));
+    const cover = { covered: 25, sampled: 25, by: '#backdrop', opaque: 0 };
+    // Still covered while captured, and the focus change shows through: covered, not hidden.
+    expect(verdicts({ obscured: cover, coveredAtCapture: true }, good, plain)).toEqual([
+      { rule: 'covered-not-hidden', status: 'info', sc: '2.4.11' },
+      { rule: 'measured', status: 'info', sc: '1.4.11' },
+    ]);
+    // Captured elsewhere: the captures say nothing about what the cover hid.
+    expect(verdicts({ obscured: cover }, good, plain)).toEqual([
+      { rule: 'measured', status: 'info', sc: '1.4.11' },
+      { rule: 'obscured', status: 'likely', sc: '2.4.11' },
+    ]);
+    // Nothing shows through: one likely, and no 2.4.7 failure on top of it.
+    expect(verdicts({ obscured: cover, coveredAtCapture: true, outsideChange: null }, plain, plain)).toEqual([
+      { rule: 'obscured', status: 'likely', sc: '2.4.11' },
+    ]);
+    expect(verdicts({ obscured: { ...cover, opaque: 24 }, crops: null, notCaptured: 'obscured' }, plain, plain)).toEqual([
+      { rule: 'obscured', status: 'likely', sc: '2.4.11' },
+    ]);
+  });
+  it('downgrades low contrast measured through a cover', () => {
+    const cover = { covered: 25, sampled: 25, by: '#backdrop', opaque: 0 };
+    expect(verdicts({ obscured: cover, coveredAtCapture: true }, page('#ffffff', ring('#c8c8c8')), plain)).toEqual([
+      { rule: 'covered-not-hidden', status: 'info', sc: '2.4.11' },
+      { rule: 'low-contrast', status: 'likely', sc: '1.4.11' },
+    ]);
+  });
+  it('says so when an element became covered only after it was scrolled for capture', () => {
+    expect(
+      verdicts({ obscured: { covered: 0, sampled: 25, by: '', opaque: 0 }, crops: null, notCaptured: 'obscured' }, plain, plain),
+    ).toEqual([{ rule: 'not-captured', status: 'info', sc: undefined }]);
+    expect(verdicts({ obscured: null, crops: null, notCaptured: 'obscured' }, plain, plain)).toEqual([
+      { rule: 'not-captured', status: 'info', sc: undefined },
+    ]);
+  });
+  it('does not judge an element whose unfocused state could not be captured', () => {
+    expect(verdicts({ unfocusedNotCaptured: true }, plain, plain)).toEqual([
+      { rule: 'unfocused-not-captured', status: 'info', sc: '2.4.7' },
+    ]);
+    expect(verdicts({ unfocusedNotCaptured: true }, page('#ffffff', ring('#c8c8c8')), plain)).toEqual([
+      { rule: 'unfocused-not-captured', status: 'info', sc: '2.4.7' },
+    ]);
+  });
+  it('downgrades no change to likely when the element is cut off by the viewport', () => {
+    expect(verdicts({ clippedByViewport: true, outsideChange: null }, plain, plain)).toEqual([
+      { rule: 'no-visible-change', status: 'likely', sc: '2.4.7' },
+    ]);
+  });
+  it('never fails a capture taken without the stabilising styles', () => {
+    expect(verdicts({ unstabilised: true, outsideChange: null }, plain, plain)).toEqual([
+      { rule: 'no-visible-change', status: 'likely', sc: '2.4.7' },
+    ]);
+    const low = page('#ffffff', ring('#c8c8c8'));
+    expect(verdicts({ unstabilised: true }, low, plain)).toEqual([{ rule: 'low-contrast', status: 'likely', sc: '1.4.11' }]);
+    const finding = runChecks(snapshotWith({ unstabilised: true }, low, plain), config).find((f) => f.selector === '#target');
+    expect(finding!.evidence.flags).toContain('unstabilised');
+  });
+  it('does not claim that no part reaches 3:1 when some parts were not measured', () => {
+    const focused = page('#ffffff');
+    for (const x of [10, 40, 70]) {
+      fillRect(focused, { x: x * SCALE, y: 5 * SCALE, width: 12 * SCALE, height: 3 * SCALE }, hex('#c8c8c8'));
+    }
+    const run = (maxComponents: number) =>
+      runChecks(snapshotWith({}, focused, plain), resolveConfig({ checks: ['focus-indicator'], focus: { maxComponents } }))
+        .filter((finding) => finding.selector === '#target')
+        .map((finding) => ({ rule: finding.rule, status: finding.status, message: finding.message }));
+    expect(run(3)).toEqual([expect.objectContaining({ rule: 'focus-indicator/low-contrast', status: 'fail' })]);
+    const capped = run(2);
+    expect(capped).toEqual([expect.objectContaining({ rule: 'focus-indicator/low-contrast', status: 'likely' })]);
+    expect(capped[0]!.message).toContain('only the 2 largest of 3 changed regions were measured');
+    expect(capped[0]!.message).not.toContain('no part of it reaches');
+  });
+  it('explains a forced state by the reason the walk did not reach the element', () => {
+    const message = (stoppedBy: 'cycle' | 'limit' | 'opaque-frame'): string => {
+      const snapshot = snapshotWith({ reachedBy: 'forced' }, plain, plain);
+      snapshot.focus!.stoppedBy = stoppedBy;
+      return runChecks(snapshot, config).find((finding) => finding.selector === '#target')!.message;
+    };
+    expect(message('cycle')).toContain('completed without reaching');
+    expect(message('limit')).toContain('stopped at a configured limit');
+    expect(message('opaque-frame')).toContain('could not get past a cross-origin iframe');
+    for (const reason of ['cycle', 'limit', 'opaque-frame'] as const) {
+      expect(message(reason)).not.toContain('not in the Tab order');
+    }
   });
   it('does not measure inside a cross-origin frame', () => {
     expect(verdicts({ opaqueFrame: true, crops: null }, plain, plain)).toEqual([

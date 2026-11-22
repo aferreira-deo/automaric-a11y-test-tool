@@ -1,0 +1,7 @@
+{
+  "description": "An !important transition beats the stabilising style sheet, so the capture is taken mid-transition and shows nothing yet. Flagged as unstabilised and never a fail.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#slow", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change", "flags": ["unstabilised"] }
+  ]
+}

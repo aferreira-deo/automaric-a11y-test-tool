@@ -1,0 +1,7 @@
+{
+  "description": "A focusable region larger than the viewport has an outline, but every edge of it is off screen. No change can be seen, which is not evidence that there is none.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#big", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" }
+  ]
+}

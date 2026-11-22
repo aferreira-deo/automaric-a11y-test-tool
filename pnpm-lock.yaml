@@ -184,6 +184,9 @@ importers:
       '@a11y-vision/playwright':
         specifier: workspace:*
         version: link:packages/playwright
+      '@a11y-vision/reporters':
+        specifier: workspace:*
+        version: link:packages/reporters
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.15.0)

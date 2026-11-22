@@ -76,3 +76,49 @@ describe('toHtmlReport', () => {
     expect(html.toLowerCase()).not.toMatch(/passes wcag|wcag compliant|conforms to wcag/);
   });
 });
+
+describe('toHtmlReport with hostile values', () => {
+  const payload = '<img src=x onerror=alert(1)>';
+  const attribute = 'x" onerror="alert(1)';
+  // A report can be built from JSON that this version of the collector did not write.
+  const hostile = JSON.parse(JSON.stringify(result)) as ScanResult;
+  const loose = hostile as unknown as {
+    timestamp: unknown;
+    tool: { name: unknown; version: unknown };
+    environment: { viewport: unknown; devicePixelRatio: unknown; colorScheme: unknown };
+    findings: {
+      box: unknown;
+      wcag: unknown;
+      evidence: { ratios: Record<string, unknown>; colors: Record<string, unknown>; flags: unknown[]; crops: unknown[] };
+    }[];
+  };
+  loose.timestamp = payload;
+  loose.tool = { name: payload, version: payload };
+  loose.environment.viewport = { width: payload, height: { toString: () => payload } };
+  loose.environment.devicePixelRatio = payload;
+  loose.environment.colorScheme = payload;
+  loose.findings[0]!.box = { x: payload, y: payload, width: payload, height: payload };
+  loose.findings[0]!.wcag = { sc: payload, level: payload };
+  loose.findings[0]!.evidence.ratios = { [payload]: payload };
+  loose.findings[0]!.evidence.colors = { [payload]: attribute };
+  loose.findings[0]!.evidence.flags = [payload];
+  loose.findings[0]!.evidence.crops = [`${attribute}-focused.png`];
+
+  it('escapes every interpolated value', () => {
+    const html = toHtmlReport(hostile, { [`${attribute}-focused.png`]: Uint8Array.of(1) });
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('" onerror="');
+    expect(html).toContain('Viewport unknown by unknown CSS px');
+  });
+  it('does not throw on a missing environment, a broken box or an unknown status', () => {
+    const broken = JSON.parse(JSON.stringify(result)) as ScanResult;
+    const parts = broken as unknown as { environment: unknown; findings: { status: unknown; box: unknown; evidence: unknown }[] };
+    parts.environment = undefined;
+    parts.findings[0]!.status = payload;
+    parts.findings[0]!.box = { x: null };
+    parts.findings[0]!.evidence = undefined;
+    const html = toHtmlReport(broken);
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('Viewport unknown by unknown CSS px');
+  });
+});

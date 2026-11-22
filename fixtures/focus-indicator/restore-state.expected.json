@@ -1,0 +1,13 @@
+{
+  "description": "Scroll containers, a same-origin iframe and a long cross-origin iframe. Used by e2e/collector.spec.ts to check that focus, scroll positions and attributes are put back after a scan.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#inner", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#deep", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#field", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#in-frame", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured", "frame": "#frame" },
+    { "selector": "#opaque", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/frame-not-measured" },
+    { "selector": "#last", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "html", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/walk", "flags": ["cycle"] }
+  ]
+}
