@@ -52,6 +52,7 @@ function evaluateStop(
   if (stop.reachedBy === 'forced') flags.push('forced');
   if (stop.authorModified) flags.push('authorModified');
   if (stop.unstabilised) flags.push('unstabilised');
+  if (stop.possiblyCovered) flags.push('possiblyCovered');
 
   const emit = (
     rule: string,
@@ -137,6 +138,8 @@ function evaluateStop(
       const why = {
         'no-box': 'The focused element has no box',
         'outside-viewport': 'The focused element could not be brought into the viewport',
+        'transformed-frame':
+          'The focused element is inside an iframe that is scaled, rotated or zoomed, where its position on screen cannot be worked out reliably',
         obscured:
           'The element was not entirely covered when it received focus, but once scrolled to the centre of the viewport for capture it was entirely under opaque fixed or sticky content',
       }[stop.notCaptured ?? 'outside-viewport'];
@@ -193,6 +196,11 @@ function evaluateStop(
     }
     if (stop.unstabilised) {
       unseen.push('transitions and animations could not be switched off on it, so a change may not have started yet');
+    }
+    if (stop.possiblyCovered) {
+      unseen.push(
+        'other content lay over the element while it was captured, or that could not be ruled out (content of a parent page over its iframe, a layer that lets pointer events through, a pseudo-element of an ancestor), and may hide an indicator',
+      );
     }
 
     if (stop.textEntry) {
@@ -356,6 +364,11 @@ function evaluateStop(
     doubts.push('transitions and animations could not be switched off on it, so the capture may show an intermediate state');
   }
   if (coverUnproven && stop.coveredAtCapture) doubts.push('it was measured through the content that covers the element');
+  if (stop.possiblyCovered) {
+    doubts.push(
+      'other content lay over the element while it was captured, or that could not be ruled out (content of a parent page over its iframe, a layer that lets pointer events through, a pseudo-element of an ancestor), so the colours measured may not be those of the indicator',
+    );
+  }
   const capped = components.length > config.maxComponents;
   if (capped) {
     doubts.push(

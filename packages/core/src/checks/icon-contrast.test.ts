@@ -118,6 +118,45 @@ describe('icon-contrast: icons', () => {
     expect(finding.message).toContain('measurement error');
   });
 
+  it.each([
+    ['logo', 'maybeLogo', 'names it a logo'],
+    ['home-link', 'homeLink', 'home link of the site'],
+    ['plain-shape', 'plainShape', 'a single shape drawn with CSS'],
+    ['visible-label', 'visibleLabel', 'visible text outside the control is its label'],
+    ['duplicate-link', 'duplicateLink', 'the text link next to it'],
+    ['inactive', 'maybeInactive', 'inactive'],
+  ] as const)('is likely, not fail, with the hint %s, and says why', (hint, flag, reason) => {
+    const finding = evaluate(iconCandidate({ hints: [hint] }), button('#c0c0c0'));
+    expect(finding).toMatchObject({ rule: 'icon-contrast/icon-low-contrast', status: 'likely' });
+    expect(finding.evidence.flags).toContain(flag);
+    expect(finding.message).toContain(reason);
+    // A hint changes nothing for an icon that measures well.
+    expect(evaluate(iconCandidate({ hints: [hint] }), button('#1a1a1a'))).toMatchObject({ rule: 'icon-contrast/icon-measured', status: 'info' });
+  });
+
+  it('does not say that a control labelled by visible text has no visible text', () => {
+    expect(evaluate(iconCandidate(), button('#c0c0c0')).message).toContain('the control has no visible text.');
+    for (const hint of ['visible-label', 'duplicate-link'] as const) {
+      const { message } = evaluate(iconCandidate({ hints: [hint] }), button('#c0c0c0'));
+      expect(message).not.toContain('has no visible text');
+      expect(message).toContain('contains no visible text of its own');
+    }
+    expect(evaluate(iconCandidate({ hints: ['home-link'] }), button('#c0c0c0')).evidence.flags).toContain('maybeLogo');
+  });
+
+  it('measures a capture at the scale the capture says it has', () => {
+    // The same control captured at 1x: boxes map to half the pixels.
+    const image = createImage(CLIP.width, CLIP.height, hex('#ffffff'));
+    const at1 = (x: number, y: number, width: number, height: number) => ({ x: x - CLIP.x, y: y - CLIP.y, width, height });
+    fillRect(image, at1(BOX.x, BOX.y, BOX.width, BOX.height), hex('#595959'));
+    fillRect(image, at1(ROOM.x, ROOM.y, ROOM.width, ROOM.height), hex('#ffffff'));
+    for (const y of [221, 228, 235]) fillRect(image, at1(121, y, 18, 3), hex('#c0c0c0'));
+    const snapshot = snapshotWith([iconCandidate()], null);
+    snapshot.screenshots.clips[CROP] = { box: CLIP, scale: 1, png: encodePng(image) };
+    const finding = runChecks(snapshot, config).find((f) => f.selector === '#target');
+    expect(finding).toMatchObject({ rule: 'icon-contrast/icon-low-contrast', evidence: { colors: { icon: '#c0c0c0', background: '#ffffff' } } });
+  });
+
   it('records an icon at 3:1 or more as info', () => {
     expect(evaluate(iconCandidate(), button('#949494'))).toMatchObject({ rule: 'icon-contrast/icon-measured', status: 'info' });
     expect(evaluate(iconCandidate(), button('#ffffff', '#1a1a1a'))).toMatchObject({
@@ -245,9 +284,24 @@ describe('icon-contrast: disabled and not captured', () => {
     }
   });
 
-  it.each(['no-box', 'outside-viewport', 'covered'] as const)('records a control that was not captured (%s) as info', (reason) => {
-    const finding = evaluate(iconCandidate({ crop: null, notCaptured: reason }), null);
-    expect(finding).toMatchObject({ rule: 'icon-contrast/not-measured', status: 'info', box: BOX, evidence: { crops: [] } });
+  it.each(['no-box', 'outside-viewport', 'covered', 'cover-unknown', 'transformed-frame'] as const)(
+    'records a control that was not captured (%s) as info, with the reason as a flag',
+    (reason) => {
+      const finding = evaluate(iconCandidate({ crop: null, notCaptured: reason }), null);
+      expect(finding).toMatchObject({ rule: 'icon-contrast/not-measured', status: 'info', box: BOX, evidence: { crops: [] } });
+      expect(finding.evidence.flags).toContain(reason);
+    },
+  );
+
+  it('does not call a control that left the page a browser default, and reports no box for it', () => {
+    for (const candidate of [
+      boundaryCandidate({ crop: null, notCaptured: 'detached' }, { authorModified: false }),
+      iconCandidate({ crop: null, notCaptured: 'detached' }),
+    ]) {
+      const finding = evaluate(candidate, null);
+      expect(finding).toMatchObject({ rule: 'icon-contrast/not-measured', status: 'info', box: null });
+      expect(finding.message).toContain('removed from the page');
+    }
   });
 
   it('reports no box for a control that kept moving', () => {

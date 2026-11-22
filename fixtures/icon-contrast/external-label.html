@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: external-label</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .pair { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+      button, a.i { padding: 8px; border: 0; background: none; display: inline-flex; }
+      svg { display: block; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <!-- Pale icons (2:1) on controls that contain no text but have visible text next to them as their label. -->
+    <div class="pair"><button id="labelledby" aria-labelledby="delete-label"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></button><span id="delete-label">Delete draft</span></div>
+    <div class="pair"><button id="label-for"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></button><label for="label-for">Archive</label></div>
+    <!-- A decorative copy of the text link next to it, taken out of the accessibility tree and the tab order. -->
+    <div class="pair"><a id="duplicate" class="i" href="settings.html" aria-hidden="true" tabindex="-1"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></a><a href="settings.html">Settings</a></div>
+
+    <!-- No visible label: these fail. -->
+    <div class="pair"><button id="labelledby-hidden" aria-labelledby="hidden-label"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></button><span id="hidden-label" class="visually-hidden">Remove</span></div>
+    <div class="pair"><a id="other-target" class="i" href="profile.html" aria-hidden="true" tabindex="-1"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></a><a href="settings.html">Settings</a></div>
+    <div class="pair"><a id="exposed-twin" class="i" href="help.html" aria-label="Help"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path fill="#b5b5b5" d="M3 3h14v14H3z" /></svg></a><a href="help.html">Help</a></div>
+  </body>
+</html>

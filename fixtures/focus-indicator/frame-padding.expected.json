@@ -1,0 +1,10 @@
+{
+  "description": "Controls inside a padded iframe are captured where they are (the frame content starts after border and padding). Inside a scaled iframe nothing is captured.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    {"selector": "#good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured", "frame": "#padded"},
+    {"selector": "#low", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "frame": "#padded"},
+    {"selector": "#good", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/not-captured", "frame": "#scaled"},
+    {"selector": "#low", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/not-captured", "frame": "#scaled"}
+  ]
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: frame-padding child</title>
+    <style>
+      body { margin: 0; background: #fff; }
+      /* A pale decoration 40px up and left of the icon: where a capture lands that forgets the frame padding. */
+      .deco { position: absolute; left: 20px; top: 20px; }
+      button { position: absolute; left: 52px; top: 52px; padding: 8px; border: 0; background: none; }
+      input { position: absolute; left: 130px; top: 60px; width: 120px; padding: 6px 8px; border: 1px solid #595959; }
+      img { display: block; }
+    </style>
+  </head>
+  <body>
+    <img class="deco" alt="" width="32" height="32" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect x='3' y='3' width='26' height='26' fill='%23dcdcdc'/%3E%3C/svg%3E" />
+    <button id="stop" aria-label="Stop"><img alt="" width="32" height="32" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect x='3' y='3' width='26' height='26' fill='%23000000'/%3E%3C/svg%3E" /></button>
+    <input id="field" type="text" aria-label="Name" />
+  </body>
+</html>

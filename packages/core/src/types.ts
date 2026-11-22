@@ -114,8 +114,18 @@ export interface FocusStop {
   geometryChanged: boolean;
   /** Crop ids of the two captures of the same region; null when the element could not be captured. */
   crops: { focused: string; unfocused: string } | null;
-  /** Why `crops` is null. */
-  notCaptured?: 'no-box' | 'obscured' | 'outside-viewport';
+  /**
+   * Why `crops` is null. `transformed-frame`: the element is inside an iframe that is scaled,
+   * rotated or zoomed, where page coordinates cannot be worked out from the frame's box.
+   */
+  notCaptured?: 'no-box' | 'obscured' | 'outside-viewport' | 'transformed-frame';
+  /**
+   * While it was captured, something the 2.4.11 sampling cannot see lay over the element, or
+   * that could not be ruled out: content of a parent document over the iframe it is in, a layer
+   * with `pointer-events: none`, a pseudo-element of an ancestor. The captures may show that
+   * content, so no `fail` is drawn from them.
+   */
+  possiblyCovered?: boolean;
   /**
    * Evaluated only when the two crops are identical: bounding box of what changed elsewhere
    * in the viewport, or null when nothing did. Undefined when not evaluated.
@@ -145,6 +155,8 @@ export type IconSource =
   | 'mask-image'
   | 'pseudo-element'
   | 'css-shape';
+
+export type IconHint = 'inactive' | 'logo' | 'home-link' | 'plain-shape' | 'visible-label' | 'duplicate-link';
 
 export type BoundaryControl = 'text-field' | 'select' | 'checkbox' | 'radio' | 'switch';
 
@@ -190,15 +202,26 @@ export interface IconCandidate {
     boxes: Box[];
   };
   /**
-   * Signs in styles and markup that the control may be exempt although nothing says so
-   * programmatically. `inactive`: no pointer events, a not-allowed cursor, or a class naming it
-   * disabled. `logo`: a class, id, name or file name says logo. Either keeps a finding from being a `fail`.
+   * Signs in styles and markup that the control may be exempt, or may not be identified by its
+   * graphic, although nothing says so programmatically. Any of them keeps a finding from being a `fail`.
+   * - `inactive`: no pointer events, a not-allowed cursor, or a class naming it disabled.
+   * - `logo`: a class, id, name or file name says logo.
+   * - `home-link`: a link to the root of the site or with `rel="home"`, or a link in the page
+   *   header named "home" or after the site: where a logotype usually is.
+   * - `plain-shape`: the graphic is a single element drawn with CSS (a colour swatch).
+   * - `visible-label`: visible text outside the control is its label (`aria-labelledby`, `label`).
+   * - `duplicate-link`: a link hidden from assistive technology (`aria-hidden`, `tabindex="-1"`)
+   *   next to a text link with the same target.
    */
-  hints?: ('inactive' | 'logo')[];
+  hints?: IconHint[];
   /** Crop id of the capture; null when the control could not be captured. */
   crop: string | null;
-  /** Why `crop` is null. */
-  notCaptured?: 'no-box' | 'outside-viewport' | 'covered' | 'moving';
+  /**
+   * Why `crop` is null. `cover-unknown`: the hit test that proves nothing lies in front of the
+   * control gave no answer. `detached`: the control was removed from the page during the scan.
+   * `transformed-frame`: see FocusStop.notCaptured.
+   */
+  notCaptured?: 'no-box' | 'outside-viewport' | 'covered' | 'cover-unknown' | 'moving' | 'detached' | 'transformed-frame';
   /** Once scrolled for capture, the measured region still reached beyond the viewport. */
   clippedByViewport?: boolean;
   /** See FocusStop.unstabilised. */
@@ -291,6 +314,12 @@ export interface FocusConfig {
   maxForced: number;
   /** Tab presses spent inside one cross-origin iframe before the walk moves focus past it. */
   maxTabsInOpaqueFrame: number;
+  /**
+   * A capture may differ by this many pixels, per side, from its clip size times the scale:
+   * Chrome rounds the edges of a clip to device pixels. Beyond that, the scale is worked out from
+   * the capture itself.
+   */
+  captureSizeTolerancePx: number;
   /** Animation frames to wait after each state change before capturing. */
   settleFrames: number;
   /** Upper bound for that wait, for pages where animation frames do not fire. */
@@ -330,6 +359,11 @@ export interface FocusConfig {
   /** Points per side of the grid sampled for 2.4.11. */
   obscuredGrid: number;
   /**
+   * Points per side of the grid hit-tested from the top document before the captures, to find
+   * content over the element that the 2.4.11 sampling cannot see (see FocusStop.possiblyCovered).
+   */
+  coverGrid: number;
+  /**
    * Alpha of a background colour, and cumulated opacity of an element and its ancestors, from
    * which fixed or sticky content counts as opaque. Only opaque content can `fail` 2.4.11.
    */
@@ -368,6 +402,11 @@ export interface IconConfig {
    * (case-insensitive) may be a logotype, which is exempt.
    */
   logoHintPattern: string;
+  /**
+   * The accessible name of a link in the page header (`header`, `role="banner"`) matching this
+   * pattern (case-insensitive) marks it as the home link, where a logotype usually is.
+   */
+  homeLinkNamePattern: string;
   /** Text clipped to less than this on either side is not visible text. */
   minVisibleTextCssPx: number;
   /** Wrappers of a field, up to this many levels, whose edges may be its boundary. */
@@ -376,6 +415,24 @@ export interface IconConfig {
   boundaryWrapperSlackCssPx: number;
   /** Points per side of the grid hit-tested to make sure nothing else covers the graphic. */
   coverGrid: number;
+  /** A graphic, or a part of one, smaller than this on either side paints nothing worth measuring; so does text of a smaller font size. */
+  minPaintedSizeCssPx: number;
+  /**
+   * Slack when two boxes are compared for containment or equal size: an element laid over a
+   * field counts as around it within this, and a box is untransformed when its layout size and
+   * its size on screen agree within this.
+   */
+  boxToleranceCssPx: number;
+  /** How far inside each side of a boundary control the point lies that is hit-tested for content in front of it. */
+  boundaryProbeInsetCssPx: number;
+  /** A control whose box moved by more than this between measuring it and capturing it is captured again. Sub-pixel differences are rounding. */
+  sameBoxToleranceCssPx: number;
+  /**
+   * CSS properties (pattern on the property name) through which an author changes what the
+   * boundary of a native control looks like. A native control with none of them declared by an
+   * author rule has the browser default look, which is exempt.
+   */
+  boundaryAuthorPropertyPattern: string;
 
   /** Colours closer than this (CIEDE2000) are the same colour. */
   clusterDeltaE: number;
@@ -412,6 +469,10 @@ export interface IconConfig {
    * between two other colours (a gradient, a lighter tone of the same hue). Anti-aliasing never does.
    */
   flatBlockCssPx: number;
+  /** Fewest interior pixels (see `minInteriorShare`) for a colour to be trusted, whatever its share. */
+  minInteriorPixels: number;
+  /** Smallest side of the solid square of `flatBlockCssPx`, in device pixels, whatever the scale: anti-aliasing can fill a smaller one. */
+  flatBlockMinPx: number;
   /** More parts than this, and the graphic is a picture rather than an icon. */
   maxParts: number;
   /** Share of the ink that belongs to no part and no blend above which the graphic is a picture. */

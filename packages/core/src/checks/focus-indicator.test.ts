@@ -205,6 +205,25 @@ describe('focus-indicator scoring', () => {
       { rule: 'no-visible-change', status: 'likely', sc: '2.4.7' },
     ]);
   });
+  it('never fails what was captured under content the 2.4.11 sampling cannot see', () => {
+    expect(verdicts({ possiblyCovered: true, outsideChange: null }, plain, plain)).toEqual([
+      { rule: 'no-visible-change', status: 'likely', sc: '2.4.7' },
+    ]);
+    const low = page('#ffffff', ring('#c8c8c8'));
+    expect(verdicts({ possiblyCovered: true }, low, plain)).toEqual([{ rule: 'low-contrast', status: 'likely', sc: '1.4.11' }]);
+    const finding = runChecks(snapshotWith({ possiblyCovered: true }, low, plain), config).find((f) => f.selector === '#target');
+    expect(finding!.evidence.flags).toContain('possiblyCovered');
+    expect(finding!.message).toContain('pseudo-element of an ancestor');
+    // A good indicator is still a good indicator.
+    expect(verdicts({ possiblyCovered: true }, page('#ffffff', ring('#005fcc')), plain)).toEqual([
+      { rule: 'measured', status: 'info', sc: '1.4.11' },
+    ]);
+  });
+  it('does not capture inside a transformed iframe', () => {
+    expect(verdicts({ crops: null, notCaptured: 'transformed-frame' }, plain, plain)).toEqual([
+      { rule: 'not-captured', status: 'info', sc: undefined },
+    ]);
+  });
   it('never fails a capture taken without the stabilising styles', () => {
     expect(verdicts({ unstabilised: true, outsideChange: null }, plain, plain)).toEqual([
       { rule: 'no-visible-change', status: 'likely', sc: '2.4.7' },

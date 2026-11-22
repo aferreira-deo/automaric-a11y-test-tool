@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: unseen-covers</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg, img { display: block; }
+      .card { position: relative; display: inline-block; padding: 20px; border: 1px solid #595959; margin: 0 16px 0 0; vertical-align: top; }
+      /* A layer that lets clicks through: a fade, a watermark, a ribbon. elementFromPoint skips it. */
+      .ribbon { position: absolute; inset: 0; background: #f2f2f2; opacity: 0.85; pointer-events: none; }
+      /* A veil painted by a pseudo-element of an ancestor: hit tests answer with the ancestor. */
+      .busy::after { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.8); }
+      /* The same two patterns painting nothing: a stretched-link area, a toast container, a closed dialog. */
+      .stretched::after { content: ""; position: absolute; inset: 0; }
+      .stage { position: relative; }
+      .toasts { position: absolute; inset: 0; pointer-events: none; }
+      .closed-dialog { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+      input { font: inherit; padding: 6px 8px; border: 1px solid #595959; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <span class="card"><button id="under-ribbon" class="icon" style="border: 0" aria-label="Share"><img alt="" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect x='3' y='3' width='18' height='18' fill='%23333333'/%3E%3C/svg%3E" /></button><span class="ribbon"></span></span>
+      <span class="card busy"><button id="under-veil" class="icon" style="border: 0" aria-label="Save"><img alt="" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect x='3' y='3' width='18' height='18' fill='%23333333'/%3E%3C/svg%3E" /></button></span>
+      <span class="card"><input id="field-under-ribbon" type="text" aria-label="Name" /><span class="ribbon"></span></span>
+    </p>
+    <div class="row stage">
+      <!-- Under layers that paint nothing, controls are measured as usual... -->
+      <span class="card stretched"><button id="in-stretched" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button></span>
+      <button id="plain-low" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="plain-good" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <!-- ...and a cover under such a layer is still a cover. -->
+      <span class="card"><button id="under-both" class="icon" style="border: 0" aria-label="Share"><img alt="" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect x='3' y='3' width='18' height='18' fill='%23333333'/%3E%3C/svg%3E" /></button><span class="ribbon"></span></span>
+      <div class="toasts"><div></div></div>
+      <div class="closed-dialog">Closed</div>
+    </div>
+  </body>
+</html>

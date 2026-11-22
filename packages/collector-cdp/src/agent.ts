@@ -12,6 +12,7 @@ export interface AgentOptions {
   fontsTimeoutMs: number;
   clipMarginCssPx: number;
   obscuredGrid: number;
+  coverGrid: number;
   opaqueCoverMinAlpha: number;
   invisibleCoverMaxOpacity: number;
   icon: AgentIconOptions;
@@ -25,6 +26,10 @@ export interface AgentIconOptions {
   iconFontFamilyPattern: string;
   inactiveHintPattern: string;
   logoHintPattern: string;
+  homeLinkNamePattern: string;
+  minPaintedSizeCssPx: number;
+  boxToleranceCssPx: number;
+  boundaryProbeInsetCssPx: number;
   minVisibleTextCssPx: number;
   boundaryWrapperLevels: number;
   boundaryWrapperSlackCssPx: number;
@@ -56,8 +61,17 @@ export interface AgentIconItem {
   /** Boundary controls: an input, textarea or select, whose default look belongs to the browser. */
   native: boolean;
   /** Signs in styles and markup that the control may be exempt; see IconCandidate.hints. */
-  hints: ('inactive' | 'logo')[];
+  hints: AgentIconHint[];
 }
+
+export type AgentIconHint = 'inactive' | 'logo' | 'home-link' | 'plain-shape' | 'visible-label' | 'duplicate-link';
+
+/**
+ * What a hit test found at a point, in relation to an element. `own`: the element, something in
+ * it, or what lies behind it. `cover`: other content, in front of it. `through`: other content
+ * that paints nothing there (a transparent box, opacity 0), so what is under it shows.
+ */
+export type AgentHitKind = 'own' | 'through' | 'cover';
 
 export interface AgentIconSurvey {
   total: number;
@@ -76,7 +90,9 @@ export interface AgentIconPrepared {
   /** Boundary controls: the control's box, then its tight wrappers, innermost first. */
   boxes: AgentRect[];
   clip: AgentRect | null;
-  reason: 'no-box' | 'outside-viewport' | 'covered' | null;
+  reason: 'no-box' | 'outside-viewport' | 'covered' | 'detached' | 'transformed-frame' | null;
+  /** Points, in page coordinates, where the caller must make sure with a real hit test that nothing covers the control. */
+  probes: [number, number][];
   clipped: boolean;
   stable: boolean;
 }
@@ -112,7 +128,11 @@ export interface AgentPrepared {
   box: AgentRect | null;
   /** Region to capture, page coordinates, snapped to whole CSS pixels. */
   clip: AgentRect | null;
-  reason: 'no-box' | 'outside-viewport' | 'obscured' | null;
+  reason: 'no-box' | 'outside-viewport' | 'obscured' | 'transformed-frame' | null;
+  /** Points over the element, in page coordinates, for the caller to hit-test for covers this code cannot see. */
+  probes: [number, number][];
+  /** A parent document has other content over the iframe the element is in, at one of those points. */
+  frameCovered: boolean;
   /** Entirely under fixed or sticky content that is not demonstrably opaque; captured all the same. */
   covered: boolean;
   /** The border box reaches beyond the viewport (of the page or of its own frame) on at least one side. */
@@ -142,6 +162,9 @@ export interface Agent {
   unreached(max: number): { total: number; items: AgentElementInfo[] };
   iconSurvey(max: number): AgentIconSurvey;
   prepareIcon(key: number): Promise<AgentIconPrepared>;
+  hitKind(key: number, hit: unknown, mode: 'icon' | 'focus'): AgentHitKind;
+  coveredBelow(key: number, x: number, y: number, mode: 'icon' | 'focus'): boolean;
+  connected(key: number): boolean;
   element(key: number): Element;
   cleanup(): void;
 }
@@ -362,17 +385,56 @@ export function agentFactory(options: AgentOptions): Agent {
     return parts.join(JOIN);
   }
 
+  /**
+   * Offset from the client coordinates of the element's frame to those of the top-level viewport.
+   * The content of a frame starts at its content box: after the border and the padding.
+   */
+  function frameOffset(element: Element): { x: number; y: number } {
+    let x = 0;
+    let y = 0;
+    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
+      const origin = contentOrigin(frame);
+      x += origin.x;
+      y += origin.y;
+    }
+    return { x, y };
+  }
+
+  /** Where the content of a frame starts, in the client coordinates of the document the frame element is in. */
+  function contentOrigin(frame: Element): { x: number; y: number } {
+    const outer = frame.getBoundingClientRect();
+    const style = frame.ownerDocument.defaultView?.getComputedStyle(frame);
+    return {
+      x: outer.left + frame.clientLeft + (style ? parseFloat(style.paddingLeft) || 0 : 0),
+      y: outer.top + frame.clientTop + (style ? parseFloat(style.paddingTop) || 0 : 0),
+    };
+  }
+
+  /**
+   * True when a frame the element is nested in, or anything around such a frame, is scaled,
+   * rotated, skewed or zoomed. The bounding box of a frame then says where the frame is, but not
+   * where a point inside it lands, and its content is not at the capture scale either: nothing in
+   * such a frame is measured. A plain translation moves the box and everything in it alike.
+   */
+  function inTransformedFrame(element: Element): boolean {
+    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
+      for (let current: Node | null = frame; current; current = composedParent(current)) {
+        if (current.nodeType !== 1) continue;
+        const style = (current as Element).ownerDocument.defaultView?.getComputedStyle(current as Element);
+        if (!style) return true;
+        if (style.rotate !== 'none' || style.scale !== 'none') return true;
+        if (style.zoom !== undefined && style.zoom !== '' && parseFloat(style.zoom) !== 1) return true;
+        if (style.transform !== 'none' && !/^matrix\(1, 0, 0, 1, [^,]+, [^,]+\)$/.test(style.transform)) return true;
+      }
+    }
+    return false;
+  }
+
   /** Border box in the coordinates of the top-level viewport. */
   function viewportRect(element: Element): AgentRect {
     const rect = element.getBoundingClientRect();
-    let x = rect.left;
-    let y = rect.top;
-    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
-      const outer = frame.getBoundingClientRect();
-      x += outer.left + frame.clientLeft;
-      y += outer.top + frame.clientTop;
-    }
-    return { x, y, width: rect.width, height: rect.height };
+    const offset = frameOffset(element);
+    return { x: rect.left + offset.x, y: rect.top + offset.y, width: rect.width, height: rect.height };
   }
 
   function toPage(rect: AgentRect): AgentRect {
@@ -397,6 +459,189 @@ export function agentFactory(options: AgentOptions): Agent {
       top = inner;
     }
     return top;
+  }
+
+  /**
+   * True when, in a document the element's frame is nested in, something other than that frame
+   * is on top at the point: content of a parent page lying over the frame. `x` and `y` are client
+   * coordinates of the element's own document.
+   */
+  function frameCoveredAt(element: Element, x: number, y: number): boolean {
+    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
+      const origin = contentOrigin(frame);
+      x += origin.x;
+      y += origin.y;
+      if (topElementAt(frame.ownerDocument, x, y) !== frame) return true;
+    }
+    return false;
+  }
+
+  const PAINTS_ITSELF = ['img', 'picture', 'canvas', 'video', 'iframe', 'frame', 'object', 'embed', 'input', 'textarea', 'select', 'button', 'hr', 'meter', 'progress'];
+
+  /**
+   * True when a box that was hit paints nothing over what lies under it: it is invisible
+   * (cumulated opacity), or it is an HTML box without background, border, shadow, backdrop
+   * filter or text of its own. A transparent container over the page (for toasts, for a closed
+   * dialog) is hit by a hit test that ignores `pointer-events`, and hides nothing.
+   */
+  function paintsNothing(element: Element, pseudo: string | null): boolean {
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(element, pseudo);
+    // A pseudo-element that is not generated.
+    if (pseudo && (style.content === 'none' || style.content === 'normal' || style.display === 'none')) return true;
+    let opacity = pseudo ? parseFloat(style.opacity) : 1;
+    for (let current: Node | null = element; current; current = composedParent(current)) {
+      if (current.nodeType !== 1) continue;
+      const own = parseFloat(view.getComputedStyle(current as Element).opacity);
+      opacity *= Number.isFinite(own) ? own : 0;
+    }
+    if (opacity <= options.invisibleCoverMaxOpacity) return true;
+    if (alphaOf(style.backgroundColor) > 0 || style.backgroundImage !== 'none' || hasBorder(style)) return false;
+    if (style.boxShadow !== 'none' || style.backdropFilter !== 'none' || style.maskImage !== 'none') return false;
+    if (pseudo) return /^(""|'')$/.test(style.content);
+    if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || PAINTS_ITSELF.includes(element.localName)) return false;
+    for (const child of element.childNodes) {
+      if (child.nodeType === 3 && (child as Text).data.trim() !== '') return false;
+    }
+    return true;
+  }
+
+  /** Icon controls: the element inside which other content may lie over the measured area, set by prepareIcon. */
+  const iconOuter = new Map<number, Element>();
+
+  /**
+   * Judges what Chrome's own hit test found at a point over the element held under `key`. That
+   * hit test starts in the top document and does not skip `pointer-events: none`, and it names
+   * pseudo-elements (as a CSSPseudoElement object), so it sees the three kinds of cover that
+   * `elementFromPoint` in the element's own document cannot: content of a parent page over an
+   * iframe, a layer that lets pointer events through, and a veil painted by a pseudo-element of
+   * an ancestor.
+   *
+   * `icon`: anything in front that is not part of the control is a cover. `focus`: only those
+   * three kinds are, because the 2.4.11 sampling already deals with what it can see, and a
+   * neighbour laid over a control is often what shows its focus (a custom checkbox).
+   */
+  function hitKind(key: number, hit: unknown, mode: 'icon' | 'focus'): AgentHitKind {
+    const element = get(key);
+    let node: Element | null = null;
+    let pseudo: string | null = null;
+    if (hit && typeof hit === 'object' && (hit as Node).nodeType === 1) node = hit as Element;
+    else if (hit && typeof hit === 'object' && 'element' in hit && 'type' in hit) {
+      node = (hit as { element: Element }).element;
+      pseudo = String((hit as { type: unknown }).type);
+    }
+    if (!node || node.nodeType !== 1) return 'cover';
+    const target = node;
+    const blocked = (): AgentHitKind => (paintsNothing(target, pseudo) ? 'through' : 'cover');
+
+    if (mode === 'icon') {
+      const outer = iconOuter.get(key) ?? element;
+      if (composedContains(outer, node)) return 'own';
+      // An ancestor itself lies behind the control; its pseudo-element can lie in front.
+      if (!pseudo && composedContains(node, element)) return 'own';
+      return blocked();
+    }
+
+    // The content of a frame that is, or is inside, the element belongs to it.
+    let inner: Element | null = node;
+    while (inner && inner.ownerDocument !== element.ownerDocument) inner = frameElementOf(inner);
+    if (inner && composedContains(element, inner)) return 'own';
+    if (node.ownerDocument !== element.ownerDocument) return blocked();
+    if (composedContains(node, element)) return pseudo ? blocked() : 'own';
+    const labels = (element as HTMLInputElement).labels;
+    if (labels) {
+      for (const label of labels) if (composedContains(label, node)) return 'own';
+    }
+    const style = node.ownerDocument.defaultView?.getComputedStyle(node, pseudo);
+    return style?.pointerEvents === 'none' ? blocked() : 'own';
+  }
+
+  const FORCE_POINTER_EVENTS_CSS = '*,*::before,*::after{pointer-events:auto!important}';
+
+  /**
+   * Runs `read` while everything in `root`, and in the trees it is nested in, takes pointer
+   * events, so that `elementsFromPoint` lists layers with `pointer-events: none` too. The style
+   * sheet is adopted and dropped within one task: nothing is painted with it, and no event tells
+   * the page. An author `!important` rule can still outweigh it; the caller starts from Chrome's
+   * own hit test, which no rule escapes.
+   */
+  function withPointerEvents<T>(root: Document | ShadowRoot, read: () => T): T {
+    const adopted: { owner: Document | ShadowRoot; sheet: CSSStyleSheet }[] = [];
+    try {
+      for (let current: Node | null = root; current; ) {
+        const owner = current as Document | ShadowRoot;
+        const doc = current.nodeType === 9 ? (current as Document) : current.ownerDocument;
+        const view = doc?.defaultView as (Window & { CSSStyleSheet: typeof CSSStyleSheet }) | null | undefined;
+        if (!view) throw new Error('No window');
+        const sheet = new view.CSSStyleSheet();
+        sheet.replaceSync(FORCE_POINTER_EVENTS_CSS);
+        owner.adoptedStyleSheets = [...owner.adoptedStyleSheets, sheet];
+        adopted.push({ owner, sheet });
+        const host = hostOf(current);
+        current = host ? host.getRootNode() : null;
+      }
+      return read();
+    } finally {
+      for (const { owner, sheet } of adopted) {
+        owner.adoptedStyleSheets = owner.adoptedStyleSheets.filter((other) => other !== sheet);
+      }
+    }
+  }
+
+  /**
+   * Called when Chrome's hit test found, on top at a point, something that paints nothing: what
+   * lies under it, in front of the element? Walks the stack of elements at the point, from the
+   * top document down through the frames the element is nested in, until it reaches the element.
+   * True when something in front paints, or when that cannot be told. `x` and `y` are page coordinates.
+   *
+   * `elementsFromPoint` answers with the element for a hit on its pseudo-elements, so an
+   * ancestor listed in front of the element stands for its `::before` or `::after`.
+   */
+  function coveredBelow(key: number, pageX: number, pageY: number, mode: 'icon' | 'focus'): boolean {
+    const element = get(key);
+    const outer = mode === 'icon' ? (iconOuter.get(key) ?? element) : element;
+    const steps: { root: Document | ShadowRoot; pass: Element | null }[] = [
+      { root: element.getRootNode() as Document | ShadowRoot, pass: null },
+    ];
+    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
+      steps.unshift({ root: frame.getRootNode() as Document | ShadowRoot, pass: frame });
+    }
+    const labels = [...((element as HTMLInputElement).labels ?? [])];
+    let x = pageX - window.scrollX;
+    let y = pageY - window.scrollY;
+    try {
+      for (const { root, pass } of steps) {
+        if (!('elementsFromPoint' in root)) return true;
+        const seen = new Set(root.elementsFromPoint(x, y));
+        const stack = withPointerEvents(root, () => root.elementsFromPoint(x, y));
+        let reached = false;
+        for (const entry of stack) {
+          if (pass ? entry === pass : composedContains(outer, entry)) {
+            reached = true;
+            break;
+          }
+          const ancestor = !pass && composedContains(entry, element);
+          if (mode === 'focus' && !pass && !ancestor) {
+            // What takes pointer events in the element's own document is the business of the 2.4.11 sampling.
+            if (seen.has(entry) || labels.some((label) => composedContains(label, entry))) continue;
+          }
+          const noPseudo = paintsNothing(entry, '::before') && paintsNothing(entry, '::after');
+          // An ancestor's own box lies behind the element; a shadow host stands for anything in its tree.
+          if (ancestor ? !noPseudo || entry.shadowRoot !== null : !noPseudo || !paintsNothing(entry, null)) return true;
+        }
+        // The element is not at the point at all: nothing can be said about it there.
+        if (!reached) return mode === 'icon';
+        if (pass) {
+          const origin = contentOrigin(pass);
+          x -= origin.x;
+          y -= origin.y;
+        }
+      }
+    } catch {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -625,6 +870,7 @@ export function agentFactory(options: AgentOptions): Agent {
   const iconFamily = new RegExp(options.icon.iconFontFamilyPattern, 'i');
   const inactiveHint = new RegExp(options.icon.inactiveHintPattern, 'i');
   const logoHint = new RegExp(options.icon.logoHintPattern, 'i');
+  const homeName = new RegExp(options.icon.homeLinkNamePattern, 'i');
 
   interface GraphicScan {
     sources: Set<AgentIconSource>;
@@ -762,7 +1008,7 @@ export function agentFactory(options: AgentOptions): Agent {
     const view = holder?.ownerDocument.defaultView;
     if (!holder || !view || !holder.checkVisibility(VISIBLE)) return null;
     const style = view.getComputedStyle(holder);
-    if (parseFloat(style.fontSize) < 1 || alphaOf(style.color) === 0) return null;
+    if (parseFloat(style.fontSize) < options.icon.minPaintedSizeCssPx || alphaOf(style.color) === 0) return null;
     const range = holder.ownerDocument.createRange();
     range.selectNodeContents(text);
     let box = plainRect(range.getBoundingClientRect());
@@ -799,10 +1045,11 @@ export function agentFactory(options: AgentOptions): Agent {
     };
     const view = control.ownerDocument.defaultView;
     if (!view) return scan;
+    const minSize = options.icon.minPaintedSizeCssPx;
 
     const place = (element: Element): void => {
       const rect = element.getBoundingClientRect();
-      if (element === control || rect.width < 1 || rect.height < 1) scan.controlBox = true;
+      if (element === control || rect.width < minSize || rect.height < minSize) scan.controlBox = true;
       else scan.holders.push(element);
     };
     const add = (source: AgentIconSource, color: string | null): void => {
@@ -840,14 +1087,14 @@ export function agentFactory(options: AgentOptions): Agent {
             parseFloat(style.width) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
           const height =
             parseFloat(style.height) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-          if (width >= 1 && height >= 1) {
+          if (width >= minSize && height >= minSize) {
             place(element);
             add('pseudo-element', null);
           }
         }
         return;
       }
-      if (parseFloat(style.fontSize) < 1 || alphaOf(style.color) === 0) return;
+      if (parseFloat(style.fontSize) < minSize || alphaOf(style.color) === 0) return;
       // Letters and digits are text, unless an icon font turns them into a glyph. A lone symbol is a graphic.
       if (isGlyph(value, style.fontFamily) || !/[\p{L}\p{N}]/u.test(value)) {
         place(element);
@@ -870,7 +1117,7 @@ export function agentFactory(options: AgentOptions): Agent {
         }
         if (name === 'svg') {
           const rect = element.getBoundingClientRect();
-          if (rect.width >= 1 && rect.height >= 1) {
+          if (rect.width >= minSize && rect.height >= minSize) {
             scan.holders.push(element);
             add('svg', svgColor(element));
           }
@@ -911,7 +1158,7 @@ export function agentFactory(options: AgentOptions): Agent {
           (alphaOf(style.backgroundColor) > 0 || hasBorder(style))
         ) {
           const rect = element.getBoundingClientRect();
-          if (rect.width >= 1 && rect.height >= 1) {
+          if (rect.width >= minSize && rect.height >= minSize) {
             scan.holders.push(element);
             add('css-shape', null);
           }
@@ -945,7 +1192,8 @@ export function agentFactory(options: AgentOptions): Agent {
   function paddingRect(element: Element): AgentRect {
     const rect = element.getBoundingClientRect();
     const html = element as HTMLElement;
-    const layoutMatches = Math.abs(html.offsetWidth - rect.width) < 1 && Math.abs(html.offsetHeight - rect.height) < 1;
+    const tolerance = options.icon.boxToleranceCssPx;
+    const layoutMatches = Math.abs(html.offsetWidth - rect.width) < tolerance && Math.abs(html.offsetHeight - rect.height) < tolerance;
     if (!layoutMatches || element.clientWidth <= 0 || element.clientHeight <= 0) return plainRect(rect);
     return {
       x: rect.left + element.clientLeft,
@@ -961,7 +1209,7 @@ export function agentFactory(options: AgentOptions): Agent {
     let box: AgentRect | null = null;
     for (const holder of scan.holders) {
       const rect = plainRect(holder.getBoundingClientRect());
-      if (rect.width < 1 || rect.height < 1) continue;
+      if (rect.width < options.icon.minPaintedSizeCssPx || rect.height < options.icon.minPaintedSizeCssPx) continue;
       box = box ? union(box, rect) : rect;
     }
     return box ?? paddingRect(control);
@@ -982,13 +1230,107 @@ export function agentFactory(options: AgentOptions): Agent {
     return null;
   }
 
+  /** True when the element, or something in it, shows text on screen. */
+  function showsText(element: Element): boolean {
+    if (!element.checkVisibility(VISIBLE)) return false;
+    const walker = element.ownerDocument.createTreeWalker(element, 4);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if ((node as Text).data.trim() !== '' && textRect(node as Text, element)) return true;
+    }
+    return false;
+  }
+
+  /** Elements that `aria-labelledby` names, in the tree the control is in. */
+  function labelledBy(control: Element): Element[] {
+    const root = control.getRootNode() as Document | ShadowRoot;
+    const found: Element[] = [];
+    for (const id of (control.getAttribute('aria-labelledby') ?? '').split(/\s+/)) {
+      const target = id === '' || !('getElementById' in root) ? null : root.getElementById(id);
+      if (target) found.push(target);
+    }
+    return found;
+  }
+
   /**
-   * Signs that a control may be exempt from 1.4.11 although nothing says so programmatically.
+   * Visible text outside the control that is its label: an element named by `aria-labelledby`,
+   * or a `label` element. Such a control shows no text of its own, yet its icon is not the only
+   * thing that identifies it.
+   */
+  function hasVisibleLabel(control: Element): boolean {
+    const labels: Element[] = labelledBy(control);
+    const native = (control as HTMLButtonElement).labels;
+    if (native) labels.push(...native);
+    return labels.some((label) => !composedContains(control, label) && showsText(label));
+  }
+
+  /**
+   * A link taken out of the accessibility tree and the tab order (`aria-hidden="true"`,
+   * `tabindex="-1"`) whose parent also holds a link to the same address that shows text and is
+   * not hidden: a decorative copy of that text link.
+   */
+  function duplicatesTextLink(control: Element): boolean {
+    if (control.localName !== 'a' || control.getAttribute('aria-hidden') !== 'true' || control.getAttribute('tabindex') !== '-1') {
+      return false;
+    }
+    const href = (control as HTMLAnchorElement).href;
+    for (const sibling of control.parentElement?.children ?? []) {
+      if (sibling === control || sibling.localName !== 'a' || (sibling as HTMLAnchorElement).href !== href) continue;
+      if (sibling.closest('[aria-hidden="true"]') === null && showsText(sibling)) return true;
+    }
+    return false;
+  }
+
+  /** What names a control without text: its own naming attributes, and the alternative texts and titles of its graphics. */
+  function nameWords(control: Element, scan: GraphicScan): string[] {
+    const words = [control.getAttribute('aria-label') ?? '', control.getAttribute('title') ?? ''];
+    for (const label of labelledBy(control)) words.push(label.textContent ?? '');
+    for (const holder of scan.holders) {
+      if (!('localName' in holder)) continue;
+      words.push(holder.getAttribute('alt') ?? '', holder.getAttribute('aria-label') ?? '', holder.getAttribute('title') ?? '');
+      for (const title of holder.querySelectorAll('title')) words.push(title.textContent ?? '');
+    }
+    return words.map((word) => word.trim().replace(/\s+/g, ' ')).filter((word) => word !== '');
+  }
+
+  /**
+   * The home link of a site is where its logotype usually is, whatever the markup calls it:
+   * a link with `rel="home"`, a link to the root of the site, or a link in the page header
+   * (`header`, `role="banner"`) whose name matches `homeLinkNamePattern` or contains the name the
+   * site gives itself in `og:site_name` or `application-name`.
+   */
+  function isHomeLink(control: Element, scan: GraphicScan): boolean {
+    if (control.localName !== 'a') return false;
+    const link = control as HTMLAnchorElement;
+    if (link.relList.contains('home')) return true;
+    const doc = control.ownerDocument;
+    try {
+      const target = new URL(link.href);
+      const here = new URL(doc.location.href);
+      if (target.origin === here.origin && target.pathname === '/' && target.search === '' && target.hash === '') return true;
+    } catch {
+      // Not an address that can be compared.
+    }
+    if (!control.closest('header,[role="banner"]')) return false;
+    const names = nameWords(control, scan);
+    if (names.some((name) => homeName.test(name))) return true;
+    const site = (
+      doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content') ??
+      doc.querySelector('meta[name="application-name"]')?.getAttribute('content') ??
+      ''
+    )
+      .trim()
+      .toLowerCase();
+    return site !== '' && names.some((name) => name.toLowerCase().includes(site));
+  }
+
+  /**
+   * Signs that a control may be exempt from 1.4.11, or may not be identified by its graphic,
+   * although nothing says so programmatically; see IconCandidate.hints in core.
    * `inactive`: it takes no pointer events, shows a not-allowed cursor, or it or its parent has a
    * class naming it disabled. `logo`: a class, id, name or file name on it or on its graphic says logo.
    */
-  function hintsOf(control: Element, scan: GraphicScan | null): ('inactive' | 'logo')[] {
-    const hints: ('inactive' | 'logo')[] = [];
+  function hintsOf(control: Element, scan: GraphicScan | null): AgentIconHint[] {
+    const hints: AgentIconHint[] = [];
     const style = control.ownerDocument.defaultView?.getComputedStyle(control);
     // Class names with a colon are state variants of utility CSS ("disabled:opacity-50"): they
     // say what the control would look like when disabled, not that it is.
@@ -1017,6 +1359,11 @@ export function agentFactory(options: AgentOptions): Agent {
         }
       }
       if (words.some((word) => logoHint.test(word))) hints.push('logo');
+      if (isHomeLink(control, scan)) hints.push('home-link');
+      // One element drawn with CSS and nothing else: a swatch as likely as an icon.
+      if (scan.sources.size === 1 && scan.sources.has('css-shape') && scan.holders.length === 1) hints.push('plain-shape');
+      if (hasVisibleLabel(control)) hints.push('visible-label');
+      if (duplicatesTextLink(control)) hints.push('duplicate-link');
     }
     return hints;
   }
@@ -1097,25 +1444,28 @@ export function agentFactory(options: AgentOptions): Agent {
     return false;
   }
 
-  /** Offset from the client coordinates of the element's frame to those of the top-level viewport. */
-  function frameOffset(element: Element): { x: number; y: number } {
-    let x = 0;
-    let y = 0;
-    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
-      const outer = frame.getBoundingClientRect();
-      x += outer.left + frame.clientLeft;
-      y += outer.top + frame.clientTop;
-    }
-    return { x, y };
-  }
-
   async function prepareIcon(key: number): Promise<AgentIconPrepared> {
     const element = get(key);
     const info = iconInfo.get(key);
     if (!info) throw new Error('Unknown icon key ' + key);
+    const gone: AgentIconPrepared = {
+      box: null,
+      graphic: null,
+      graphicFrom: 'control',
+      room: null,
+      boxes: [],
+      clip: null,
+      reason: 'detached',
+      probes: [],
+      clipped: false,
+      stable: true,
+    };
+    if (!element.isConnected) return gone;
     ensureStableAround(element);
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     await settle();
+    // Scrolling is something page scripts react to: the page may have rendered the control again.
+    if (!element.isConnected) return gone;
 
     const doc = element.ownerDocument;
     const view = doc.defaultView;
@@ -1130,10 +1480,12 @@ export function agentFactory(options: AgentOptions): Agent {
       boxes: [],
       clip: null,
       reason: null,
+      probes: [],
       clipped: false,
       stable: isStable(element),
     };
     if (!view) return { ...result, reason: 'no-box' };
+    if (inTransformedFrame(element)) return { ...result, reason: 'transformed-frame' };
 
     /** What has to be on screen and uncovered for the measurement to mean anything. */
     let measured = own;
@@ -1167,11 +1519,12 @@ export function agentFactory(options: AgentOptions): Agent {
           for (const sibling of parent.children) {
             if (sibling === current || !drawsBox(sibling, view)) continue;
             const over = plainRect(sibling.getBoundingClientRect());
+            const slack = options.icon.boxToleranceCssPx;
             const contains =
-              over.x <= own.x + 1 &&
-              over.y <= own.y + 1 &&
-              over.x + over.width >= own.x + own.width - 1 &&
-              over.y + over.height >= own.y + own.height - 1;
+              over.x <= own.x + slack &&
+              over.y <= own.y + slack &&
+              over.x + over.width >= own.x + own.width - slack &&
+              over.y + over.height >= own.y + own.height - slack;
             if (contains && over.height <= own.height + options.icon.boundaryWrapperSlackCssPx) drawn.push(over);
           }
           for (const box of drawn) {
@@ -1183,7 +1536,7 @@ export function agentFactory(options: AgentOptions): Agent {
         }
       }
       result.boxes = boxes.map(page);
-      const inset = Math.min(2, own.width / 2, own.height / 2);
+      const inset = Math.min(options.icon.boundaryProbeInsetCssPx, own.width / 2, own.height / 2);
       points.push(
         [own.x + own.width / 2, own.y + inset],
         [own.x + own.width - inset, own.y + own.height / 2],
@@ -1191,7 +1544,9 @@ export function agentFactory(options: AgentOptions): Agent {
         [own.x + inset, own.y + own.height / 2],
       );
     }
-    if (measured.width < 1 || measured.height < 1) return { ...result, reason: 'no-box' };
+    if (measured.width < options.icon.minPaintedSizeCssPx || measured.height < options.icon.minPaintedSizeCssPx) {
+      return { ...result, reason: 'no-box' };
+    }
 
     const inside = (rect: AgentRect, width: number, height: number): boolean =>
       rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width && rect.y + rect.height <= height;
@@ -1199,16 +1554,19 @@ export function agentFactory(options: AgentOptions): Agent {
     result.clipped =
       !inside(measured, view.innerWidth, view.innerHeight) || !inside(top, window.innerWidth, window.innerHeight);
 
-    let sampled = 0;
+    iconOuter.set(key, outer);
     let covered = false;
     for (const [x, y] of points) {
       if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight) continue;
       const hit = topElementAt(doc, x, y);
       if (!hit) continue;
-      sampled++;
-      if (!composedContains(outer, hit) && !composedContains(hit, element)) covered = true;
+      const topX = x + offset.x;
+      const topY = y + offset.y;
+      if (topX < 0 || topY < 0 || topX >= window.innerWidth || topY >= window.innerHeight) continue;
+      result.probes.push([topX + window.scrollX, topY + window.scrollY]);
+      if ((!composedContains(outer, hit) && !composedContains(hit, element)) || frameCoveredAt(element, x, y)) covered = true;
     }
-    if (sampled === 0) return { ...result, reason: 'outside-viewport' };
+    if (result.probes.length === 0) return { ...result, reason: 'outside-viewport' };
     if (covered) return { ...result, reason: 'covered' };
 
     const margin = options.icon.clipMarginCssPx;
@@ -1250,7 +1608,8 @@ export function agentFactory(options: AgentOptions): Agent {
       collapseSelection(element);
       element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
       await settle();
-      const state = { covered: false, clipped: false, stable: isStable(element) };
+      const state = { covered: false, clipped: false, stable: isStable(element), probes: [] as [number, number][], frameCovered: false };
+      if (inTransformedFrame(element)) return { box: null, clip: null, reason: 'transformed-frame', ...state };
 
       const own = viewportRect(element);
       const hasBox = own.width > 0 && own.height > 0;
@@ -1280,6 +1639,25 @@ export function agentFactory(options: AgentOptions): Agent {
         // are the evidence of what gets through, so they are taken.
         if (obscured.opaque === obscured.sampled) return { box, clip: null, reason: 'obscured', ...state };
         state.covered = true;
+      }
+
+      const view = element.ownerDocument.defaultView;
+      if (hasBox && view) {
+        const rect = element.getBoundingClientRect();
+        const offset = frameOffset(element);
+        const grid = options.coverGrid;
+        for (let row = 0; row < grid; row++) {
+          for (let column = 0; column < grid; column++) {
+            const x = rect.left + ((column + 0.5) / grid) * rect.width;
+            const y = rect.top + ((row + 0.5) / grid) * rect.height;
+            if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight) continue;
+            const topX = x + offset.x;
+            const topY = y + offset.y;
+            if (topX < 0 || topY < 0 || topX >= window.innerWidth || topY >= window.innerHeight) continue;
+            state.probes.push([topX + window.scrollX, topY + window.scrollY]);
+            if (frameCoveredAt(element, x, y)) state.frameCovered = true;
+          }
+        }
       }
 
       const x0 = Math.floor(left + window.scrollX);
@@ -1345,6 +1723,12 @@ export function agentFactory(options: AgentOptions): Agent {
 
     iconSurvey,
     prepareIcon,
+    hitKind,
+    coveredBelow,
+
+    connected(key) {
+      return get(key).isConnected;
+    },
 
     element(key) {
       return get(key);

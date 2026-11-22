@@ -53,7 +53,12 @@ function evaluateCandidate(candidate: IconCandidate, clips: Record<string, Scree
   if (candidate.unstabilised) baseFlags.push('unstabilised');
   if (candidate.clippedByViewport) baseFlags.push('clippedByViewport');
   if (candidate.hints?.includes('inactive')) baseFlags.push('maybeInactive');
-  if (candidate.hints?.includes('logo')) baseFlags.push('maybeLogo');
+  const hints = candidate.hints ?? [];
+  if (hints.includes('logo') || hints.includes('home-link')) baseFlags.push('maybeLogo');
+  if (hints.includes('home-link')) baseFlags.push('homeLink');
+  if (hints.includes('plain-shape')) baseFlags.push('plainShape');
+  if (hints.includes('visible-label')) baseFlags.push('visibleLabel');
+  if (hints.includes('duplicate-link')) baseFlags.push('duplicateLink');
 
   const emit = (rule: string, status: Status, message: string, help: string, evidence: Partial<Evidence> = {}): void => {
     drafts.push({
@@ -63,8 +68,8 @@ function evaluateCandidate(candidate: IconCandidate, clips: Record<string, Scree
       wcag: NON_TEXT_CONTRAST,
       selector: candidate.selector,
       frame: candidate.frame,
-      // A control that kept moving has no box to report.
-      box: candidate.notCaptured === 'moving' ? null : candidate.box,
+      // A control that kept moving, or that left the page, has no box to report.
+      box: candidate.notCaptured === 'moving' || candidate.notCaptured === 'detached' ? null : candidate.box,
       evidence: {
         crops: candidate.crop ? [candidate.crop] : [],
         colors: {},
@@ -91,9 +96,15 @@ function evaluateCandidate(candidate: IconCandidate, clips: Record<string, Scree
       'no-box': 'The control has no box',
       'outside-viewport': 'The control could not be brought into the viewport',
       covered: 'Other content lies in front of the control',
+      'cover-unknown': 'It could not be established that nothing lies in front of the control',
+      detached: 'The control was removed from the page while it was being looked at (the page rendered it again)',
+      'transformed-frame':
+        'The control is inside an iframe that is scaled, rotated or zoomed, where its position on screen cannot be worked out reliably',
       moving: 'The control kept moving while it was being captured (the page was still changing its layout)',
     }[candidate.notCaptured ?? 'outside-viewport'];
-    emit('not-measured', 'info', `${why}, so it was not measured.`, HELP.inventory);
+    emit('not-measured', 'info', `${why}, so it was not measured.`, HELP.inventory, {
+      flags: candidate.notCaptured ? [candidate.notCaptured] : [],
+    });
     return drafts;
   }
   const image = decodePng(clip.png);
@@ -191,7 +202,8 @@ function evaluateCandidate(candidate: IconCandidate, clips: Record<string, Scree
     minSolidPartShare: config.minSolidPartShare,
     blendToleranceRgb: config.blendToleranceRgb,
     minInteriorShare: config.minInteriorShare,
-    flatBlockPx: px(config.flatBlockCssPx, scale, 3),
+    minInteriorPixels: config.minInteriorPixels,
+    flatBlockPx: px(config.flatBlockCssPx, scale, config.flatBlockMinPx),
     maxParts: config.maxParts,
     complexResidualShare: config.complexResidualShare,
     declaredBlendMinShare: config.declaredBlendMinShare,
@@ -315,13 +327,35 @@ function evaluateCandidate(candidate: IconCandidate, clips: Record<string, Scree
     doubts.push('transitions and animations could not be switched off on it, so the capture may show an intermediate state');
   }
   if (candidate.clippedByViewport) doubts.push('the control reaches beyond the viewport and was captured in part');
-  if (candidate.hints?.includes('inactive')) {
+  if (hints.includes('inactive')) {
     doubts.push(
       'its styles or class names suggest that the control is inactive (no pointer events, a not-allowed cursor or a class naming it disabled), and an inactive control is exempt',
     );
   }
-  if (candidate.hints?.includes('logo')) doubts.push('its markup names it a logo, and a logotype is exempt');
-  const measuredText = `Icon ${toHex(main.color)} (${source}) measures ${mainRatio}:1 against its background ${toHex(main.against)}, under ${threshold}:1, and the control has no visible text.`;
+  if (hints.includes('logo')) doubts.push('its markup names it a logo, and a logotype is exempt');
+  if (hints.includes('home-link')) {
+    doubts.push(
+      'it is the home link of the site (a link to the site root, rel="home", or a link in the page header named home or after the site), where the graphic is usually the logotype, and a logotype is exempt',
+    );
+  }
+  if (hints.includes('plain-shape')) {
+    doubts.push('the graphic is a single shape drawn with CSS, which may be a sample of a colour (a swatch) and not an icon');
+  }
+  if (hints.includes('visible-label')) {
+    doubts.push(
+      'visible text outside the control is its label (aria-labelledby or a label element), so the icon may not be what identifies it',
+    );
+  }
+  if (hints.includes('duplicate-link')) {
+    doubts.push(
+      'the link is hidden from assistive technology and has the same target as the text link next to it, which may be what identifies it',
+    );
+  }
+  const textNote =
+    hints.includes('visible-label') || hints.includes('duplicate-link')
+      ? 'the control contains no visible text of its own'
+      : 'the control has no visible text';
+  const measuredText = `Icon ${toHex(main.color)} (${source}) measures ${mainRatio}:1 against its background ${toHex(main.against)}, under ${threshold}:1, and ${textNote}.`;
   emit(
     'icon-low-contrast',
     doubts.length > 0 ? 'likely' : 'fail',

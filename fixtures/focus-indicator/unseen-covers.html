@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: unseen-covers</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      .ring:focus-visible { outline: 2px solid #595959; outline-offset: 2px; }
+      .none:focus { outline: none; }
+      .card { position: relative; display: inline-block; padding: 20px; border: 1px solid #595959; margin: 0 16px 0 0; }
+      .ribbon { position: absolute; inset: 0; background: #fff; opacity: 0.75; pointer-events: none; }
+      .solid { opacity: 1; }
+      .busy::after { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.75); }
+      .stage { position: relative; padding: 8px; }
+      .toasts { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <!-- The outline is #595959, 7:1 on white. Through a 75% white layer it shows at about 1.5:1.
+         The 2.4.11 sampling sees neither layer: one lets pointer events through, the other is a pseudo-element of an ancestor. -->
+    <p class="row">
+      <span class="card"><button id="under-ribbon" class="ring">Share</button><span class="ribbon"></span></span>
+      <span class="card busy"><button id="under-veil" class="ring">Save</button></span>
+      <span class="card"><button id="hidden-under-ribbon" class="ring">Print</button><span class="ribbon solid"></span></span>
+    </p>
+    <div class="row stage">
+      <!-- Under a layer that paints nothing, controls are measured as usual, and a cover under it is still a cover. -->
+      <button id="clear-good" class="ring">Open</button>
+      <button id="clear-bad" class="none">Close</button>
+      <span class="card"><button id="under-both" class="ring">Send</button><span class="ribbon"></span></span>
+      <div class="toasts"><div></div></div>
+    </div>
+  </body>
+</html>

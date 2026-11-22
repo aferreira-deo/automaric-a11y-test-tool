@@ -1,0 +1,12 @@
+{
+  "description": "Focus indicators captured under content the 2.4.11 sampling does not see: a layer with pointer-events: none and a veil painted by a pseudo-element of an ancestor. What is measured through them is never a fail. A transparent layer over the whole page changes nothing.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    {"selector": "#under-ribbon", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "flags": ["possiblyCovered"]},
+    {"selector": "#under-veil", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "flags": ["possiblyCovered"]},
+    {"selector": "#hidden-under-ribbon", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change", "flags": ["possiblyCovered"]},
+    {"selector": "#clear-good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured"},
+    {"selector": "#clear-bad", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change"},
+    {"selector": "#under-both", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "flags": ["possiblyCovered"]}
+  ]
+}

@@ -20,6 +20,8 @@ export interface IconMeasureOptions {
   blendToleranceRgb: number;
   /** Share of a colour's pixels that must be interior for it to be a true colour, not a blend. */
   minInteriorShare: number;
+  /** Fewest interior pixels for the same, whatever the share. */
+  minInteriorPixels: number;
   /**
    * Side of the solid square from which a colour is a flat area of its own even when it lies
    * between two others: a gradient, or a second tone of the same hue. Anti-aliasing never is.
@@ -349,7 +351,7 @@ export function measureIcon(image: RgbImage, target: IconTarget, options: IconMe
       const i = p * 3;
       if (same({ r: image.data[i]!, g: image.data[i + 1]!, b: image.data[i + 2]! }, cluster.color)) count++;
     }
-    return count >= 2 && count >= options.minInteriorShare * cluster.share * analysis.ink.length;
+    return count >= options.minInteriorPixels && count >= options.minInteriorShare * cluster.share * analysis.ink.length;
   };
   const blendWithBackground = (color: Rgb, other: Rgb): boolean =>
     background.some(

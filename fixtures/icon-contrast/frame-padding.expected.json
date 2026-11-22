@@ -1,0 +1,12 @@
+{
+  "description": "Controls inside iframes. A padded frame: the black icon (21:1) is measured where it is, not 40px away where a pale decoration sits. A scaled frame and a frame in a rotated box: positions cannot be worked out from the frame's box, so nothing is measured.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    {"selector": "#stop", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "frame": "#padded"},
+    {"selector": "#field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured", "frame": "#padded"},
+    {"selector": "#stop", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#scaled"},
+    {"selector": "#field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#scaled"},
+    {"selector": "#stop", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#in-turned"},
+    {"selector": "#field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#in-turned"}
+  ]
+}

@@ -28,7 +28,8 @@ Chromium only.
 
 ### What `icon-contrast` reports
 
-Everything is measured on a capture of the control at rest, at device scale factor 2.
+Everything is measured on a capture of the control at rest, at device scale factor 2. The scale of each capture is
+worked out from its size in pixels, not assumed, so a page that already had that ratio is measured the same way.
 
 **Icons.** Candidates are links, buttons, `summary`, button inputs and elements with the role `button`, `link`,
 `menuitem` or `tab` that show no visible text and do show a graphic: inline SVG, `img`, an icon-font glyph, a CSS
@@ -43,9 +44,17 @@ text. A text character used as an icon in a text node (`×`) is text: its contra
 - `fail`: one colour, on one background colour, under `likelyBandFloor` (2.7:1).
 - `likely`: from 2.7:1 to 3:1; an icon of several colours with a part under 3:1; a background of several colours
   (a gradient, a picture) with one under 3:1 against the icon; strokes too thin for any pixel to show their colour;
-  a control that looks inactive or is named a logo (see below); any doubt about the capture.
+  a control that looks inactive, may be a logotype or a colour swatch, or has visible text outside it as its label
+  (see the hints below); any doubt about the capture.
 - `info`: everything measured at 3:1 or more, disabled controls (`disabled`, a disabled `fieldset`, `aria-disabled`),
-  pictures of many colours, and controls that could not be measured.
+  pictures of many colours, and controls that could not be measured. The reason is a flag of the finding: `covered`,
+  `cover-unknown`, `moving`, `detached`, `transformed-frame`, `no-box`, `outside-viewport`.
+
+A control is measured only when Chrome's own hit test, run from the top document at a grid of points over it, finds
+nothing in front of it. That hit test does not skip `pointer-events: none` and names pseudo-elements, so a backdrop of
+the parent page over an iframe, a layer that lets clicks through and a veil painted by `::before` or `::after` of an
+ancestor all count. Content in front that paints nothing (no background, border, shadow or text of its own, or
+opacity 0) does not, and what lies under it is looked at in turn.
 
 **Boundaries.** Candidates are text fields, `textarea`, `select`, checkboxes, radios and switches, native or by role.
 For the middle of each side, the colours from 3 CSS px outside the box to 4 CSS px inside are collected, and the
@@ -62,9 +71,12 @@ from (`declaredColour` or `pixelColour`).
 
 ### What a scan does to the page
 
-While it runs, the scan changes the page: device scale factor 2, reduced motion, an adopted style sheet that
-removes transitions, animations, the caret and the selection highlight, keyboard focus, scroll positions, and the
-text selection of fields it tabs into. Focus and blur events reach page scripts, as they would for a keyboard user.
+While it runs, the scan changes the page: device scale factor 2 (set as an override even when the page already has
+that ratio, because captures do not honour a ratio emulated through another session), reduced motion, an adopted
+style sheet that removes transitions, animations, the caret and the selection highlight, keyboard focus, scroll
+positions, and the text selection of fields it tabs into. Focus and blur events reach page scripts, as they would for
+a keyboard user. To look under a transparent layer, a second style sheet that turns `pointer-events` on everywhere is
+adopted and dropped within one script task; nothing is painted with it.
 
 Put back afterwards:
 
@@ -101,19 +113,36 @@ as part of a control. Focus is put back with everything else.
 - Icon fonts are recognised by Private Use Area characters, or by a font family matching `iconFontFamilyPattern`
   for ligature fonts. A ligature font the pattern does not match makes its control look like one with visible text,
   and it is left out.
-- Exemptions that cannot be measured are only hinted at: a class matching `inactiveHintPattern`, `pointer-events: none`
-  or a not-allowed cursor for inactive controls, and names matching `logoHintPattern` for logotypes. A hint turns a
-  `fail` into a `likely`. A brand mark used as an icon (a social network link) carries no such hint and can be a `fail`.
-- Whether an icon is needed to understand the control is not judged: every control without visible text is assumed to
-  be identified by its graphic.
+- Exemptions that cannot be measured are only hinted at. A hint turns a `fail` into a `likely` and shows as a flag:
+  - `maybeInactive`: a class matching `inactiveHintPattern`, `pointer-events: none` or a not-allowed cursor.
+  - `maybeLogo`: a class, id, name or file name matching `logoHintPattern`; or (with `homeLink`) the home link of the
+    site, where a logotype usually is: a link to the site root, `rel="home"`, or a link inside `header` or
+    `role="banner"` whose name matches `homeLinkNamePattern` or contains the site name given in `og:site_name` or
+    `application-name`. A house icon that links home is downgraded with it. A brand mark used as an icon elsewhere
+    (a social network link) carries no such hint and can be a `fail`.
+  - `plainShape`: the graphic is one element drawn with CSS, which is as likely a colour swatch as an icon. A menu
+    icon made of several such elements is not affected.
+- Whether an icon is needed to understand the control is not judged: a control without visible text of its own is
+  assumed to be identified by its graphic. Two cases are downgraded to `likely` because visible text next to the
+  control does identify it: `visibleLabel` (a visible element named by `aria-labelledby`, or a `label`) and
+  `duplicateLink` (a link with `aria-hidden="true"` and `tabindex="-1"` whose parent holds a text link to the same
+  address). Visible text that is merely near the control is not recognised.
 - A custom checkbox or radio built on a visually hidden native input and a styled sibling is not found: the input is
   hidden, and the sibling is not a control.
 - For boundaries, text that touches the sampled edge (a value or a label with no gap) counts as a colour on that edge
   and can make a faint boundary look sufficient. An attached button or a contrasting wrapper does the same.
-- Controls under other content at the sampled points (a cookie banner, a floating label outside the wrapper) are
-  recorded as not measured. As in the focus check, an overlay with `pointer-events: none` is not seen.
+- Controls under other content at the sampled points (a cookie banner, a floating label outside the wrapper, a badge
+  laid over an icon) are recorded as not measured, also when that content is transparent but takes pointer events
+  (a stretched link). Only the sampled points are tested: a cover that lies between them is not seen.
+- Looking under a layer that paints nothing relies on `elementsFromPoint`, which answers with the element for a hit on
+  its pseudo-elements and cannot be told apart from the element itself there. An author `pointer-events: none
+  !important` under such a layer is not seen.
+- Inside an iframe that is scaled, rotated, skewed or zoomed, or nested in something that is, nothing is measured
+  (`transformed-frame`): the frame's box does not say where a point of its content lands. Padding and borders of a
+  frame are accounted for; a frame that is only translated is measured.
 - On a page whose layout is still moving, a control is captured again up to `captureAttempts` times and then
-  recorded as not measured.
+  recorded as not measured. A control that the page removes or renders again during the scan is recorded as not
+  measured (`detached`); the node that replaced it is not looked for.
 - Cross-origin iframes and closed shadow roots are not looked into.
 
 ### Known limits of the focus check
@@ -122,9 +151,15 @@ as part of a control. Focus is put back with everything else.
   iframe; after `maxTabsInOpaqueFrame` presses (50) it sets `tabindex="-1"` on the iframe for the rest of the walk to
   step past it, which page scripts can observe.
 - 2.4.11 is hit-tested inside the element's own document: an overlay in a parent document covering an iframe is not
-  seen, nor is an overlay with `pointer-events: none`. It is a `fail` only when every sampled point is under fixed or
-  sticky content with full opacity and a solid background colour. Under a translucent colour, an image or a gradient
-  it is `likely`, or `info` when the focus change is visible through the cover.
+  reported under 2.4.11, nor is an overlay with `pointer-events: none`. It is a `fail` only when every sampled point is
+  under fixed or sticky content with full opacity and a solid background colour. Under a translucent colour, an image
+  or a gradient it is `likely`, or `info` when the focus change is visible through the cover.
+- Those overlays, and a veil painted by a pseudo-element of an ancestor, are looked for before the captures with the
+  hit test described for the icon check (`coverGrid` points). When one is found, or cannot be ruled out, the finding
+  carries the flag `possiblyCovered` and neither 2.4.7 nor 1.4.11 is reported above `likely`: the captures may show
+  the overlay and not the indicator. This also downgrades a real failure whose element sits under such a layer.
+- Inside an iframe that is scaled, rotated, skewed or zoomed, or nested in something that is, nothing is captured
+  (`not-captured`). Padding and borders of a frame are accounted for.
 - Elements the Tab walk did not reach are measured with a forced pseudo-state and never reported above `likely`.
 - No `fail` is reported, only `likely` or `info`, when the evidence is incomplete: the element takes focus back on
   blur (no unfocused capture), it reaches beyond the viewport (its edges are off screen), more changed regions were

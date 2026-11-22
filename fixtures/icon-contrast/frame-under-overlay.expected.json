@@ -1,0 +1,9 @@
+{
+  "description": "A translucent backdrop in the top document lies over a same-origin iframe. The dark controls inside the frame look pale through it; they are not measured, and never reported as low contrast.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    {"selector": "#play", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#widget"},
+    {"selector": "#stop", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#widget"},
+    {"selector": "#field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "frame": "#widget"}
+  ]
+}

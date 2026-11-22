@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: frame-under-overlay</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      .ring:focus-visible { outline: 2px solid #595959; outline-offset: 2px; }
+      .none:focus { outline: none; }
+      iframe { border: 1px solid #595959; }
+      .backdrop { position: fixed; inset: 0; background: rgba(255, 255, 255, 0.75); }
+    </style>
+  </head>
+  <body>
+    <iframe id="widget" src="frame-under-overlay-child.html" title="Widget" width="400" height="200"></iframe>
+    <div class="backdrop"></div>
+  </body>
+</html>

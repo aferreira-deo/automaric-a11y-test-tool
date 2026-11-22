@@ -1,0 +1,14 @@
+{
+  "description": "Logotypes that nothing names a logo: a link to the site root, rel=home, a header link named home, a header link named after the site (og:site_name). Likely, never fail. A single CSS shape (a colour swatch) is likely too. Other pale icon links still fail.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    {"selector": "#root-link", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo", "homeLink"]},
+    {"selector": "#rel-home", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo", "homeLink"]},
+    {"selector": "#named-home", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo", "homeLink"]},
+    {"selector": "#named-site", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo", "homeLink"]},
+    {"selector": "#header-search", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#footer-home", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#swatch-beige", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["plainShape"]},
+    {"selector": "#swatch-navy", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured"}
+  ]
+}

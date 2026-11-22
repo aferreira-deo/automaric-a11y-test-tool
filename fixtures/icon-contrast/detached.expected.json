@@ -1,0 +1,11 @@
+{
+  "description": "Controls that are replaced by new nodes while the scan runs. A node that is no longer in the page has no styles and no box: it is recorded as not measured (flag detached), and never as a control with the browser default appearance.",
+  "checks": ["icon-contrast"],
+  "exact": true,
+  "expected": [
+    {"selector": "#stays", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured"},
+    {"selector": "#late-icon", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "flags": ["detached"]},
+    {"selector": "#late-field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured", "flags": ["detached"]},
+    {"selector": "html", "check": "icon-contrast", "status": "info", "rule": "icon-contrast/survey"}
+  ]
+}

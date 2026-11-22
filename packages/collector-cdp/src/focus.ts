@@ -1,7 +1,7 @@
 import { connectedComponents, decodePng, diffMask, fnv1a64, unionBox } from '@a11y-vision/core';
-import type { Box, FocusConfig, FocusStop, FocusWalk, Png } from '@a11y-vision/core';
+import type { Box, FocusConfig, FocusStop, FocusWalk } from '@a11y-vision/core';
 import type { AgentBlurred, AgentElementInfo, AgentPrepared, AgentRect } from './agent.js';
-import type { StablePage } from './page.js';
+import type { Capture, StablePage } from './page.js';
 
 const TAB_KEY = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 };
 const NO_BOX: Box = { x: 0, y: 0, width: 0, height: 0 };
@@ -43,10 +43,23 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
     });
   };
 
-  const isUnchanged = (focused: Png, unfocused: Png): boolean => {
-    const mask = diffMask(decodePng(focused), decodePng(unfocused), config.diffDeltaE);
-    const minArea = Math.max(1, Math.round(config.minComponentAreaCssPx2 * config.deviceScaleFactor ** 2));
-    return connectedComponents(mask, minArea).length === 0;
+  const minArea = (scale: number): number => Math.max(1, Math.round(config.minComponentAreaCssPx2 * scale * scale));
+  const isUnchanged = (focused: Capture, unfocused: Capture): boolean => {
+    const mask = diffMask(decodePng(focused.png), decodePng(unfocused.png), config.diffDeltaE);
+    return connectedComponents(mask, minArea(focused.scale)).length === 0;
+  };
+
+  /**
+   * What the 2.4.11 sampling of the agent cannot see, looked for with Chrome's own hit test:
+   * content of a parent page over the iframe, a layer with pointer-events: none, a
+   * pseudo-element of an ancestor. Any of them, or no answer, and the captures are no proof.
+   */
+  const noteCovers = async (stop: FocusStop, key: number, prepared: AgentPrepared): Promise<void> => {
+    if (prepared.frameCovered) stop.possiblyCovered = true;
+    else if (prepared.probes.length > 0) {
+      const hits = await page.hitKinds(key, prepared.probes, 'focus');
+      if (hits.includes('cover') || hits.includes('unknown')) stop.possiblyCovered = true;
+    }
   };
 
   const stops: FocusStop[] = [];
@@ -84,6 +97,7 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
       return stop;
     }
     noteConditions(stop, prepared);
+    await noteCovers(stop, info.key, prepared);
     const crops = cropIds(info);
     const focused = await capture(crops.focused, prepared.clip);
     stop.authorModified = await authorModified(await page.nodeIdOf(info.key));
@@ -102,9 +116,9 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
       await agent(`refocus(${info.key})`);
       refocused = true;
       const viewportFocused = await page.screenshot(viewport);
-      const mask = diffMask(decodePng(viewportFocused), decodePng(viewportUnfocused), config.diffDeltaE);
-      const scale = config.deviceScaleFactor;
-      const changed = unionBox(connectedComponents(mask, Math.max(1, Math.round(config.minComponentAreaCssPx2 * scale * scale))));
+      const mask = diffMask(decodePng(viewportFocused.png), decodePng(viewportUnfocused.png), config.diffDeltaE);
+      const scale = viewportFocused.scale;
+      const changed = unionBox(connectedComponents(mask, minArea(scale)));
       stop.outsideChange = changed
         ? {
             x: viewport.x + changed.x / scale,
@@ -128,6 +142,7 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
       return stop;
     }
     noteConditions(stop, prepared);
+    await noteCovers(stop, info.key, prepared);
     const crops = cropIds(info);
     await capture(crops.unfocused, prepared.clip);
     const nodeId = await page.nodeIdOf(info.key);

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: detached</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg, img { display: block; }
+      .spacer { height: 2400px; }
+      input { font: inherit; padding: 6px 8px; border: 1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><button id="stays" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button></p>
+    <div class="spacer"></div>
+    <!-- Rendered again whenever the page scrolls, as a framework does with a keyed list: the nodes
+         the scan found are no longer in the page when it has scrolled to them. -->
+    <p id="late" class="row"><button id="late-icon" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button> <input id="late-field" type="text" aria-label="Name" /></p>
+    <script>
+      const late = document.getElementById('late');
+      addEventListener('scroll', () => {
+        const html = late.innerHTML;
+        late.innerHTML = html;
+      });
+    </script>
+  </body>
+</html>

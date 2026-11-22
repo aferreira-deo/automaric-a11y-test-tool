@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: logotype-links</title>
+    <meta property="og:site_name" content="Acme Tools" />
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      header, footer { display: flex; gap: 24px; align-items: center; margin: 0 0 32px; }
+      a.mark { display: inline-flex; padding: 8px; }
+      svg, img { display: block; }
+      .swatches a { display: inline-block; padding: 6px; }
+      .swatches span { display: block; width: 28px; height: 28px; border-radius: 50%; }
+    </style>
+  </head>
+  <body>
+    <!-- Brand marks in brand colours, under 3:1 on white. Nothing in a class, id or name says "logo".
+         Logotypes are exempt from 1.4.11, so none of these may be a fail. -->
+    <header>
+      <a id="root-link" class="mark" href="/" aria-label="Acme"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><path fill="#ff9900" d="M20 2 38 38H2z" /></svg></a>
+      <a id="rel-home" class="mark" href="logotype-links.html?from=mark" rel="home"><img alt="Start" width="40" height="40" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23ffcc00'/%3E%3C/svg%3E" /></a>
+      <a id="named-home" class="mark" href="index.html" aria-label="Acme home"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><path fill="#ff9900" d="M20 2 38 38H2z" /></svg></a>
+      <a id="named-site" class="mark" href="index.html"><img alt="Acme Tools" width="40" height="40" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23ffcc00'/%3E%3C/svg%3E" /></a>
+      <!-- Not the home link: an ordinary icon link in the header. -->
+      <a id="header-search" class="mark" href="search.html" aria-label="Search"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><path fill="#ff9900" d="M20 2 38 38H2z" /></svg></a>
+    </header>
+    <p class="row swatches">
+      <!-- Colour swatches: one shape, drawn with CSS, whose colour is the information. -->
+      <a id="swatch-beige" href="?colour=beige" aria-label="Beige"><span style="background: #f5f5dc"></span></a>
+      <a id="swatch-navy" href="?colour=navy" aria-label="Navy"><span style="background: #001f5c"></span></a>
+    </p>
+    <footer>
+      <!-- "Home" in a name outside the page header is not a sign of a logotype. -->
+      <a id="footer-home" class="mark" href="index.html" aria-label="Back to the home page"><svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><path fill="#ff9900" d="M20 2 38 38H2z" /></svg></a>
+    </footer>
+  </body>
+</html>

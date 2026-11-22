@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:browser": "playwright test",
-    "check": "eslint . && tsc -b && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
+    "check": "tsc -b && eslint . && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
   },
   "devDependencies": {
     "@a11y-vision/cli": "workspace:*",

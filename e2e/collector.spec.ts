@@ -35,6 +35,8 @@ const contexts = {
     reducedMotion: 'reduce',
     contrast: 'more',
   },
+  // The device pixel ratio the tool captures at: nothing to change, and still everything to put back.
+  'a context at the capture scale': { viewport: { width: 900, height: 650 }, deviceScaleFactor: 2 },
   'an emulated mobile context': devices['Pixel 5'],
   'a context with the default emulation': {},
 } as const;
@@ -83,6 +85,37 @@ test('the page is left as it was found by the icon-contrast check alone', async 
   );
 
   expect(await pageState(page)).toEqual(before);
+});
+
+test('a control removed from the page after its capture is not measured', async ({ page }) => {
+  await page.goto('/icon-contrast/input-boundaries.html');
+  // The page renders its controls again right after each capture, as a framework re-rendering a
+  // keyed list does: the node the scan holds is then detached, and has no styles to read.
+  const context = page.context();
+  const newSession = context.newCDPSession.bind(context);
+  context.newCDPSession = async (target: Page) => {
+    const session = await newSession(target);
+    const send = session.send.bind(session) as (method: string, params?: object) => Promise<unknown>;
+    (session as { send: unknown }).send = async (method: string, params?: object) => {
+      const response = await send(method, params);
+      if (method === 'Page.captureScreenshot') {
+        await page.evaluate(() => {
+          for (const control of document.querySelectorAll('input, select, textarea')) control.replaceWith(control.cloneNode(true));
+        });
+      }
+      return response;
+    };
+    return session;
+  };
+
+  const result = await new A11yVision({ page }).withChecks(['icon-contrast']).analyze();
+  const boundaries = result.findings.filter((finding) => finding.rule !== 'icon-contrast/survey');
+  expect(boundaries.length).toBeGreaterThan(3);
+  expect(boundaries.filter((finding) => finding.rule === 'icon-contrast/boundary-default')).toEqual([]);
+  for (const finding of boundaries) {
+    expect(finding, finding.selector).toMatchObject({ status: 'info', rule: 'icon-contrast/not-measured' });
+    expect(finding.evidence.flags).toContain('detached');
+  }
 });
 
 test('environment values are measured, not read from the page', async ({ page }) => {

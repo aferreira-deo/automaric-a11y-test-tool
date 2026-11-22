@@ -32,6 +32,7 @@ const OPTIONS: IconMeasureOptions = {
   minSolidPartShare: 0.01,
   blendToleranceRgb: 14,
   minInteriorShare: 0.1,
+  minInteriorPixels: 2,
   flatBlockPx: 4,
   maxParts: 3,
   complexResidualShare: 0.25,

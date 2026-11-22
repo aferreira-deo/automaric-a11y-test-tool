@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: frame-padding child</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      .ring:focus-visible { outline: 2px solid #595959; outline-offset: 2px; }
+      .none:focus { outline: none; }
+      body { margin: 16px; }
+      .row { margin: 0 0 32px; }
+      #low:focus-visible { outline: 2px solid #c8c8c8; outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><button id="good" class="ring">Play</button></p>
+    <p class="row"><button id="low">Stop</button></p>
+  </body>
+</html>

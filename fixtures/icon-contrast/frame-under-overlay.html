@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: frame-under-overlay</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      iframe { border: 1px solid #595959; }
+      /* A consent backdrop of the embedding page: it covers the frame too. */
+      .backdrop { position: fixed; inset: 0; background: rgba(255, 255, 255, 0.75); }
+      .dialog { position: fixed; left: 32px; top: 300px; background: #fff; border: 1px solid #1a1a1a; padding: 16px; }
+    </style>
+  </head>
+  <body>
+    <!-- The controls in the frame are dark (7:1 and more). Seen through the backdrop of the parent
+         page they look pale. A hit test inside the frame's own document does not see the backdrop. -->
+    <iframe id="widget" src="frame-under-overlay-child.html" title="Widget" width="400" height="160"></iframe>
+    <div class="backdrop"></div>
+    <div class="dialog" role="dialog" aria-label="Cookies">We use cookies.</div>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "description": "Covers a hit test with elementFromPoint does not see: a layer with pointer-events: none and a veil painted by a pseudo-element of an ancestor. Dark controls under them look pale and are not measured. Layers that paint nothing (a transparent container, a dialog at opacity 0, an empty pseudo-element) change nothing.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    {"selector": "#under-ribbon", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured"},
+    {"selector": "#under-veil", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured"},
+    {"selector": "#field-under-ribbon", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured"},
+    {"selector": "#in-stretched", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#plain-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#plain-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured"},
+    {"selector": "#under-both", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured"}
+  ]
+}

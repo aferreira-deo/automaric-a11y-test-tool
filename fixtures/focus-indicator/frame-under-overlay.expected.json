@@ -1,0 +1,8 @@
+{
+  "description": "A translucent backdrop in the top document lies over a same-origin iframe. The outlines inside the frame (7:1 and 4.5:1 on white) show through it well under 3:1. That is not a contrast failure of the indicator: likely at most.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    {"selector": "#good", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "frame": "#widget", "flags": ["possiblyCovered"]},
+    {"selector": "#faint", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast", "frame": "#widget", "flags": ["possiblyCovered"]}
+  ]
+}

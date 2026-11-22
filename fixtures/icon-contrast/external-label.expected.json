@@ -1,0 +1,12 @@
+{
+  "description": "Icon controls identified by visible text outside them: aria-labelledby, label for, and a link hidden from assistive technology next to a text link with the same target. Likely, never fail. A visually hidden label, another target, or a link that stays in the accessibility tree change nothing.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    {"selector": "#labelledby", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["visibleLabel"]},
+    {"selector": "#label-for", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["visibleLabel"]},
+    {"selector": "#duplicate", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["duplicateLink"]},
+    {"selector": "#labelledby-hidden", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#other-target", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"},
+    {"selector": "#exposed-twin", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast"}
+  ]
+}
