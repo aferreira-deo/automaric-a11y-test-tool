@@ -1,0 +1,7 @@
+{
+  "description": "A skip link that is off screen until focused. Its appearance is the visible change; no contrast verdict.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#skip", "check": "focus-indicator", "status": "info", "wcag": "2.4.7", "rule": "focus-indicator/appears-on-focus" }
+  ]
+}

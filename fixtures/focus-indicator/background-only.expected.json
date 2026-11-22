@@ -1,0 +1,7 @@
+{
+  "description": "Only the fill changes. A strong change is not reported; a faint one on a borderless control is likely, never fail.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#subtle", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

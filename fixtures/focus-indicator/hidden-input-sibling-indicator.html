@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: hidden-input-sibling-indicator</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); border: 0; white-space: nowrap; }
+      label { display: block; }
+      .box { display: inline-block; width: 20px; height: 20px; border: 2px solid #1a1a1a; border-radius: 3px; vertical-align: middle; margin-right: 8px; }
+      #cb-good:focus-visible + .box { outline: 2px solid #005fcc; outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <label class="row"><input id="cb-good" class="vh" type="checkbox" /><span class="box"></span>Subscribe</label>
+    <label class="row"><input id="cb-bad" class="vh" type="checkbox" /><span class="box"></span>Remember me</label>
+  </body>
+</html>

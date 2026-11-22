@@ -1,0 +1,8 @@
+{
+  "description": "Text fields with the outline removed: the caret is the only sign of focus. Reported as likely, not fail.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#caret-input", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" },
+    { "selector": "#caret-textarea", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/caret-only" }
+  ]
+}

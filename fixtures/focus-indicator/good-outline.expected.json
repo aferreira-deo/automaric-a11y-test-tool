@@ -1,0 +1,9 @@
+{
+  "description": "A 2px #005fcc outline with a 2px offset on a button, a link and a text input.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#good-button", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#good-link", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#good-input", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

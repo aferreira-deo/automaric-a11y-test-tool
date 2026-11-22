@@ -3,3 +3,7 @@ export * from './types.js';
 export * from './config.js';
 export * from './fingerprint.js';
 export * from './run.js';
+export * from './measure/color.js';
+export * from './measure/image.js';
+export * from './measure/diff.js';
+export * from './measure/indicator.js';

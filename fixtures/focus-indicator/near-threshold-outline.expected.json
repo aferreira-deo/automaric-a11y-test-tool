@@ -1,0 +1,7 @@
+{
+  "description": "#999 on white is 2.85:1, inside the likely band. #949494 is 3.03:1 and must not be reported.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#near", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

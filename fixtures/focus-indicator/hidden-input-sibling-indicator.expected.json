@@ -1,0 +1,8 @@
+{
+  "description": "Visually hidden checkboxes. One draws its indicator on a sibling inside the label; the other draws none.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#cb-good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#cb-bad", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" }
+  ]
+}

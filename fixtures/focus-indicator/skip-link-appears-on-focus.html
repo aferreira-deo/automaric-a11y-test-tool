@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: skip-link-appears-on-focus</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      #skip { position: absolute; left: -9999px; top: 8px; background: #000; color: #fff; padding: 8px 12px; }
+      #skip:focus { left: 8px; }
+      main { padding-top: 48px; }
+    </style>
+  </head>
+  <body>
+    <a id="skip" href="#main">Skip to main content</a>
+    <main id="main"><p class="row"><a id="link" class="good" href="#">Read more</a></p></main>
+  </body>
+</html>

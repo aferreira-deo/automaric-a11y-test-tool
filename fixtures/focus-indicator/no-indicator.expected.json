@@ -1,0 +1,8 @@
+{
+  "description": "An indicator is declared but paints nothing visible: same colour as the backdrop, or transparent.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#same", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" },
+    { "selector": "#transparent", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" }
+  ]
+}

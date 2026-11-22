@@ -1,0 +1,9 @@
+{
+  "description": "Focusable but not in the Tab order: measured with a forced state, so never more than likely.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#ok", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#panel", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change", "flags": ["forced"]},
+    { "selector": "#heading", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/browser-default", "flags": ["forced"]}
+  ]
+}

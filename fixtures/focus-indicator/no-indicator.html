@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: no-indicator</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      #same:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+      #transparent { display: inline-block; }
+      #transparent:focus-visible { outline: 3px solid transparent; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><button id="same">Save</button></p>
+    <p class="row"><span id="transparent" class="btn" role="button" tabindex="0">Open</span></p>
+  </body>
+</html>

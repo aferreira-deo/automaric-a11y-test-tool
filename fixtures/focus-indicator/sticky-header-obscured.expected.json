@@ -1,0 +1,8 @@
+{
+  "description": "A link sits entirely under a fixed header when it receives focus.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#under", "check": "focus-indicator", "status": "fail", "wcag": "2.4.11", "rule": "focus-indicator/obscured" },
+    { "selector": "#visible", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

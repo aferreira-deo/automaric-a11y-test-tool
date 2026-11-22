@@ -1,9 +1,10 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { hasFailures, registeredChecks, TOOL_NAME, TOOL_VERSION } from '@a11y-vision/core';
+import { defaultConfig, hasFailures, registeredChecks, TOOL_NAME, TOOL_VERSION } from '@a11y-vision/core';
 import type { CheckId } from '@a11y-vision/core';
 import { A11yVision } from '@a11y-vision/playwright';
-import { toJsonReport } from '@a11y-vision/reporters';
+import { toHtmlReport, toJsonReport } from '@a11y-vision/reporters';
 import { chromium } from 'playwright';
 
 export const EXIT_OK = 0;
@@ -16,7 +17,11 @@ const USAGE = `Usage: ${TOOL_NAME} scan <url> [options]
 
 Options:
   -o, --output <file>   Write the JSON report to a file instead of stdout
-      --checks <ids>    Comma-separated checks to run (available: ${registeredChecks().join(', ')})
+      --html <file>     Also write a self-contained HTML evidence report
+      --crops <dir>     Also write the evidence crops as PNG files; the ids in
+                        "evidence.crops" are paths relative to this directory
+      --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
+                        available: ${registeredChecks().join(', ')})
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -33,6 +38,11 @@ const processIo: Io = {
   stderr: (text) => void process.stderr.write(text),
 };
 
+async function writeTo(file: string, content: string | Uint8Array): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, content);
+}
+
 export async function main(argv: string[], io: Io = processIo): Promise<number> {
   let parsed;
   try {
@@ -41,6 +51,8 @@ export async function main(argv: string[], io: Io = processIo): Promise<number> 
       allowPositionals: true,
       options: {
         output: { type: 'string', short: 'o' },
+        html: { type: 'string' },
+        crops: { type: 'string' },
         checks: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -88,12 +100,14 @@ export async function main(argv: string[], io: Io = processIo): Promise<number> 
     await page.goto(url, { waitUntil: 'load' });
     const scanner = new A11yVision({ page });
     if (checks) scanner.withChecks(checks as CheckId[]);
-    const result = await scanner.analyze();
+    const { result, crops } = await scanner.analyzeWithEvidence();
+
     const json = `${JSON.stringify(toJsonReport(result), null, 2)}\n`;
-    if (values.output) {
-      await writeFile(values.output, json);
-    } else {
-      io.stdout(json);
+    if (values.output) await writeTo(values.output, json);
+    else io.stdout(json);
+    if (values.html) await writeTo(values.html, toHtmlReport(result, crops));
+    if (values.crops) {
+      for (const [id, png] of Object.entries(crops)) await writeTo(join(values.crops, id), png);
     }
     return hasFailures(result) ? EXIT_FAILURES : EXIT_OK;
   } catch (error) {

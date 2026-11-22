@@ -1,0 +1,8 @@
+{
+  "description": "A link highlighted with a yellow fill and a dark bar under it: the bar is the part that reaches 3:1. Without the bar, a faint fill alone is likely.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#bar", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#no-bar", "check": "focus-indicator", "status": "likely", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

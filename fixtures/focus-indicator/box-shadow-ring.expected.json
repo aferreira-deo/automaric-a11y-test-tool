@@ -1,0 +1,8 @@
+{
+  "description": "Outline replaced by a box-shadow ring: #005fcc passes; #dedede on a #f5f5f5 fill is 1.23:1 and 1.35:1.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#ring", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#pale", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

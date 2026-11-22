@@ -1,0 +1,8 @@
+{
+  "description": "Controls on a white to light-blue gradient. A dark outline passes; a pale one fails along the whole gradient.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#bad", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

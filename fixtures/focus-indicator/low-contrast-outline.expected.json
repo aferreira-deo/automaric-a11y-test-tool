@@ -1,0 +1,8 @@
+{
+  "description": "Author outline at 1.67:1 against white and 1.44:1 against the #eee fill: below 3:1 on both sides.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#offset", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" },
+    { "selector": "#flush", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

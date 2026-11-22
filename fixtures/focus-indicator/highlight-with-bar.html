@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: highlight-with-bar</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      #bar:focus-visible { outline: 3px solid transparent; background: #ffdd00; box-shadow: 0 -2px #ffdd00, 0 4px #0b0c0c; color: #0b0c0c; text-decoration: none; }
+      #no-bar:focus-visible { outline: 3px solid transparent; background: #fff8d6; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><a id="bar" href="#">Read more about this</a></p>
+    <p class="row"><a id="no-bar" href="#">Read more about that</a></p>
+  </body>
+</html>

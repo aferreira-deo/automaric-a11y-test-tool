@@ -1,0 +1,10 @@
+{
+  "description": "No author focus styles: the unmodified browser indicator is inventoried and not held to 1.4.11.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#default-button", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/browser-default" },
+    { "selector": "#default-link", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/browser-default" },
+    { "selector": "#default-input", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/browser-default" },
+    { "selector": "#styled-button", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/browser-default" }
+  ]
+}

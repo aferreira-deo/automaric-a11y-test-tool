@@ -11,6 +11,10 @@ export interface ExpectedFinding {
   wcag?: string;
   /** Compared only when present. */
   rule?: string;
+  /** Iframe selector path. Compared only when present. */
+  frame?: string;
+  /** Evidence flags the finding must carry (it may carry others). */
+  flags?: string[];
 }
 
 export interface Manifest {
@@ -49,7 +53,9 @@ function matches(finding: Finding, expected: ExpectedFinding): boolean {
     finding.check === expected.check &&
     finding.status === expected.status &&
     (expected.wcag === undefined || finding.wcag?.sc === expected.wcag) &&
-    (expected.rule === undefined || finding.rule === expected.rule)
+    (expected.rule === undefined || finding.rule === expected.rule) &&
+    (expected.frame === undefined || finding.frame === expected.frame) &&
+    (expected.flags ?? []).every((flag) => finding.evidence.flags.includes(flag))
   );
 }
 

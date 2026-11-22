@@ -1,0 +1,10 @@
+{
+  "description": "A script keeps Tab inside two buttons. The walk stops cleanly; the unreachable button is measured with a forced state.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#t1", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#t2", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#after", "check": "focus-indicator", "status": "likely", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change", "flags": ["forced"]},
+    { "selector": "html", "check": "focus-indicator", "status": "info", "rule": "focus-indicator/walk" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "description": "A link is half covered by a fixed header: inventoried, not a 2.4.11 (Minimum) failure.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#partial", "check": "focus-indicator", "status": "info", "wcag": "2.4.11", "rule": "focus-indicator/partly-obscured" }
+  ]
+}

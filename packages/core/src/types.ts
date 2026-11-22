@@ -71,8 +71,53 @@ export interface Environment {
   colorScheme: 'light' | 'dark';
 }
 
+/** One element that received focus during collection. All boxes are CSS pixels in page coordinates. */
+export interface FocusStop {
+  selector: string;
+  /** Selectors of the enclosing same-origin iframes, outermost first, joined with " >>> ". Empty in the main frame. */
+  frame: string;
+  /** Border box while focused. */
+  box: Box;
+  /** `tab`: reached with real Tab presses. `forced`: pseudo-state forced through CDP, lower confidence. */
+  reachedBy: 'tab' | 'forced';
+  /** Text field, textarea or contenteditable: the (hidden) caret may be its only focus cue. */
+  textEntry: boolean;
+  /** An author rule matched in the focused state declares an outline or has :focus in its selector. */
+  authorModified: boolean;
+  /** Cross-origin iframe: focus went inside and could not be followed. */
+  opaqueFrame: boolean;
+  /**
+   * Where the browser left the element when it received focus, before collection scrolled it:
+   * how many of the sampled points were covered by fixed or sticky content. Null when not sampled.
+   */
+  obscured: { covered: number; sampled: number; by: string } | null;
+  /** The box moved or resized between the unfocused and the focused state. */
+  geometryChanged: boolean;
+  /** Crop ids of the two captures of the same region; null when the element could not be captured. */
+  crops: { focused: string; unfocused: string } | null;
+  /** Why `crops` is null. */
+  notCaptured?: 'no-box' | 'obscured' | 'outside-viewport';
+  /**
+   * Evaluated only when the two crops are identical: bounding box of what changed elsewhere
+   * in the viewport, or null when nothing did. Undefined when not evaluated.
+   */
+  outsideChange?: Box | null;
+}
+
+export interface FocusWalk {
+  stops: FocusStop[];
+  /** `cycle`: focus came back to a visited element. `limit`: a configured maximum was hit. */
+  stoppedBy: 'cycle' | 'limit' | 'no-focusable';
+  /** Focusable elements the Tab walk never reached. */
+  unreached: number;
+  /** How many of those were measured with a forced state. */
+  forced: number;
+}
+
 export interface Snapshot {
   environment: Environment;
+  /** Present when the focus-indicator check was collected. */
+  focus?: FocusWalk;
   nodes: SnapshotNode[];
   axTree: AxNode[];
   screenshots: {
@@ -131,9 +176,66 @@ export interface Check {
   evaluate(snapshot: Snapshot, config: Config): FindingDraft[];
 }
 
+export interface FocusConfig {
+  /**
+   * Device pixels per CSS pixel while measuring. At 2, a 1 CSS px line is two device pixels
+   * wide, so it has pixels of its true colour and not only anti-aliased ones.
+   */
+  deviceScaleFactor: number;
+  /** Margin captured around the element (and its labels). Larger outline offsets fall back to the viewport diff. */
+  clipMarginCssPx: number;
+  /** The Tab walk stops after this many elements. */
+  maxTabStops: number;
+  /** At most this many unreached focusable elements are measured with a forced state. */
+  maxForced: number;
+  /** Tab presses allowed inside one cross-origin iframe before the walk gives up. */
+  maxTabsInOpaqueFrame: number;
+  /** Animation frames to wait after each state change before capturing. */
+  settleFrames: number;
+  /** Upper bound for that wait, for pages where animation frames do not fire. */
+  settleTimeoutMs: number;
+  /** Longest wait for web fonts before the walk starts. */
+  fontsTimeoutMs: number;
+  /** CIEDE2000 difference above which a pixel counts as changed. Around 1 is just noticeable. */
+  diffDeltaE: number;
+  /** Changed regions smaller than this many square CSS pixels are discarded as noise. */
+  minComponentAreaCssPx2: number;
+  /** Changed regions measured per element, largest first. */
+  maxComponents: number;
+  /** Skipped next to an indicator before sampling adjacent colours: blended edge pixels. */
+  adjacentGapCssPx: number;
+  /** Width of the band sampled for adjacent colours. Kept under a 2px outline-offset. */
+  adjacentBandCssPx: number;
+  /** Colours closer than this (CIEDE2000) are the same colour when looking for dominant ones. */
+  clusterDeltaE: number;
+  /** A colour inside an indicator is considered only above this share of it. */
+  minIndicatorShare: number;
+  /** Below that share, a colour still counts if it reaches this share and forms a solid block (a bar, a ring). */
+  minorPartMinShare: number;
+  /** Side of that solid block. */
+  minorPartSolidCssPx: number;
+  /** An adjacent colour is considered only above this share of the sampled band. */
+  minAdjacentShare: number;
+  /** WCAG 1.4.11. */
+  contrastThreshold: number;
+  /** From here up to the threshold a low ratio is `likely`, not `fail`: absorbs anti-aliasing error. */
+  likelyBandFloor: number;
+  /** A changed region thicker than this in both directions, and covering its box, is a fill. */
+  strokeMaxThicknessCssPx: number;
+  /** Share of its bounding box a region must cover to be a fill. */
+  fillMinCoverage: number;
+  /** An unmodified browser indicator stays within this distance of the element box. */
+  defaultRingMaxCssPx: number;
+  /** Points per side of the grid sampled for 2.4.11. */
+  obscuredGrid: number;
+  /** Box movement below this is not a geometry change. */
+  geometryToleranceCssPx: number;
+}
+
 export interface Config {
   /** Checks to run, in any order. */
   checks: CheckId[];
+  focus: FocusConfig;
 }
 
 export interface ScanResult {

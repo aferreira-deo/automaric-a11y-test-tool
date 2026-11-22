@@ -1,14 +1,8 @@
-import type { Environment, Snapshot } from '@a11y-vision/core';
+import type { Config, Environment, Snapshot } from '@a11y-vision/core';
+import { collectFocus } from './focus.js';
+import type { CdpSession } from './session.js';
 
-/**
- * The slice of a CDP client the collector needs.
- * Playwright's CDPSession and a thin wrapper over chrome.debugger both satisfy it.
- */
-export interface CdpSession {
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
-  on(event: string, handler: (params: unknown) => void): void;
-  off(event: string, handler: (params: unknown) => void): void;
-}
+export type { CdpSession } from './session.js';
 
 interface EvaluateResponse {
   result: { value?: unknown };
@@ -30,13 +24,19 @@ async function evaluate(cdp: CdpSession, expression: string): Promise<unknown> {
   return response.result.value;
 }
 
-/** M0: environment only. Nodes, accessibility tree and screenshots arrive with the checks that need them. */
-export async function collectSnapshot(cdp: CdpSession): Promise<Snapshot> {
+/** Collects what the configured checks need, and nothing else. */
+export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<Snapshot> {
   const environment = (await evaluate(cdp, ENVIRONMENT_EXPRESSION)) as Environment;
-  return {
+  const snapshot: Snapshot = {
     environment,
     nodes: [],
     axTree: [],
     screenshots: { tiles: [], clips: {} },
   };
+  if (config.checks.includes('focus-indicator')) {
+    snapshot.focus = await collectFocus(cdp, config.focus, snapshot.screenshots.clips);
+    // The captures were taken at this scale, whatever the page had before.
+    snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
+  }
+  return snapshot;
 }

@@ -3,8 +3,29 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M0 (scaffold). No accessibility check is implemented yet; the only check is `noop`,
-which exists to exercise the pipeline.
+Status: M1. One check is implemented, `focus-indicator` (2.4.7, 1.4.11 for the indicator, 2.4.11), with no AI involved.
+
+## Use
+
+```sh
+node packages/cli/dist/bin.js scan https://example.com --html report.html --crops crops -o report.json
+```
+
+Exit code 1 means at least one `fail`. `likely`, `advisory` and `info` never fail a run.
+
+```ts
+import { A11yVision } from '@a11y-vision/playwright';
+
+const result = await new A11yVision({ page }).analyze();
+```
+
+Chromium only. While it runs, the scan changes the page (device scale factor 2, reduced motion, a style sheet that
+removes transitions and the caret, focus and scroll position) and restores it afterwards. Focus and blur events do
+reach page scripts.
+
+Known limits of the focus check: content inside cross-origin iframes and closed shadow roots is not measured; an
+overlay in a parent document covering an iframe is not seen by the 2.4.11 test; elements outside the Tab order are
+measured with a forced pseudo-state and never reported above `likely`.
 
 ## Development
 
@@ -20,7 +41,8 @@ Individual steps: `lint`, `build`, `typecheck`, `test` (vitest), `test:browser` 
 `typecheck` and `test:browser` read the packages through their built output, so run `build` first.
 
 ```sh
-node packages/cli/dist/bin.js scan https://example.com
+node e2e/support/fixture-server.mjs 4173 &   # then, to print findings next to manifests:
+node e2e/support/dump.mjs focus-indicator/gradient
 ```
 
 ## Layout

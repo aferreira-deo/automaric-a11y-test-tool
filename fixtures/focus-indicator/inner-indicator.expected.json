@@ -1,0 +1,8 @@
+{
+  "description": "Indicators drawn inside the component: negative outline-offset and inset box-shadow, both on dark fills.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#inset-outline", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#inset-shadow", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" }
+  ]
+}

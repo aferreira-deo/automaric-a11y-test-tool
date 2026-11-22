@@ -1,0 +1,7 @@
+{
+  "description": "Focus adds only an underline. #0645ad passes; a #a6a6a6 underline is 2.44:1 against white.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#pale-underline", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

@@ -4,6 +4,16 @@
   "private": true,
   "description": "Types, result schema, pure candidate generators, measurers and scoring",
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"]
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "fast-png": "^8.0.0"
+  }
 }

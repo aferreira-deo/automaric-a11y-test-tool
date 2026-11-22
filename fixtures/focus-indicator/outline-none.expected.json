@@ -1,0 +1,8 @@
+{
+  "description": "outline removed and nothing replaces it: no visible change on focus.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#none-button", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" },
+    { "selector": "#none-link", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" }
+  ]
+}

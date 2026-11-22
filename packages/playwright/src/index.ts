@@ -1,7 +1,7 @@
 import { collectSnapshot } from '@a11y-vision/collector-cdp';
 import type { CdpSession } from '@a11y-vision/collector-cdp';
 import { buildResult, resolveConfig } from '@a11y-vision/core';
-import type { CheckId, ConfigInput, ScanResult } from '@a11y-vision/core';
+import type { CheckId, ConfigInput, Png, ScanResult } from '@a11y-vision/core';
 import type { Page } from 'playwright-core';
 
 /**
@@ -30,6 +30,11 @@ export class A11yVision {
   }
 
   async analyze(): Promise<ScanResult> {
+    return (await this.analyzeWithEvidence()).result;
+  }
+
+  /** Like analyze(), plus the PNG crops the findings refer to, keyed by the ids in `evidence.crops`. */
+  async analyzeWithEvidence(): Promise<{ result: ScanResult; crops: Record<string, Png> }> {
     const config = resolveConfig(this.#config);
     const session = await this.#page.context().newCDPSession(this.#page);
     // Playwright types `send`/`on` against its own protocol map; the collector speaks plain CDP.
@@ -39,8 +44,14 @@ export class A11yVision {
       off: (event, handler) => void session.off(event as never, handler as never),
     };
     try {
-      const snapshot = await collectSnapshot(cdp);
-      return buildResult(snapshot, config, new Date());
+      const snapshot = await collectSnapshot(cdp, config);
+      const result = buildResult(snapshot, config, new Date());
+      const crops: Record<string, Png> = {};
+      for (const id of result.findings.flatMap((finding) => finding.evidence.crops)) {
+        const clip = snapshot.screenshots.clips[id];
+        if (clip) crops[id] = clip.png;
+      }
+      return { result, crops };
     } finally {
       await session.detach();
     }

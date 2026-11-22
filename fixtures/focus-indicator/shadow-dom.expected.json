@@ -1,0 +1,8 @@
+{
+  "description": "Controls inside an open shadow root. The selector joins host and inner selector with \">>>\".",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#host >>> #good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#host >>> #bad", "check": "focus-indicator", "status": "fail", "wcag": "2.4.7", "rule": "focus-indicator/no-visible-change" }
+  ]
+}

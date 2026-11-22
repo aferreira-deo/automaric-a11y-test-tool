@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: sticky-header-partial</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      body { margin: 0; }
+      header { position: fixed; top: 0; left: 0; right: 0; height: 80px; background: #1a1a1a; color: #fff; }
+      #partial { position: absolute; top: 68px; left: 32px; }
+      main { padding: 140px 32px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a id="partial" class="good" href="#">Half under the header</a>
+      <p class="row"><a id="visible" class="good" href="#">Visible link</a></p>
+    </main>
+    <header>Site header</header>
+  </body>
+</html>

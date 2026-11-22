@@ -58,7 +58,7 @@ describe('fingerprint', () => {
 
 describe('runChecks', () => {
   it('runs the noop check', () => {
-    const findings = runChecks(snapshot, resolveConfig());
+    const findings = runChecks(snapshot, resolveConfig({ checks: ['noop'] }));
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ check: 'noop', status: 'info', selector: 'html', wcag: null });
     expect(findings[0]?.id).toMatch(/^[0-9a-f]{16}$/);
@@ -70,14 +70,14 @@ describe('runChecks', () => {
     expect(() => runChecks(snapshot, resolveConfig({ checks: ['headings'] }))).toThrow(/Unknown check "headings"/);
   });
   it('gives identical findings on two runs', () => {
-    const config = resolveConfig();
+    const config = resolveConfig({ checks: ['noop'] });
     expect(runChecks(snapshot, config)).toEqual(runChecks(snapshot, config));
   });
 });
 
 describe('buildResult', () => {
   it('has no failures for an info-only result', () => {
-    const result = buildResult(snapshot, resolveConfig(), new Date('2026-01-01T00:00:00Z'));
+    const result = buildResult(snapshot, resolveConfig({ checks: ['noop'] }), new Date('2026-01-01T00:00:00Z'));
     expect(result.timestamp).toBe('2026-01-01T00:00:00.000Z');
     expect(hasFailures(result)).toBe(false);
   });

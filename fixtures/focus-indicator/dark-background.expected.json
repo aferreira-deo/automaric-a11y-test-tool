@@ -1,0 +1,8 @@
+{
+  "description": "Dark page. A #ffdd00 outline passes; a #333 outline on #111 is 1.5:1.",
+  "checks": ["focus-indicator"],
+  "expected": [
+    { "selector": "#good", "check": "focus-indicator", "status": "info", "wcag": "1.4.11", "rule": "focus-indicator/measured" },
+    { "selector": "#bad", "check": "focus-indicator", "status": "fail", "wcag": "1.4.11", "rule": "focus-indicator/low-contrast" }
+  ]
+}

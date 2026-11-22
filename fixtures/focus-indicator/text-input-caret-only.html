@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>focus-indicator: text-input-caret-only</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 48px; }
+      button, .btn { font: inherit; padding: 8px 16px; background: #fff; color: #1a1a1a; border: 1px solid #595959; border-radius: 4px; }
+      a { color: #0645ad; }
+      .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
+      input, textarea { font: inherit; padding: 6px 8px; border: 1px solid #595959; outline: none; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><label for="caret-input">Name</label> <input id="caret-input" type="text" /></p>
+    <p class="row"><label for="caret-textarea">Comment</label> <textarea id="caret-textarea" rows="3"></textarea></p>
+  </body>
+</html>
