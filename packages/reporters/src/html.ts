@@ -57,6 +57,7 @@ function statusOf(finding: Finding): Status {
 function cropLabel(id: string): string {
   if (id.endsWith('-focused.png')) return 'Focused';
   if (id.endsWith('-unfocused.png')) return 'Not focused';
+  if (id.startsWith('icon-contrast/')) return 'At rest';
   return 'Capture';
 }
 

@@ -1,4 +1,4 @@
-import type { CheckId, Config, FocusConfig } from './types.js';
+import type { CheckId, Config, FocusConfig, IconConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +6,7 @@ import type { CheckId, Config, FocusConfig } from './types.js';
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator'],
+  checks: ['focus-indicator', 'icon-contrast'],
   focus: {
     deviceScaleFactor: 2,
     clipMarginCssPx: 12,
@@ -36,13 +36,50 @@ export const defaultConfig: Config = {
     invisibleCoverMaxOpacity: 0,
     geometryToleranceCssPx: 1,
   },
+  icon: {
+    maxCandidates: 300,
+    clipMarginCssPx: 8,
+    minControlSizeCssPx: 4,
+    maxGraphicSizeCssPx: 64,
+    iconFontFamilyPattern: 'icon|glyph|awesome|material symbols|fontello|icomoon',
+    inactiveHintPattern: 'disabled|inactive',
+    logoHintPattern: 'logo|brand',
+    minVisibleTextCssPx: 2,
+    boundaryWrapperLevels: 3,
+    boundaryWrapperSlackCssPx: 40,
+    coverGrid: 3,
+    clusterDeltaE: 5,
+    backgroundGapCssPx: 0.5,
+    backgroundBandCssPx: 1.5,
+    uniformBackgroundMinShare: 0.6,
+    minBackgroundShare: 0.05,
+    minInkShare: 0.004,
+    minPartShare: 0.12,
+    minSolidPartShare: 0.01,
+    blendToleranceRgb: 14,
+    minInteriorShare: 0.1,
+    flatBlockCssPx: 2,
+    maxParts: 3,
+    complexResidualShare: 0.25,
+    declaredBlendMinShare: 0.9,
+    contrastThreshold: 3,
+    likelyBandFloor: 2.7,
+    boundaryReachCssPx: 3,
+    boundaryDepthCssPx: 4,
+    boundarySideShare: 0.3,
+    boundaryMinSideCssPx: 6,
+    boundaryMinShare: 0.06,
+    boundaryClusterDeltaE: 2,
+    captureAttempts: 3,
+  },
 };
 
-export type ConfigInput = { checks?: CheckId[]; focus?: Partial<FocusConfig> };
+export type ConfigInput = { checks?: CheckId[]; focus?: Partial<FocusConfig>; icon?: Partial<IconConfig> };
 
 export function resolveConfig(input: ConfigInput = {}): Config {
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
+    icon: { ...defaultConfig.icon, ...input.icon },
   };
 }

@@ -1,0 +1,12 @@
+{
+  "description": "Icons of several colours and gradients. Never a fail: likely when a part is under 3:1, info when every part reaches it. A small image of many colours (an avatar) is inventory only.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#pale-part", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-multi-colour", "flags": ["multiColour"] },
+    { "selector": "#all-parts-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["multiColour"] },
+    { "selector": "#all-parts-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-multi-colour" },
+    { "selector": "#gradient-pale", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11" },
+    { "selector": "#gradient-dark", "check": "icon-contrast", "status": "info", "wcag": "1.4.11" },
+    { "selector": "#avatar", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-complex" }
+  ]
+}

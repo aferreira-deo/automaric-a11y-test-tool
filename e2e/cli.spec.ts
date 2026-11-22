@@ -45,13 +45,39 @@ test('scan --output writes the report to a file', async ({ baseURL }, testInfo) 
   expect(report.a11yVision.findings).toHaveLength(1);
 });
 
-test('the default check is focus-indicator: a fail exits 1 and lands in violations', async ({ baseURL }) => {
+test('focus-indicator is a default check: a fail exits 1 and lands in violations', async ({ baseURL }) => {
   const { code, stdout } = await cli('scan', `${baseURL}/focus-indicator/outline-none.html`);
   expect(code).toBe(1);
   const report = JSON.parse(stdout) as Report;
   expect(report.violations).toHaveLength(1);
   expect(report.violations[0]).toMatchObject({ id: 'focus-indicator/no-visible-change', tags: ['wcag247'] });
   expect(report.violations[0]!.nodes.map((node) => node.target[0]).sort()).toEqual(['#none-button', '#none-link']);
+});
+
+test('icon-contrast is a default check too, and can be selected alone', async ({ baseURL }, testInfo) => {
+  const url = `${baseURL}/icon-contrast/svg-currentcolor.html`;
+  const both = JSON.parse((await cli('scan', url)).stdout) as Report;
+  expect(new Set(both.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['focus-indicator', 'icon-contrast']));
+
+  const html = testInfo.outputPath('out', 'report.html');
+  const crops = testInfo.outputPath('out', 'crops');
+  const { code, stdout } = await cli('scan', url, '--checks', 'icon-contrast', '--html', html, '--crops', crops);
+  expect(code).toBe(1);
+  const report = JSON.parse(stdout) as Report;
+  expect(new Set(report.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['icon-contrast']));
+  const low = report.violations.find((rule) => rule.id === 'icon-contrast/icon-low-contrast')!;
+  expect(low.tags).toEqual(['wcag1411']);
+  expect(low.nodes.map((node) => node.target[0]).sort()).toEqual(['#link-low', '#low', '#on-dark-low', '#stroke-low']);
+  // The one in the band just under 3:1 needs a tester.
+  expect(report.incomplete).toHaveLength(1);
+
+  const ids = report.a11yVision.findings.flatMap((finding) => finding.evidence.crops);
+  expect((await readdir(`${crops}/icon-contrast`)).length).toBe(new Set(ids).size);
+  const page = await readFile(html, 'utf8');
+  expect(page).toContain('icon-contrast/icon-low-contrast');
+  expect(page).toContain('<dt>Measured contrast</dt><dd>1.82:1</dd>');
+  expect(page).toContain('<span class="swatch" style="background:#c0c0c0"></span><code>#c0c0c0</code>');
+  expect(page).toContain('<figcaption>At rest</figcaption>');
 });
 
 test('likely findings do not fail the run and land in incomplete', async ({ baseURL }) => {

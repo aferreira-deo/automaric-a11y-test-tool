@@ -1,0 +1,15 @@
+{
+  "description": "Icons whose colour is inside an image: CSS background images, img elements and an image input. Measured from pixels. A hairline icon read as low is only likely, because no pixel shows its true colour.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["background-image", "pixelColour"] },
+    { "selector": "#good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#near", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#hairline-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["thin"] },
+    { "selector": "#child-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#child-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#img-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["img"] },
+    { "selector": "#img-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#input-image-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" }
+  ]
+}

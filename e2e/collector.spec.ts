@@ -65,6 +65,26 @@ for (const [name, options] of Object.entries(contexts)) {
   });
 }
 
+test('the page is left as it was found by the icon-contrast check alone', async ({ page }) => {
+  await page.goto('/focus-indicator/restore-state.html');
+  await page.evaluate(() => {
+    document.getElementById('prescrolled')!.scrollTop = 40;
+    (document.getElementById('frame') as HTMLIFrameElement).contentWindow!.scrollTo(0, 30);
+    window.scrollTo(0, 100);
+    document.getElementById('field')!.focus({ preventScroll: true });
+  });
+  const before = await pageState(page);
+  expect(before).toMatchObject({ active: 'field', windowScroll: [0, 100], scrolledScroller: 40, frameScroll: 30 });
+
+  const result = await new A11yVision({ page }).withChecks(['icon-contrast']).analyze();
+  // The fields were scrolled to, in the page and in the frame, so there was something to restore.
+  expect(result.findings.filter((finding) => finding.rule === 'icon-contrast/boundary-measured').map((finding) => finding.selector)).toEqual(
+    expect.arrayContaining(['#field', '#frame-field']),
+  );
+
+  expect(await pageState(page)).toEqual(before);
+});
+
 test('environment values are measured, not read from the page', async ({ page }) => {
   const dialogs: string[] = [];
   page.on('dialog', (dialog) => {

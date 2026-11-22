@@ -1,0 +1,8 @@
+{
+  "description": "A single-colour icon on a gradient. Info when it reaches 3:1 against every colour around it, likely (never fail) when it does not against some.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#dark-gradient", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["variedBackground"] },
+    { "selector": "#light-gradient", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-varied-background", "flags": ["variedBackground"] }
+  ]
+}

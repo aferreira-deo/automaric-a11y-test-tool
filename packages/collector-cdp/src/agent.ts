@@ -14,6 +14,71 @@ export interface AgentOptions {
   obscuredGrid: number;
   opaqueCoverMinAlpha: number;
   invisibleCoverMaxOpacity: number;
+  icon: AgentIconOptions;
+}
+
+/** Subset of IconConfig the agent needs; documented there. */
+export interface AgentIconOptions {
+  clipMarginCssPx: number;
+  minControlSizeCssPx: number;
+  maxGraphicSizeCssPx: number;
+  iconFontFamilyPattern: string;
+  inactiveHintPattern: string;
+  logoHintPattern: string;
+  minVisibleTextCssPx: number;
+  boundaryWrapperLevels: number;
+  boundaryWrapperSlackCssPx: number;
+  coverGrid: number;
+}
+
+export type AgentIconSource =
+  | 'svg'
+  | 'img'
+  | 'font-glyph'
+  | 'background-image'
+  | 'mask-image'
+  | 'pseudo-element'
+  | 'css-shape';
+
+export interface AgentIconItem {
+  /** Handle for later calls; stable for the lifetime of the agent. */
+  key: number;
+  selector: string;
+  frame: string;
+  kind: 'icon' | 'boundary';
+  disabled: boolean;
+  /** Icon controls: what draws the graphic, in a fixed order. */
+  sources: AgentIconSource[];
+  /** Icon controls: #rrggbb when computed styles give one opaque colour for the whole graphic. */
+  declaredColor: string | null;
+  /** Boundary controls. */
+  control: 'text-field' | 'select' | 'checkbox' | 'radio' | 'switch' | null;
+  /** Boundary controls: an input, textarea or select, whose default look belongs to the browser. */
+  native: boolean;
+  /** Signs in styles and markup that the control may be exempt; see IconCandidate.hints. */
+  hints: ('inactive' | 'logo')[];
+}
+
+export interface AgentIconSurvey {
+  total: number;
+  skipped: Record<string, number>;
+  items: AgentIconItem[];
+}
+
+/** All rectangles in page coordinates. */
+export interface AgentIconPrepared {
+  box: AgentRect | null;
+  /** Icon controls: box of the graphic, and whether it is the graphic's own box or the control's padding box. */
+  graphic: AgentRect | null;
+  graphicFrom: 'graphic' | 'control';
+  /** Icon controls: padding box of the control. */
+  room: AgentRect | null;
+  /** Boundary controls: the control's box, then its tight wrappers, innermost first. */
+  boxes: AgentRect[];
+  clip: AgentRect | null;
+  reason: 'no-box' | 'outside-viewport' | 'covered' | null;
+  clipped: boolean;
+  stable: boolean;
 }
 
 export interface AgentObscured {
@@ -75,6 +140,8 @@ export interface Agent {
   blurActive(): Promise<void>;
   viewport(): AgentRect;
   unreached(max: number): { total: number; items: AgentElementInfo[] };
+  iconSurvey(max: number): AgentIconSurvey;
+  prepareIcon(key: number): Promise<AgentIconPrepared>;
   element(key: number): Element;
   cleanup(): void;
 }
@@ -530,6 +597,633 @@ export function agentFactory(options: AgentOptions): Agent {
     }
   }
 
+  // ---------------------------------------------------------------------------------------
+  // icon-contrast: controls without visible text that show a graphic, and control boundaries.
+  // ---------------------------------------------------------------------------------------
+
+  const ICON_CONTROLS =
+    'a[href],button,summary,input[type="button"],input[type="submit"],input[type="reset"],input[type="image"],' +
+    '[role="button"],[role="link"],[role="menuitem"],[role="tab"]';
+  const BOUNDARY_CONTROLS = 'input,textarea,select,[role="checkbox"],[role="radio"],[role="switch"]';
+  const FIELD_TYPES = [...TEXT_INPUT_TYPES, 'date', 'datetime-local', 'month', 'week', 'time'];
+  const SVG_SHAPES = ['path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon'];
+  const SVG_GROUPS = ['g', 'svg', 'a'];
+  const SVG_NOT_PAINTED =
+    'defs,clipPath,mask,symbol,marker,pattern,linearGradient,radialGradient,title,desc,style,script,metadata';
+  const SVG_OPEN = ['line', 'polyline'];
+  const NOT_READABLE = ['canvas', 'video', 'object', 'embed', 'iframe', 'frame'];
+  const SOURCE_ORDER: AgentIconSource[] = [
+    'svg',
+    'img',
+    'font-glyph',
+    'background-image',
+    'mask-image',
+    'pseudo-element',
+    'css-shape',
+  ];
+  const VISIBLE = { visibilityProperty: true, opacityProperty: true };
+  const iconFamily = new RegExp(options.icon.iconFontFamilyPattern, 'i');
+  const inactiveHint = new RegExp(options.icon.inactiveHintPattern, 'i');
+  const logoHint = new RegExp(options.icon.logoHintPattern, 'i');
+
+  interface GraphicScan {
+    sources: Set<AgentIconSource>;
+    /** What has a box of its own. */
+    holders: (Element | Range)[];
+    /** A source without a box of its own: the graphic box is the padding box of the control. */
+    controlBox: boolean;
+    /** One entry per graphic found: its colour when computed styles give one, else null. */
+    declared: (string | null)[];
+    /** Visible text: the control is not identified by a graphic. */
+    text: boolean;
+    /** Content this check cannot read (a canvas, a broken image, generated content other than a string). */
+    unsupported: boolean;
+  }
+  interface IconInfo {
+    kind: 'icon' | 'boundary';
+    control: AgentIconItem['control'];
+    scan: GraphicScan | null;
+  }
+  const iconInfo = new Map<number, IconInfo>();
+
+  function parseColor(text: string): { r: number; g: number; b: number; a: number } | null {
+    const match = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(text.trim());
+    if (!match) return null;
+    const alpha = match[4];
+    const a = alpha === undefined ? 1 : alpha.endsWith('%') ? parseFloat(alpha) / 100 : parseFloat(alpha);
+    return { r: Math.round(Number(match[1])), g: Math.round(Number(match[2])), b: Math.round(Number(match[3])), a };
+  }
+
+  /** #rrggbb for a computed colour that is opaque sRGB; null for anything else. */
+  function opaqueHex(text: string): string | null {
+    const color = parseColor(text);
+    if (!color || color.a < 1) return null;
+    return '#' + [color.r, color.g, color.b].map((channel) => channel.toString(16).padStart(2, '0')).join('');
+  }
+
+  function plainRect(rect: { left: number; top: number; width: number; height: number }): AgentRect {
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }
+
+  function intersect(a: AgentRect, b: AgentRect): AgentRect {
+    const x = Math.max(a.x, b.x);
+    const y = Math.max(a.y, b.y);
+    return {
+      x,
+      y,
+      width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - x),
+      height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - y),
+    };
+  }
+
+  function parentElementOf(element: Element): Element | null {
+    const parent = composedParent(element);
+    return parent && parent.nodeType === 1 ? (parent as Element) : null;
+  }
+
+  /**
+   * True when what the element paints reaches the screen in the colours its styles compute to:
+   * no opacity, filter or blend mode on it or on anything it is nested in, frames included.
+   */
+  function paintsPlainly(element: Element): boolean {
+    for (let current: Element | null = element; current; ) {
+      const view = current.ownerDocument.defaultView;
+      if (!view) return false;
+      const style = view.getComputedStyle(current);
+      if (parseFloat(style.opacity) !== 1 || style.filter !== 'none' || style.mixBlendMode !== 'normal') return false;
+      if (current !== element && style.maskImage !== 'none') return false;
+      current = parentElementOf(current) ?? (current === current.ownerDocument.documentElement ? frameElementOf(current) : null);
+    }
+    return true;
+  }
+
+  /** The one opaque colour every painted shape of an inline SVG computes to, or null. */
+  function svgColor(svg: Element): string | null {
+    const view = svg.ownerDocument.defaultView;
+    if (!view || !paintsPlainly(svg)) return null;
+    const colors = new Set<string>();
+    for (const node of svg.querySelectorAll('*')) {
+      if (node.closest(SVG_NOT_PAINTED)) continue;
+      const name = node.localName;
+      const style = view.getComputedStyle(node);
+      if (style.display === 'none') continue;
+      if (parseFloat(style.opacity) !== 1 || style.filter !== 'none' || style.maskImage !== 'none') return null;
+      if (SVG_GROUPS.includes(name)) continue;
+      // use, image, text, foreignObject: what they paint is not in their own computed styles.
+      if (!SVG_SHAPES.includes(name)) return null;
+      if (style.visibility !== 'visible') continue;
+      if (style.fill !== 'none' && !SVG_OPEN.includes(name)) {
+        const fill = opaqueHex(style.fill);
+        if (!fill || parseFloat(style.fillOpacity) !== 1) return null;
+        colors.add(fill);
+      }
+      if (style.stroke !== 'none' && parseFloat(style.strokeWidth) > 0) {
+        const stroke = opaqueHex(style.stroke);
+        if (!stroke || parseFloat(style.strokeOpacity) !== 1) return null;
+        colors.add(stroke);
+      }
+    }
+    return colors.size === 1 ? [...colors][0]! : null;
+  }
+
+  function isPrivateUse(text: string): boolean {
+    for (const char of text) {
+      const code = char.codePointAt(0)!;
+      if (/\s/.test(char)) continue;
+      const privateUse =
+        (code >= 0xe000 && code <= 0xf8ff) || (code >= 0xf0000 && code <= 0xffffd) || (code >= 0x100000 && code <= 0x10fffd);
+      if (!privateUse) return false;
+    }
+    return true;
+  }
+
+  function isGlyph(text: string, fontFamily: string): boolean {
+    const first = (fontFamily.split(',')[0] ?? '').trim().replace(/^["']|["']$/g, '');
+    return isPrivateUse(text) || iconFamily.test(first);
+  }
+
+  function hasBorder(style: CSSStyleDeclaration): boolean {
+    const sides = [
+      [style.borderTopWidth, style.borderTopStyle, style.borderTopColor],
+      [style.borderRightWidth, style.borderRightStyle, style.borderRightColor],
+      [style.borderBottomWidth, style.borderBottomStyle, style.borderBottomColor],
+      [style.borderLeftWidth, style.borderLeftStyle, style.borderLeftColor],
+    ] as const;
+    return sides.some(([width, line, color]) => parseFloat(width) > 0 && line !== 'none' && line !== 'hidden' && alphaOf(color) > 0);
+  }
+
+  /**
+   * Where a text node shows on screen, in the client coordinates of its frame, or null when it
+   * does not: hidden, zero font size, transparent, clipped away (the usual "visually hidden"
+   * rules) or pushed off the page.
+   */
+  function textRect(text: Text, control: Element): AgentRect | null {
+    const holder = text.parentElement ?? hostOf(text.parentNode);
+    const view = holder?.ownerDocument.defaultView;
+    if (!holder || !view || !holder.checkVisibility(VISIBLE)) return null;
+    const style = view.getComputedStyle(holder);
+    if (parseFloat(style.fontSize) < 1 || alphaOf(style.color) === 0) return null;
+    const range = holder.ownerDocument.createRange();
+    range.selectNodeContents(text);
+    let box = plainRect(range.getBoundingClientRect());
+    for (let current: Element | null = holder; current; current = parentElementOf(current)) {
+      const own = view.getComputedStyle(current);
+      if (own.overflowX !== 'visible' || own.overflowY !== 'visible' || own.clip !== 'auto' || own.clipPath !== 'none') {
+        box = intersect(box, plainRect(current.getBoundingClientRect()));
+      }
+      if (current === control) break;
+    }
+    const root = holder.ownerDocument.documentElement;
+    box = intersect(box, { x: -view.scrollX, y: -view.scrollY, width: root.scrollWidth, height: root.scrollHeight });
+    const min = options.icon.minVisibleTextCssPx;
+    return box.width >= min && box.height >= min ? box : null;
+  }
+
+  function composedChildren(element: Element): Node[] {
+    if (element.localName === 'slot') {
+      const assigned = (element as HTMLSlotElement).assignedNodes({ flatten: true });
+      if (assigned.length > 0) return assigned;
+    }
+    return [...(element.shadowRoot ?? element).childNodes];
+  }
+
+  /** What a control shows: visible text, or the graphics that stand in for it. */
+  function scanGraphic(control: Element): GraphicScan {
+    const scan: GraphicScan = {
+      sources: new Set(),
+      holders: [],
+      controlBox: false,
+      declared: [],
+      text: false,
+      unsupported: false,
+    };
+    const view = control.ownerDocument.defaultView;
+    if (!view) return scan;
+
+    const place = (element: Element): void => {
+      const rect = element.getBoundingClientRect();
+      if (element === control || rect.width < 1 || rect.height < 1) scan.controlBox = true;
+      else scan.holders.push(element);
+    };
+    const add = (source: AgentIconSource, color: string | null): void => {
+      scan.sources.add(source);
+      scan.declared.push(color);
+    };
+
+    const pseudo = (element: Element, which: '::before' | '::after'): void => {
+      const style = view.getComputedStyle(element, which);
+      const content = style.content;
+      if (content === 'none' || content === 'normal' || style.display === 'none') return;
+      if (style.visibility !== 'visible' || parseFloat(style.opacity) === 0) return;
+      const plain = parseFloat(style.opacity) === 1 && style.filter === 'none' && style.mixBlendMode === 'normal' && paintsPlainly(element);
+      if (content.includes('url(')) {
+        place(element);
+        add('pseudo-element', null);
+        return;
+      }
+      const quoted = /^"((?:[^"\\]|\\.)*)"$/.exec(content);
+      if (!quoted) {
+        // counter(), attr(), quotes: generated text this check does not read.
+        scan.unsupported = true;
+        return;
+      }
+      const value = quoted[1]!.replace(/\\(.)/g, '$1').trim();
+      if (value === '') {
+        if (style.maskImage.includes('url(')) {
+          place(element);
+          add('mask-image', plain && style.backgroundImage === 'none' ? opaqueHex(style.backgroundColor) : null);
+        } else if (style.backgroundImage.includes('url(')) {
+          place(element);
+          add('background-image', null);
+        } else if (alphaOf(style.backgroundColor) > 0 || hasBorder(style)) {
+          const width =
+            parseFloat(style.width) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+          const height =
+            parseFloat(style.height) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+          if (width >= 1 && height >= 1) {
+            place(element);
+            add('pseudo-element', null);
+          }
+        }
+        return;
+      }
+      if (parseFloat(style.fontSize) < 1 || alphaOf(style.color) === 0) return;
+      // Letters and digits are text, unless an icon font turns them into a glyph. A lone symbol is a graphic.
+      if (isGlyph(value, style.fontFamily) || !/[\p{L}\p{N}]/u.test(value)) {
+        place(element);
+        add('font-glyph', plain ? opaqueHex(style.color) : null);
+      } else {
+        scan.text = true;
+      }
+    };
+
+    const visit = (element: Element): void => {
+      const isControl = element === control;
+      const shown = isControl || element.checkVisibility(VISIBLE);
+      // `visibility: hidden` can be undone by a descendant; `display: none` and `opacity: 0` cannot.
+      if (!shown && !element.checkVisibility({ opacityProperty: true })) return;
+      const name = element.localName;
+      if (shown) {
+        if (NOT_READABLE.includes(name)) {
+          scan.unsupported = true;
+          return;
+        }
+        if (name === 'svg') {
+          const rect = element.getBoundingClientRect();
+          if (rect.width >= 1 && rect.height >= 1) {
+            scan.holders.push(element);
+            add('svg', svgColor(element));
+          }
+          return;
+        }
+        if (name === 'img') {
+          const image = element as HTMLImageElement;
+          // A broken image shows its alternative text instead.
+          if (!image.complete || image.naturalWidth === 0) scan.unsupported = true;
+          else {
+            place(element);
+            add('img', null);
+          }
+          return;
+        }
+        if (name === 'input') {
+          const input = element as HTMLInputElement;
+          if (input.type === 'image') {
+            place(element);
+            add('img', null);
+            return;
+          }
+          // Button inputs show their value, or a default label when there is no value attribute.
+          if (input.value.trim() !== '' || (input.type !== 'button' && !input.hasAttribute('value'))) scan.text = true;
+        }
+        const style = view.getComputedStyle(element);
+        if (style.maskImage.includes('url(')) {
+          place(element);
+          add('mask-image', style.backgroundImage === 'none' && paintsPlainly(element) ? opaqueHex(style.backgroundColor) : null);
+        } else if (style.backgroundImage.includes('url(')) {
+          place(element);
+          add('background-image', null);
+        } else if (
+          !isControl &&
+          element.childElementCount === 0 &&
+          !element.shadowRoot &&
+          (element.textContent ?? '').trim() === '' &&
+          (alphaOf(style.backgroundColor) > 0 || hasBorder(style))
+        ) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width >= 1 && rect.height >= 1) {
+            scan.holders.push(element);
+            add('css-shape', null);
+          }
+        }
+        pseudo(element, '::before');
+        pseudo(element, '::after');
+      }
+      for (const child of composedChildren(element)) {
+        if (child.nodeType === 1) visit(child as Element);
+        if (child.nodeType !== 3) continue;
+        const text = child as Text;
+        const value = text.data.trim();
+        if (value === '' || !textRect(text, control)) continue;
+        const holder = text.parentElement ?? hostOf(text.parentNode);
+        const family = holder ? view.getComputedStyle(holder) : null;
+        if (holder && family && isGlyph(value, family.fontFamily)) {
+          const range = holder.ownerDocument.createRange();
+          range.selectNodeContents(text);
+          scan.holders.push(range);
+          add('font-glyph', paintsPlainly(holder) ? opaqueHex(family.color) : null);
+        } else {
+          scan.text = true;
+        }
+      }
+    };
+    visit(control);
+    return scan;
+  }
+
+  /** Padding box in client coordinates; the border box for an inline or transformed element. */
+  function paddingRect(element: Element): AgentRect {
+    const rect = element.getBoundingClientRect();
+    const html = element as HTMLElement;
+    const layoutMatches = Math.abs(html.offsetWidth - rect.width) < 1 && Math.abs(html.offsetHeight - rect.height) < 1;
+    if (!layoutMatches || element.clientWidth <= 0 || element.clientHeight <= 0) return plainRect(rect);
+    return {
+      x: rect.left + element.clientLeft,
+      y: rect.top + element.clientTop,
+      width: element.clientWidth,
+      height: element.clientHeight,
+    };
+  }
+
+  /** Box of the graphic in client coordinates of its frame. */
+  function graphicRect(control: Element, scan: GraphicScan): AgentRect {
+    if (scan.controlBox || scan.holders.length === 0) return paddingRect(control);
+    let box: AgentRect | null = null;
+    for (const holder of scan.holders) {
+      const rect = plainRect(holder.getBoundingClientRect());
+      if (rect.width < 1 || rect.height < 1) continue;
+      box = box ? union(box, rect) : rect;
+    }
+    return box ?? paddingRect(control);
+  }
+
+  function boundaryControlOf(element: Element): AgentIconItem['control'] {
+    const role = element.getAttribute('role');
+    const name = element.localName;
+    if (name === 'input') {
+      const type = (element as HTMLInputElement).type;
+      if (type === 'checkbox') return role === 'switch' ? 'switch' : 'checkbox';
+      if (type === 'radio') return 'radio';
+      return FIELD_TYPES.includes(type) ? 'text-field' : null;
+    }
+    if (name === 'textarea') return 'text-field';
+    if (name === 'select') return 'select';
+    if (role === 'checkbox' || role === 'radio' || role === 'switch') return role;
+    return null;
+  }
+
+  /**
+   * Signs that a control may be exempt from 1.4.11 although nothing says so programmatically.
+   * `inactive`: it takes no pointer events, shows a not-allowed cursor, or it or its parent has a
+   * class naming it disabled. `logo`: a class, id, name or file name on it or on its graphic says logo.
+   */
+  function hintsOf(control: Element, scan: GraphicScan | null): ('inactive' | 'logo')[] {
+    const hints: ('inactive' | 'logo')[] = [];
+    const style = control.ownerDocument.defaultView?.getComputedStyle(control);
+    // Class names with a colon are state variants of utility CSS ("disabled:opacity-50"): they
+    // say what the control would look like when disabled, not that it is.
+    const classes = ((control.getAttribute('class') ?? '') + ' ' + (control.parentElement?.getAttribute('class') ?? ''))
+      .split(/\s+/)
+      .filter((name) => !name.includes(':'));
+    if (style?.pointerEvents === 'none' || style?.cursor === 'not-allowed' || classes.some((name) => inactiveHint.test(name))) {
+      hints.push('inactive');
+    }
+    if (scan) {
+      const words: string[] = [];
+      const collect = (element: Element): void => {
+        for (const name of ['class', 'id', 'alt', 'title', 'aria-label']) words.push(element.getAttribute(name) ?? '');
+        // The file name only: a path or a host called "logos" says nothing about this image.
+        for (const name of ['src', 'href', 'xlink:href']) {
+          if (element.localName === 'a') continue;
+          words.push((element.getAttribute(name) ?? '').split(/[?#]/)[0]!.split('/').pop() ?? '');
+        }
+      };
+      collect(control);
+      for (const holder of scan.holders) {
+        if (!('localName' in holder)) continue;
+        collect(holder);
+        for (const inner of holder.querySelectorAll('title,use')) {
+          words.push(inner.localName === 'title' ? (inner.textContent ?? '') : (inner.getAttribute('href') ?? inner.getAttribute('xlink:href') ?? ''));
+        }
+      }
+      if (words.some((word) => logoHint.test(word))) hints.push('logo');
+    }
+    return hints;
+  }
+
+  function iconSurvey(max: number): AgentIconSurvey {
+    const skipped: Record<string, number> = { hidden: 0, small: 0, large: 0, noGraphic: 0, unsupported: 0 };
+    const items: AgentIconItem[] = [];
+    let total = 0;
+    const min = options.icon.minControlSizeCssPx;
+    eachElement(document, (element) => {
+      const control = boundaryControlOf(element);
+      const isIcon = control === null && element.matches(ICON_CONTROLS);
+      if (control === null && !isIcon) return;
+      if (element.closest('[inert]')) return;
+      if (!element.checkVisibility(VISIBLE)) {
+        skipped['hidden']!++;
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      let scan: GraphicScan | null = null;
+      if (isIcon) {
+        // A control that holds other controls is a container, not an icon button.
+        if (element.querySelector(ICON_CONTROLS + ',' + BOUNDARY_CONTROLS)) return;
+        scan = scanGraphic(element);
+        if (scan.text) return;
+        if (scan.unsupported) {
+          skipped['unsupported']!++;
+          return;
+        }
+        if (scan.sources.size === 0) {
+          skipped['noGraphic']!++;
+          return;
+        }
+        const graphic = graphicRect(element, scan);
+        if (graphic.width < min || graphic.height < min) {
+          skipped['small']!++;
+          return;
+        }
+        if (Math.max(graphic.width, graphic.height) > options.icon.maxGraphicSizeCssPx) {
+          skipped['large']!++;
+          return;
+        }
+      } else if (rect.width < min || rect.height < min) {
+        skipped['small']!++;
+        return;
+      }
+      total++;
+      if (items.length >= max) return;
+      const key = keyOf(element);
+      iconInfo.set(key, { kind: isIcon ? 'icon' : 'boundary', control, scan });
+      const declared = scan && scan.declared.length > 0 && scan.declared.every((color) => color === scan.declared[0]) ? scan.declared[0]! : null;
+      items.push({
+        key,
+        selector: selectorOf(element),
+        frame: frameOf(element),
+        kind: isIcon ? 'icon' : 'boundary',
+        disabled: element.matches(':disabled') || element.closest('[aria-disabled="true"]') !== null,
+        sources: scan ? SOURCE_ORDER.filter((source) => scan.sources.has(source)) : [],
+        declaredColor: declared,
+        control,
+        native: !isIcon && ['input', 'textarea', 'select'].includes(element.localName),
+        hints: hintsOf(element, scan),
+      });
+    });
+    return { total, skipped, items };
+  }
+
+  /** True when the element paints a box of its own: a border, a background or a shadow, also through a pseudo-element. */
+  function drawsBox(element: Element, view: Window): boolean {
+    const paints = (style: CSSStyleDeclaration): boolean =>
+      hasBorder(style) || alphaOf(style.backgroundColor) > 0 || style.backgroundImage !== 'none' || style.boxShadow !== 'none';
+    if (!element.checkVisibility(VISIBLE)) return false;
+    if (paints(view.getComputedStyle(element))) return true;
+    for (const which of ['::before', '::after']) {
+      const style = view.getComputedStyle(element, which);
+      if (style.content !== 'none' && style.content !== 'normal' && style.display !== 'none' && paints(style)) return true;
+    }
+    return false;
+  }
+
+  /** Offset from the client coordinates of the element's frame to those of the top-level viewport. */
+  function frameOffset(element: Element): { x: number; y: number } {
+    let x = 0;
+    let y = 0;
+    for (let frame = frameElementOf(element); frame; frame = frameElementOf(frame)) {
+      const outer = frame.getBoundingClientRect();
+      x += outer.left + frame.clientLeft;
+      y += outer.top + frame.clientTop;
+    }
+    return { x, y };
+  }
+
+  async function prepareIcon(key: number): Promise<AgentIconPrepared> {
+    const element = get(key);
+    const info = iconInfo.get(key);
+    if (!info) throw new Error('Unknown icon key ' + key);
+    ensureStableAround(element);
+    element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    await settle();
+
+    const doc = element.ownerDocument;
+    const view = doc.defaultView;
+    const offset = frameOffset(element);
+    const page = (rect: AgentRect): AgentRect => toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y });
+    const own = plainRect(element.getBoundingClientRect());
+    const result: AgentIconPrepared = {
+      box: own.width > 0 && own.height > 0 ? page(own) : null,
+      graphic: null,
+      graphicFrom: 'control',
+      room: null,
+      boxes: [],
+      clip: null,
+      reason: null,
+      clipped: false,
+      stable: isStable(element),
+    };
+    if (!view) return { ...result, reason: 'no-box' };
+
+    /** What has to be on screen and uncovered for the measurement to mean anything. */
+    let measured = own;
+    let region = own;
+    /** Content inside this element may lie over the measured area without hiding it from the check. */
+    let outer = element;
+    const points: [number, number][] = [];
+    if (info.kind === 'icon' && info.scan) {
+      const graphic = graphicRect(element, info.scan);
+      result.graphic = page(graphic);
+      result.graphicFrom = info.scan.controlBox || info.scan.holders.length === 0 ? 'control' : 'graphic';
+      result.room = page(paddingRect(element));
+      measured = graphic;
+      region = union(own, graphic);
+      const grid = options.icon.coverGrid;
+      for (let row = 0; row < grid; row++) {
+        for (let column = 0; column < grid; column++) {
+          points.push([graphic.x + ((column + 0.5) / grid) * graphic.width, graphic.y + ((row + 0.5) / grid) * graphic.height]);
+        }
+      }
+    } else {
+      const boxes = [own];
+      if (info.control === 'text-field' || info.control === 'select') {
+        for (let level = 0, current = element; level < options.icon.boundaryWrapperLevels; level++) {
+          const parent = parentElementOf(current);
+          if (!parent || parent === doc.body || parent === doc.documentElement) break;
+          const rect = plainRect(parent.getBoundingClientRect());
+          if (rect.height > own.height + options.icon.boundaryWrapperSlackCssPx) break;
+          // The wrapper itself, and anything else in it laid over the control (an outline element).
+          const drawn = drawsBox(parent, view) ? [rect] : [];
+          for (const sibling of parent.children) {
+            if (sibling === current || !drawsBox(sibling, view)) continue;
+            const over = plainRect(sibling.getBoundingClientRect());
+            const contains =
+              over.x <= own.x + 1 &&
+              over.y <= own.y + 1 &&
+              over.x + over.width >= own.x + own.width - 1 &&
+              over.y + over.height >= own.y + own.height - 1;
+            if (contains && over.height <= own.height + options.icon.boundaryWrapperSlackCssPx) drawn.push(over);
+          }
+          for (const box of drawn) {
+            boxes.push(box);
+            region = union(region, box);
+          }
+          if (drawn.length > 0) outer = parent;
+          current = parent;
+        }
+      }
+      result.boxes = boxes.map(page);
+      const inset = Math.min(2, own.width / 2, own.height / 2);
+      points.push(
+        [own.x + own.width / 2, own.y + inset],
+        [own.x + own.width - inset, own.y + own.height / 2],
+        [own.x + own.width / 2, own.y + own.height - inset],
+        [own.x + inset, own.y + own.height / 2],
+      );
+    }
+    if (measured.width < 1 || measured.height < 1) return { ...result, reason: 'no-box' };
+
+    const inside = (rect: AgentRect, width: number, height: number): boolean =>
+      rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width && rect.y + rect.height <= height;
+    const top = { ...measured, x: measured.x + offset.x, y: measured.y + offset.y };
+    result.clipped =
+      !inside(measured, view.innerWidth, view.innerHeight) || !inside(top, window.innerWidth, window.innerHeight);
+
+    let sampled = 0;
+    let covered = false;
+    for (const [x, y] of points) {
+      if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight) continue;
+      const hit = topElementAt(doc, x, y);
+      if (!hit) continue;
+      sampled++;
+      if (!composedContains(outer, hit) && !composedContains(hit, element)) covered = true;
+    }
+    if (sampled === 0) return { ...result, reason: 'outside-viewport' };
+    if (covered) return { ...result, reason: 'covered' };
+
+    const margin = options.icon.clipMarginCssPx;
+    const left = Math.max(0, region.x + offset.x - margin);
+    const upper = Math.max(0, region.y + offset.y - margin);
+    const right = Math.min(window.innerWidth, region.x + offset.x + region.width + margin);
+    const lower = Math.min(window.innerHeight, region.y + offset.y + region.height + margin);
+    if (right - left < 1 || lower - upper < 1) return { ...result, reason: 'outside-viewport' };
+    const x0 = Math.floor(left + window.scrollX);
+    const y0 = Math.floor(upper + window.scrollY);
+    const x1 = Math.ceil(right + window.scrollX);
+    const y1 = Math.ceil(lower + window.scrollY);
+    return { ...result, clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } };
+  }
+
   return {
     async stabilise() {
       ensureStable(document);
@@ -648,6 +1342,9 @@ export function agentFactory(options: AgentOptions): Agent {
       collectUnreached(document, found);
       return { total: found.length, items: found.slice(0, max).map((element) => describe(element, false)) };
     },
+
+    iconSurvey,
+    prepareIcon,
 
     element(key) {
       return get(key);

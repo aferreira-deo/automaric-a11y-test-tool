@@ -1,0 +1,17 @@
+{
+  "description": "Inline SVG icons painted with currentColor, in buttons and a link without visible text. Low ones fail, the one in the band just under 3:1 is likely, and a hairline icon is judged on its declared colour.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["svg", "declaredColour"] },
+    { "selector": "#good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#near", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#just-above", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#stroke-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#stroke-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#hairline-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["declaredColour"] },
+    { "selector": "#on-dark", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#on-dark-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#link-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "html", "check": "icon-contrast", "status": "info", "rule": "icon-contrast/survey" }
+  ]
+}

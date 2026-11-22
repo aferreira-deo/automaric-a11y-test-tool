@@ -1,0 +1,11 @@
+{
+  "description": "Icons whose painted colour is not a declared colour: opacity, a filter, and sprite icons referenced with use. They are measured from pixels.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#opacity-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["pixelColour"] },
+    { "selector": "#opacity-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["pixelColour"] },
+    { "selector": "#filter-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["pixelColour"] },
+    { "selector": "#use-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["pixelColour"] },
+    { "selector": "#use-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" }
+  ]
+}

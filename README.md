@@ -3,7 +3,12 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M1. One check is implemented, `focus-indicator` (2.4.7, 1.4.11 for the indicator, 2.4.11), with no AI involved.
+Status: M2. Two checks are implemented, with no AI involved, and both run by default:
+
+- `focus-indicator`: 2.4.7, 1.4.11 for the indicator, 2.4.11.
+- `icon-contrast`: 1.4.11 for the icon of controls without visible text, and for the boundary of form controls.
+
+`--checks focus-indicator` or `--checks icon-contrast` runs one of them.
 
 ## Use
 
@@ -20,6 +25,40 @@ const result = await new A11yVision({ page }).analyze();
 ```
 
 Chromium only.
+
+### What `icon-contrast` reports
+
+Everything is measured on a capture of the control at rest, at device scale factor 2.
+
+**Icons.** Candidates are links, buttons, `summary`, button inputs and elements with the role `button`, `link`,
+`menuitem` or `tab` that show no visible text and do show a graphic: inline SVG, `img`, an icon-font glyph, a CSS
+background image, a mask image, pseudo-element content, or shapes drawn with CSS. Visually hidden text is not visible
+text. A text character used as an icon in a text node (`×`) is text: its contrast is left to axe.
+
+- The icon colour is the computed colour when one opaque colour paints the whole graphic (SVG shapes that share a
+  fill or stroke, an icon-font glyph, the background colour under a mask) and the capture confirms it. Otherwise it is
+  read from pixels, where opacity, filters and images have had their effect.
+- The background is what surrounds the graphic inside the control, so a white icon on a blue button is measured
+  against the blue.
+- `fail`: one colour, on one background colour, under `likelyBandFloor` (2.7:1).
+- `likely`: from 2.7:1 to 3:1; an icon of several colours with a part under 3:1; a background of several colours
+  (a gradient, a picture) with one under 3:1 against the icon; strokes too thin for any pixel to show their colour;
+  a control that looks inactive or is named a logo (see below); any doubt about the capture.
+- `info`: everything measured at 3:1 or more, disabled controls (`disabled`, a disabled `fieldset`, `aria-disabled`),
+  pictures of many colours, and controls that could not be measured.
+
+**Boundaries.** Candidates are text fields, `textarea`, `select`, checkboxes, radios and switches, native or by role.
+For the middle of each side, the colours from 3 CSS px outside the box to 4 CSS px inside are collected, and the
+highest contrast between two of them is the result. That covers a border against the page, a border against the fill,
+a fill against the page and a ring drawn with `box-shadow`, and one side is enough (an underline). For a field, the
+elements wrapped tightly around it that draw a box of their own are measured too.
+
+- `likely`: no edge reaches 3:1. Never `fail`: whether the boundary is what identifies the control is a judgement.
+- `info`: an edge at 3:1 or more; a native control whose look no author rule changes (exempt, like the default focus
+  ring); a low `select`, because its arrow may identify it.
+
+The report shows, for every finding, the capture, the two colours and the ratio, and for icons where the colour came
+from (`declaredColour` or `pixelColour`).
 
 ### What a scan does to the page
 
@@ -46,6 +85,36 @@ Not put back:
 During the scan a context created with `isMobile` is measured with mobile emulation off, in a viewport of the page's
 layout size (`innerWidth` by `innerHeight`). The layout width is kept, but for a page without a viewport meta tag
 that is larger than the device screen, so more of the page counts as on screen than on the device.
+
+The icon check also blurs the focused element before it looks at the controls, so that a focus ring is not measured
+as part of a control. Focus is put back with everything else.
+
+### Known limits of the icon check
+
+- One state only: the page as it is. Hover, pressed, expanded and checked-versus-unchecked states are not visited.
+- A graphic larger than `maxGraphicSizeCssPx` (64) is left out as not being an icon, and at most `maxCandidates`
+  (300) controls are measured. The `icon-contrast/survey` finding gives the counts.
+- Read from pixels, a colour is trusted only if some of its pixels are surrounded by the graphic. Strokes of about
+  1 CSS px and less have none at this scale, so such an icon is `likely` at most unless its colour can be read from
+  styles. Sprite icons referenced with `use`, images and anything under opacity or a filter are read from pixels.
+- A gradient too faint to be told from a flat colour (under `clusterDeltaE`) is measured as that flat colour.
+- Icon fonts are recognised by Private Use Area characters, or by a font family matching `iconFontFamilyPattern`
+  for ligature fonts. A ligature font the pattern does not match makes its control look like one with visible text,
+  and it is left out.
+- Exemptions that cannot be measured are only hinted at: a class matching `inactiveHintPattern`, `pointer-events: none`
+  or a not-allowed cursor for inactive controls, and names matching `logoHintPattern` for logotypes. A hint turns a
+  `fail` into a `likely`. A brand mark used as an icon (a social network link) carries no such hint and can be a `fail`.
+- Whether an icon is needed to understand the control is not judged: every control without visible text is assumed to
+  be identified by its graphic.
+- A custom checkbox or radio built on a visually hidden native input and a styled sibling is not found: the input is
+  hidden, and the sibling is not a control.
+- For boundaries, text that touches the sampled edge (a value or a label with no gap) counts as a colour on that edge
+  and can make a faint boundary look sufficient. An attached button or a contrasting wrapper does the same.
+- Controls under other content at the sampled points (a cookie banner, a floating label outside the wrapper) are
+  recorded as not measured. As in the focus check, an overlay with `pointer-events: none` is not seen.
+- On a page whose layout is still moving, a control is captured again up to `captureAttempts` times and then
+  recorded as not measured.
+- Cross-origin iframes and closed shadow roots are not looked into.
 
 ### Known limits of the focus check
 
@@ -94,4 +163,4 @@ node e2e/support/dump.mjs focus-indicator/gradient
 | `packages/cli` | `scan <url>` |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, and the CLI. |
+| `e2e/` | Browser tests: every fixture against its manifest, the collector and the CLI. |

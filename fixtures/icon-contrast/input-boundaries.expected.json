@@ -1,0 +1,20 @@
+{
+  "description": "Field boundaries: border, fill, underline, box-shadow ring, border drawn by a wrapper, browser default. A boundary is never a fail: likely when no edge of the field or of a tight wrapper reaches 3:1.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#border-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#border-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#border-near", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#border-just", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#fill-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#fill-only", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#underline", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#filled-underline", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured", "flags": ["bottom"] },
+    { "selector": "#shadow-ring", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#wrapped", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured", "flags": ["wrapper"] },
+    { "selector": "#wrapped-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#native", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-default", "flags": ["browserDefault"] },
+    { "selector": "#textarea-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#select-low", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast", "flags": ["otherCue"] }
+  ]
+}

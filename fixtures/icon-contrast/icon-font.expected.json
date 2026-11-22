@@ -1,0 +1,11 @@
+{
+  "description": "Icon-font glyphs of the Private Use Area, as pseudo-element content and as a text node. The glyph colour is the computed text colour.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["font-glyph"] },
+    { "selector": "#good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["font-glyph"] },
+    { "selector": "#near", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#text-node-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["font-glyph"] },
+    { "selector": "#text-node-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" }
+  ]
+}

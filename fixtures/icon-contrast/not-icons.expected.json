@@ -1,0 +1,10 @@
+{
+  "description": "Precision controls. Controls with visible text (including a text character used as an icon, which is text contrast and left to axe), a stretched link, an empty link, a large linked picture and a hidden button produce no finding. Visually hidden text does not count as visible text.",
+  "checks": ["icon-contrast"],
+  "exact": true,
+  "expected": [
+    { "selector": "#sr-only-text", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#tile", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "html", "check": "icon-contrast", "status": "info", "rule": "icon-contrast/survey" }
+  ]
+}

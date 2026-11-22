@@ -136,10 +136,89 @@ export interface FocusWalk {
   forced: number;
 }
 
+/** What draws the graphic of an icon control. */
+export type IconSource =
+  | 'svg'
+  | 'img'
+  | 'font-glyph'
+  | 'background-image'
+  | 'mask-image'
+  | 'pseudo-element'
+  | 'css-shape';
+
+export type BoundaryControl = 'text-field' | 'select' | 'checkbox' | 'radio' | 'switch';
+
+/**
+ * One control collected for the icon-contrast check: an interactive element without visible
+ * text that renders a graphic (`icon`), or a form control identified by its boundary
+ * (`boundary`). All boxes are CSS pixels in page coordinates, taken while it was captured.
+ */
+export interface IconCandidate {
+  selector: string;
+  /** Same convention as FocusStop.frame. */
+  frame: string;
+  /** Border box of the control. */
+  box: Box;
+  kind: 'icon' | 'boundary';
+  /** `disabled`, inside a disabled fieldset, or `aria-disabled="true"` on it or an ancestor. Not measured. */
+  disabled: boolean;
+  icon?: {
+    /** Distinct sources found in the control, in a fixed order. */
+    sources: IconSource[];
+    /** Box of the graphic: the union of the elements that draw it, or the padding box of the control. */
+    box: Box;
+    /** Where `box` comes from. `control`: a source without a box of its own (pseudo-element, background). */
+    boxFrom: 'graphic' | 'control';
+    /** Padding box of the control: what lies inside it and around the graphic is the control's own fill. */
+    room: Box;
+    /**
+     * #rrggbb when the collector could read one opaque colour for the whole graphic from computed
+     * styles: SVG shapes that all paint the same solid colour, an icon-font glyph, the background
+     * colour under a mask. Null when opacity, a filter, a blend mode, a gradient, an image or
+     * several colours are involved: then only pixels can tell.
+     */
+    declaredColor: string | null;
+  };
+  boundary?: {
+    control: BoundaryControl;
+    /**
+     * False for a native control on which no author rule declares a border, background,
+     * box-shadow, appearance or accent colour: its look is the browser default.
+     */
+    authorModified: boolean;
+    /** Boxes whose edges are measured: the control first, then its tight wrappers, innermost first. */
+    boxes: Box[];
+  };
+  /**
+   * Signs in styles and markup that the control may be exempt although nothing says so
+   * programmatically. `inactive`: no pointer events, a not-allowed cursor, or a class naming it
+   * disabled. `logo`: a class, id, name or file name says logo. Either keeps a finding from being a `fail`.
+   */
+  hints?: ('inactive' | 'logo')[];
+  /** Crop id of the capture; null when the control could not be captured. */
+  crop: string | null;
+  /** Why `crop` is null. */
+  notCaptured?: 'no-box' | 'outside-viewport' | 'covered' | 'moving';
+  /** Once scrolled for capture, the measured region still reached beyond the viewport. */
+  clippedByViewport?: boolean;
+  /** See FocusStop.unstabilised. */
+  unstabilised?: boolean;
+}
+
+export interface IconSurvey {
+  candidates: IconCandidate[];
+  /** Controls that qualified, including those beyond `maxCandidates`. */
+  total: number;
+  /** Controls looked at and left out, by reason (`hidden`, `small`, `large`, `noGraphic`, `unsupported`). */
+  skipped: Record<string, number>;
+}
+
 export interface Snapshot {
   environment: Environment;
   /** Present when the focus-indicator check was collected. */
   focus?: FocusWalk;
+  /** Present when the icon-contrast check was collected. */
+  icons?: IconSurvey;
   nodes: SnapshotNode[];
   axTree: AxNode[];
   screenshots: {
@@ -261,10 +340,120 @@ export interface FocusConfig {
   geometryToleranceCssPx: number;
 }
 
+export interface IconConfig {
+  /** At most this many controls are captured and measured, in document order. */
+  maxCandidates: number;
+  /** Margin captured around the control. */
+  clipMarginCssPx: number;
+  /** Controls smaller than this on either side are not looked at (visually hidden inputs, 1px links). */
+  minControlSizeCssPx: number;
+  /**
+   * A graphic larger than this on either side is not an icon (a linked picture, a logo, a card
+   * that is one link) and is left out.
+   */
+  maxGraphicSizeCssPx: number;
+  /**
+   * A text node or pseudo-element whose first font family matches this pattern (case-insensitive)
+   * is an icon-font glyph even when its characters are letters (ligature icon fonts). Characters
+   * of the Private Use Areas are glyphs whatever the font.
+   */
+  iconFontFamilyPattern: string;
+  /**
+   * A control whose class, or whose parent's class, matches this pattern (case-insensitive) may
+   * be inactive without saying so with `disabled` or `aria-disabled`. Inactive controls are exempt.
+   */
+  inactiveHintPattern: string;
+  /**
+   * A control or graphic whose class, id, name or file name matches this pattern
+   * (case-insensitive) may be a logotype, which is exempt.
+   */
+  logoHintPattern: string;
+  /** Text clipped to less than this on either side is not visible text. */
+  minVisibleTextCssPx: number;
+  /** Wrappers of a field, up to this many levels, whose edges may be its boundary. */
+  boundaryWrapperLevels: number;
+  /** A wrapper counts only if it is at most this much taller than the field, above and below together. */
+  boundaryWrapperSlackCssPx: number;
+  /** Points per side of the grid hit-tested to make sure nothing else covers the graphic. */
+  coverGrid: number;
+
+  /** Colours closer than this (CIEDE2000) are the same colour. */
+  clusterDeltaE: number;
+  /** Skipped between the graphic box and the band sampled for its background. */
+  backgroundGapCssPx: number;
+  /** Width of that band. */
+  backgroundBandCssPx: number;
+  /** The background is one colour when its most common colour reaches this share of the band. */
+  uniformBackgroundMinShare: number;
+  /** On a background of several colours, the icon is compared with those above this share of the band. */
+  minBackgroundShare: number;
+  /** Below this share of the graphic box, what differs from the background is noise, not a graphic. */
+  minInkShare: number;
+  /** A colour is a part of the icon (not anti-aliasing residue) from this share of its ink. */
+  minPartShare: number;
+  /**
+   * Below `minPartShare`, a colour is still a part from this share if it forms a solid block: a
+   * small detail can be the part that matters (a dark glyph on a pale disc).
+   */
+  minSolidPartShare: number;
+  /**
+   * A colour within this distance (Euclidean, 8-bit RGB) of the line between two other colours
+   * is their anti-aliasing blend, not a colour of its own.
+   */
+  blendToleranceRgb: number;
+  /**
+   * A colour read from pixels is trusted as a true colour only if this share of its pixels is
+   * interior (surrounded by pixels of the graphic). Strokes of about 1 CSS px and less have no
+   * interior at the capture scale: every pixel of theirs may be blended with the background.
+   */
+  minInteriorShare: number;
+  /**
+   * A colour that forms a solid square of this side is a flat area of its own even when it lies
+   * between two other colours (a gradient, a lighter tone of the same hue). Anti-aliasing never does.
+   */
+  flatBlockCssPx: number;
+  /** More parts than this, and the graphic is a picture rather than an icon. */
+  maxParts: number;
+  /** Share of the ink that belongs to no part and no blend above which the graphic is a picture. */
+  complexResidualShare: number;
+  /**
+   * A declared colour is taken as the colour of the icon when pixels of it are found, or when at
+   * least this share of the ink is a blend of it with the background (strokes too thin to show it).
+   */
+  declaredBlendMinShare: number;
+  /** WCAG 1.4.11. */
+  contrastThreshold: number;
+  /** From here up to the threshold a low ratio is `likely`, not `fail`. */
+  likelyBandFloor: number;
+
+  /** How far outside a boundary box its edge is looked for (outer shadows, rings). */
+  boundaryReachCssPx: number;
+  /** How far inside. Kept small so that the content of the control stays out. */
+  boundaryDepthCssPx: number;
+  /** Share of each side, around its middle, that is sampled: stays clear of rounded corners. */
+  boundarySideShare: number;
+  /** Shortest length sampled on a side, whatever its share. */
+  boundaryMinSideCssPx: number;
+  /** A colour counts on an edge from this share of the sampled zone: a 0.5px line still does. */
+  boundaryMinShare: number;
+  /**
+   * Colours on an edge closer than this (CIEDE2000) are one colour. Smaller than `clusterDeltaE`:
+   * a pale fill next to a white page must stay two colours, or a line is compared with their mix.
+   */
+  boundaryClusterDeltaE: number;
+  /** Times a control is captured again when its box moved between measuring it and capturing it. */
+  captureAttempts: number;
+}
+
 export interface Config {
   /** Checks to run, in any order. */
   checks: CheckId[];
+  /**
+   * Focus-indicator settings. Its capture settings (`deviceScaleFactor`, `settleFrames`,
+   * `settleTimeoutMs`, `fontsTimeoutMs`) apply to every check that takes captures.
+   */
   focus: FocusConfig;
+  icon: IconConfig;
 }
 
 export interface ScanResult {

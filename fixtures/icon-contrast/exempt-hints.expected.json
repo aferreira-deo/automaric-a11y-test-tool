@@ -1,0 +1,13 @@
+{
+  "description": "Low-contrast icons on controls that look inactive (a class, pointer-events: none, a not-allowed cursor) or are named a logo. Both are exempt from 1.4.11 when true, so they are likely, never fail. The same icon without such a sign fails.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#class-disabled", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeInactive"] },
+    { "selector": "#not-allowed", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeInactive"] },
+    { "selector": "#is-inactive", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeInactive"] },
+    { "selector": "#logo-class", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo"] },
+    { "selector": "#logo-file", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["maybeLogo"] },
+    { "selector": "#variant-class", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#plain-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" }
+  ]
+}

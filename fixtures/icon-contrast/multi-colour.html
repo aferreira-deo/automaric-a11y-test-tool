@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: multi-colour</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg, img { display: block; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <!-- A dark part at 17.4:1 and a pale part (#ffe08a, 1.29:1): which one is essential is a judgement. -->
+      <button id="pale-part" class="icon" aria-label="Favourite"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="#1a1a1a" d="M2 2h9v20H2z" /><path fill="#ffe08a" d="M13 2h9v20h-9z" /></svg></button>
+      <!-- Two colours, both above 3:1 (#b00020 is 7.3:1). -->
+      <button id="all-parts-good" class="icon" aria-label="Favourite"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="#1a1a1a" d="M2 2h9v20H2z" /><path fill="#b00020" d="M13 2h9v20h-9z" /></svg></button>
+      <!-- Two colours, both low. -->
+      <button id="all-parts-low" class="icon" aria-label="Favourite"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="#d0d0d0" d="M2 2h9v20H2z" /><path fill="#ffe08a" d="M13 2h9v20h-9z" /></svg></button>
+    </p>
+    <p class="row">
+      <button id="gradient-pale" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="pale" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ececec" /><stop offset="1" stop-color="#a8a8a8" /></linearGradient></defs><path fill="url(#pale)" d="M3 3h18v18H3z" /></svg></button>
+      <button id="gradient-dark" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a1a1a" /><stop offset="1" stop-color="#595959" /></linearGradient></defs><path fill="url(#dark)" d="M3 3h18v18H3z" /></svg></button>
+    </p>
+    <p class="row">
+      <!-- A small image of many colours, such as an avatar: not judged. -->
+      <a id="avatar" class="icon" href="#top"><img alt="Profile of Ada" width="32" height="32" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23264653' d='M0 0h1v1H0z'/%3E%3Cpath fill='%232a9d8f' d='M1 0h1v1H1z'/%3E%3Cpath fill='%23e9c46a' d='M2 0h1v1H2z'/%3E%3Cpath fill='%23f4a261' d='M3 0h1v1H3z'/%3E%3Cpath fill='%23e76f51' d='M0 1h1v1H0z'/%3E%3Cpath fill='%23ffd6a5' d='M1 1h1v1H1z'/%3E%3Cpath fill='%23caffbf' d='M2 1h1v1H2z'/%3E%3Cpath fill='%239bf6ff' d='M3 1h1v1H3z'/%3E%3Cpath fill='%23a0c4ff' d='M0 2h1v1H0z'/%3E%3Cpath fill='%23bdb2ff' d='M1 2h1v1H1z'/%3E%3Cpath fill='%233a0ca3' d='M2 2h1v1H2z'/%3E%3Cpath fill='%237209b7' d='M3 2h1v1H3z'/%3E%3Cpath fill='%23f72585' d='M0 3h1v1H0z'/%3E%3Cpath fill='%234cc9f0' d='M1 3h1v1H1z'/%3E%3Cpath fill='%23606c38' d='M2 3h1v1H2z'/%3E%3Cpath fill='%23bc6c25' d='M3 3h1v1H3z'/%3E%3C/svg%3E" /></a>
+    </p>
+  </body>
+</html>

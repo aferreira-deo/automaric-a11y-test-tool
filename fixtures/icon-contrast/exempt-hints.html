@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: exempt-hints</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #c0c0c0; }
+      svg, img { display: block; }
+      .page-item { display: inline-block; list-style: none; }
+      .page-item.disabled a { pointer-events: none; }
+      ul { margin: 0; padding: 0; display: inline; }
+    </style>
+  </head>
+  <body>
+    <!-- Low-contrast icons on controls that may be exempt, although nothing says so programmatically.
+         Inactive controls and logotypes are outside 1.4.11, so none of these may be a fail. -->
+    <div class="row">
+      <!-- Inactive by convention only: a class and pointer-events, no disabled state. -->
+      <ul><li class="page-item disabled"><a id="class-disabled" class="icon" href="#previous" aria-label="Previous page"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15 4l-8 8 8 8z" /></svg></a></li></ul>
+      <button id="not-allowed" class="icon" style="cursor: not-allowed" aria-label="Next page"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 4l8 8-8 8z" /></svg></button>
+      <button id="is-inactive" class="icon is-inactive" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+    </div>
+    <p class="row">
+      <!-- A small pale logotype. -->
+      <a id="logo-class" class="site-logo" href="#home" style="display: inline-block; padding: 8px"><svg width="48" height="24" viewBox="0 0 48 24" role="img" aria-label="Acme"><path fill="#c0c0c0" d="M2 4h12v16H2zM18 4h12v16H18zM34 4h12v16H34z" /></svg></a>
+      <a id="logo-file" href="#home" style="display: inline-block; padding: 8px"><img id="partner-logo" alt="Partner" width="48" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 24'%3E%3Cpath fill='%23c0c0c0' d='M2 4h12v16H2zM18 4h12v16H18zM34 4h12v16H34z'/%3E%3C/svg%3E" /></a>
+    </p>
+    <p class="row">
+      <!-- The same icon with no such sign. A utility class for the disabled state is not one. -->
+      <button id="variant-class" class="icon disabled:opacity-50" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="plain-low" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+    </p>
+  </body>
+</html>

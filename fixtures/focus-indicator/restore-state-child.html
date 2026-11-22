@@ -10,11 +10,13 @@
       a { color: #0645ad; }
       .good:focus-visible { outline: 2px solid #005fcc; outline-offset: 2px; }
       .gap { height: 300px; }
+      input { font: inherit; padding: 6px 8px; border: 1px solid #595959; }
     </style>
   </head>
   <body>
     <div class="gap"></div>
     <button id="in-frame" class="good">In the frame</button>
+    <input id="frame-field" class="good" type="text" aria-label="Field in the frame" />
     <div class="gap"></div>
   </body>
 </html>

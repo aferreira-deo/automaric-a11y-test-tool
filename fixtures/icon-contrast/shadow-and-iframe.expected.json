@@ -1,0 +1,11 @@
+{
+  "description": "Icon buttons inside an open shadow root and inside a same-origin iframe, and a field boundary inside the iframe.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#host >>> #low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#host >>> #good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "frame": "#frame" },
+    { "selector": "#good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "frame": "#frame" },
+    { "selector": "#field-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast", "frame": "#frame" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Custom checkboxes, radios and switches: role-based and appearance:none. Low boundaries are likely, never fail. Round and thin good boundaries must stay info, and the unmodified native checkbox is exempt.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#role-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast", "flags": ["checkbox"] },
+    { "selector": "#role-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#role-checked", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#appearance-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast" },
+    { "selector": "#appearance-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#native-checkbox", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-default" },
+    { "selector": "#radio-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#radio-thin-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#radio-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast", "flags": ["radio"] },
+    { "selector": "#switch-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/boundary-measured" },
+    { "selector": "#switch-low", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/boundary-low-contrast", "flags": ["switch"] }
+  ]
+}

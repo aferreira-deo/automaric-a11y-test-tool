@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: shadow-and-iframe</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      iframe { border: 1px solid #595959; }
+    </style>
+  </head>
+  <body>
+    <div id="host" class="row"></div>
+    <iframe id="frame" src="shadow-and-iframe-child.html" title="Child document" width="320" height="120"></iframe>
+    <script>
+      const root = document.getElementById('host').attachShadow({ mode: 'open' });
+      const icon = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg>';
+      root.innerHTML =
+        '<style>button { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; } svg { display: block; }</style>' +
+        '<button id="low" style="color: #c0c0c0" aria-label="Menu">' + icon + '</button> ' +
+        '<button id="good" aria-label="Menu">' + icon + '</button>';
+    </script>
+  </body>
+</html>

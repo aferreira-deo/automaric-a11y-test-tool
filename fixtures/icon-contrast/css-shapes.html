@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: css-shapes</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; vertical-align: middle; }
+      .bars { display: flex; flex-direction: column; justify-content: space-between; width: 24px; height: 18px; }
+      .bars span { display: block; height: 3px; background: currentColor; }
+      .chevron::before { content: ""; display: block; width: 10px; height: 10px; margin: 4px 7px 10px; border: solid currentColor; border-width: 0 3px 3px 0; transform: rotate(45deg); }
+      .symbol::before { content: "\2715"; font: bold 22px/24px Arial, Helvetica, sans-serif; width: 24px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <!-- A menu button drawn with three empty spans. -->
+      <button id="bars-low" class="icon" style="color: #c8c8c8" aria-label="Menu"><span class="bars"><span></span><span></span><span></span></span></button>
+      <button id="bars-good" class="icon" aria-label="Menu"><span class="bars"><span></span><span></span><span></span></span></button>
+    </p>
+    <p class="row">
+      <!-- A chevron drawn with the borders of a pseudo-element. -->
+      <button id="chevron-low" class="icon chevron" style="color: #c8c8c8" aria-label="Expand"></button>
+      <button id="chevron-good" class="icon chevron" aria-label="Expand"></button>
+      <!-- A symbol character as pseudo-element content: no text node, so axe does not see it. -->
+      <button id="symbol-low" class="icon symbol" style="color: #c8c8c8" aria-label="Close"></button>
+      <button id="symbol-good" class="icon symbol" aria-label="Close"></button>
+    </p>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: varied-background</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 12px; border: 0; border-radius: 4px; color: #fff; }
+      svg { display: block; }
+      /* White is above 3:1 against every colour of this gradient (7:1 at its lightest end). */
+      #dark-gradient { background: linear-gradient(#1a1a1a, #595959); }
+      /* White falls to 1.2:1 at the light end of this one. */
+      #light-gradient { background: linear-gradient(#1a1a1a, #e6e6e6); }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <button id="dark-gradient" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="light-gradient" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+    </p>
+  </body>
+</html>

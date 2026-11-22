@@ -1,0 +1,11 @@
+{
+  "description": "Icons cut out of a background colour with a mask image, on an element and on a pseudo-element. The icon colour is the computed background colour of the masked box.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["mask-image"] },
+    { "selector": "#good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured", "flags": ["mask-image"] },
+    { "selector": "#near", "check": "icon-contrast", "status": "likely", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast" },
+    { "selector": "#pseudo-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["mask-image"] },
+    { "selector": "#pseudo-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" }
+  ]
+}

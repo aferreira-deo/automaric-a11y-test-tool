@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: rendered-colour</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg { display: block; }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true"><symbol id="menu" viewBox="0 0 24 24"><path d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></symbol></svg>
+    <!-- Opacity changes what is painted: the declared colour is not what the user sees, so pixels decide. -->
+    <p class="row">
+      <!-- Black at 30% on white paints #b3b3b3, 2.09:1. -->
+      <button id="opacity-low" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" opacity="0.3" aria-hidden="true"><path fill="#000" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <!-- Black at 70% on white paints #4d4d4d, 8.4:1. -->
+      <button id="opacity-good" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" opacity="0.7" aria-hidden="true"><path fill="#000" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <!-- A pale colour declared, but a filter paints it dark. -->
+      <button id="filter-good" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" style="filter: brightness(0)" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+    </p>
+    <!-- Sprite icons: the shapes live in a symbol, and the colour is inherited through use. -->
+    <p class="row">
+      <button id="use-low" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" fill="currentColor" aria-hidden="true"><use href="#menu" /></svg></button>
+      <button id="use-good" class="icon" aria-label="Menu"><svg width="24" height="24" fill="currentColor" aria-hidden="true"><use href="#menu" /></svg></button>
+    </p>
+  </body>
+</html>

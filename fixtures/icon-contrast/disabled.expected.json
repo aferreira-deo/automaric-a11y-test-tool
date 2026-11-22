@@ -1,0 +1,13 @@
+{
+  "description": "Disabled controls with low-contrast icons and boundaries: disabled attribute, aria-disabled, a disabled fieldset. All are recorded as info and none is measured.",
+  "checks": ["icon-contrast"],
+  "exact": true,
+  "expected": [
+    { "selector": "#disabled-button", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/disabled", "flags": ["disabled"] },
+    { "selector": "#aria-disabled", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/disabled", "flags": ["disabled"] },
+    { "selector": "#in-disabled-fieldset", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/disabled", "flags": ["disabled"] },
+    { "selector": "#disabled-input", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/disabled", "flags": ["disabled"] },
+    { "selector": "#disabled-checkbox", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/disabled", "flags": ["disabled"] },
+    { "selector": "html", "check": "icon-contrast", "status": "info", "rule": "icon-contrast/survey" }
+  ]
+}

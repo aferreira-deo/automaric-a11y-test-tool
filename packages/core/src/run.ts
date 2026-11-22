@@ -1,4 +1,5 @@
 import { focusIndicatorCheck } from './checks/focus-indicator.js';
+import { iconContrastCheck } from './checks/icon-contrast.js';
 import { noopCheck } from './checks/noop.js';
 import { fingerprint } from './fingerprint.js';
 import { TOOL_NAME, TOOL_VERSION } from './meta.js';
@@ -7,6 +8,7 @@ import type { Check, CheckId, Config, Finding, ScanResult, Snapshot } from './ty
 const registry = new Map<CheckId, Check>([
   [noopCheck.id, noopCheck],
   [focusIndicatorCheck.id, focusIndicatorCheck],
+  [iconContrastCheck.id, iconContrastCheck],
 ]);
 
 export function registeredChecks(): CheckId[] {

@@ -23,3 +23,7 @@ How a run is compared (`e2e/support/manifest.ts`):
 - Unexpected `advisory` and `info` findings are tolerated, unless the manifest
   sets `"exact": true`.
 - Each fixture is analysed twice and the two sets of findings must be equal.
+
+`icon-contrast/assets/fixture-icons.ttf` is the icon font of the icon-contrast
+fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,
+so it carries no third-party licence.

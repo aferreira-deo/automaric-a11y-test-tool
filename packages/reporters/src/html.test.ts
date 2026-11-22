@@ -77,6 +77,46 @@ describe('toHtmlReport', () => {
   });
 });
 
+describe('toHtmlReport for icon-contrast findings', () => {
+  const iconResult: ScanResult = {
+    ...result,
+    findings: [
+      {
+        id: 'def',
+        check: 'icon-contrast',
+        rule: 'icon-contrast/icon-multi-colour',
+        status: 'likely',
+        wcag: { sc: '1.4.11', level: 'AA' },
+        selector: '#menu',
+        frame: '#frame',
+        box: { x: 1, y: 2, width: 40, height: 40 },
+        evidence: {
+          crops: ['icon-contrast/x.png'],
+          colors: { icon: '#1a1a1a', background: '#ffffff', part2: '#ffe08a' },
+          ratios: { contrast: 17.4, part2: 1.29 },
+          flags: ['svg', 'pixelColour', 'multiColour'],
+        },
+        message: 'Icon of 2 colours.',
+        help: 'help',
+      },
+    ],
+  };
+  const html = toHtmlReport(iconResult, { 'icon-contrast/x.png': Uint8Array.of(1, 2, 3) });
+
+  it('shows the capture, every measured colour and every ratio', () => {
+    expect(html).toContain('<figcaption>At rest</figcaption>');
+    expect(html).toContain('alt="At rest capture of #menu"');
+    expect(html).toContain('src="data:image/png;base64,AQID"');
+    for (const colour of ['#1a1a1a', '#ffffff', '#ffe08a']) {
+      expect(html).toContain(`<span class="swatch" style="background:${colour}"></span><code>${colour}</code>`);
+    }
+    expect(html).toContain('<dt>Measured contrast</dt><dd>17.4:1</dd>');
+    expect(html).toContain('<dt>Measured part2</dt><dd>1.29:1</dd>');
+    expect(html).toContain('svg, pixelColour, multiColour');
+    expect(html).toContain('<h2>Likely (1)</h2>');
+  });
+});
+
 describe('toHtmlReport with hostile values', () => {
   const payload = '<img src=x onerror=alert(1)>';
   const attribute = 'x" onerror="alert(1)';

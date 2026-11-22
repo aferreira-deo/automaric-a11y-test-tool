@@ -7,3 +7,4 @@ export * from './measure/color.js';
 export * from './measure/image.js';
 export * from './measure/diff.js';
 export * from './measure/indicator.js';
+export * from './measure/icon.js';

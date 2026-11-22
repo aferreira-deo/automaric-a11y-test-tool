@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: input-boundaries</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 28px; }
+      label { display: inline-block; min-width: 14em; }
+      .field { font: inherit; padding: 6px 8px; border: 1px solid #595959; background: #fff; color: #1a1a1a; border-radius: 0; }
+      .panel { background: #4a4a4a; color: #fff; padding: 16px; }
+      .wrap { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid #595959; }
+      .wrap .bare { font: inherit; padding: 2px 0; border: 0; background: transparent; color: #1a1a1a; }
+      #native { font: inherit; }
+    </style>
+  </head>
+  <body>
+    <!-- #ccc on white is 1.61:1, #999 is 2.85:1, #949494 is 3.03:1, #f2f2f2 is 1.12:1. -->
+    <p class="row"><label for="border-low">Low border</label> <input id="border-low" class="field" type="text" style="border-color: #ccc" /></p>
+    <p class="row"><label for="border-good">Good border</label> <input id="border-good" class="field" type="text" /></p>
+    <p class="row"><label for="border-near">Border just under 3:1</label> <input id="border-near" class="field" type="text" style="border-color: #999" /></p>
+    <p class="row"><label for="border-just">Border just over 3:1</label> <input id="border-just" class="field" type="text" style="border-color: #949494" /></p>
+    <p class="row"><label for="fill-low">No border, pale fill</label> <input id="fill-low" class="field" type="text" style="border: 0; background: #f2f2f2" /></p>
+    <div class="row panel"><label for="fill-only">No border, contrasting fill</label> <input id="fill-only" class="field" type="text" style="border: 0" /></div>
+    <p class="row"><label for="underline">Underline only</label> <input id="underline" class="field" type="text" style="border: 0; border-bottom: 2px solid #1a1a1a" /></p>
+    <!-- Found on a real page: the line is 2.99:1 against the pale fill above it but 3.41:1 against the white page below. -->
+    <p class="row"><label for="filled-underline">Pale fill, underline</label> <input id="filled-underline" class="field" type="text" style="border: 0; border-bottom: 1px solid #8b8b8b; background: #f0f0f0" /></p>
+    <p class="row"><label for="shadow-ring">Ring drawn with box-shadow</label> <input id="shadow-ring" class="field" type="text" style="border: 0; box-shadow: 0 0 0 1px #595959" /></p>
+    <p class="row"><label for="wrapped">Border on a wrapper</label> <span class="wrap"><span aria-hidden="true">@</span><input id="wrapped" class="bare" type="text" /></span></p>
+    <p class="row"><label for="wrapped-low">Low border on a wrapper</label> <span class="wrap" style="border-color: #ddd"><span aria-hidden="true">@</span><input id="wrapped-low" class="bare" type="text" /></span></p>
+    <p class="row"><label for="native">Browser default</label> <input id="native" type="text" /></p>
+    <p class="row"><label for="textarea-low">Low border, textarea</label> <textarea id="textarea-low" class="field" rows="2" style="border-color: #ccc; vertical-align: top"></textarea></p>
+    <p class="row"><label for="select-low">Low border, select</label> <select id="select-low" class="field" style="border-color: #ccc"><option>One</option><option>Two</option></select></p>
+  </body>
+</html>

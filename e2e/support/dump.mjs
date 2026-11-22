@@ -32,19 +32,25 @@ for (const name of names) {
     const e = f.evidence;
     console.log(
       `  ${f.status.padEnd(8)} ${(f.wcag?.sc ?? '-').padEnd(6)} ${f.rule.replace(/^[^/]+\//, '').padEnd(22)} ${(f.frame ? f.frame + ' | ' : '') + f.selector}` +
-        (e.ratios.contrast ? `  ${e.ratios.contrast}:1 ${e.colors.indicator} vs ${e.colors.adjacent}` : '') +
+        (e.ratios.contrast ? `  ${e.ratios.contrast}:1 ${Object.values(e.colors).join(' vs ')}` : '') +
         (e.flags.length ? `  [${e.flags.join(',')}]` : ''),
     );
   }
   for (const x of manifest.expected) {
     const hit = result.findings.some(
-      (f) => f.selector === x.selector && f.status === x.status && (!x.rule || f.rule === x.rule) && (!x.wcag || f.wcag?.sc === x.wcag),
+      (f) =>
+        f.selector === x.selector &&
+        f.status === x.status &&
+        (!x.rule || f.rule === x.rule) &&
+        (!x.wcag || f.wcag?.sc === x.wcag) &&
+        (x.frame === undefined || f.frame === x.frame) &&
+        (x.flags ?? []).every((flag) => f.evidence.flags.includes(flag)),
     );
     if (!hit) console.log(`  MISSING  ${x.status} ${x.wcag ?? '-'} ${x.rule} ${x.selector}`);
   }
   if (cropsDir) {
     for (const [id, png] of Object.entries(crops)) {
-      const file = join(cropsDir, name.replaceAll('/', '_'), id.replace('focus-indicator/', ''));
+      const file = join(cropsDir, name.replaceAll('/', '_'), id.replace(/^[^/]+\//, ''));
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, png);
     }

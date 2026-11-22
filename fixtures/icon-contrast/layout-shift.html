@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: layout-shift</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg { display: block; }
+      .band { height: 60px; background: #1a1a1a; }
+      input { font: inherit; padding: 6px 8px; border: 1px solid #ccc; }
+    </style>
+  </head>
+  <body>
+    <p class="row"><button id="still" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button></p>
+    <!-- Found on a real page that was still loading: content above the controls keeps growing, so
+         what is captured at their coordinates is no longer them. Nothing below may be judged. -->
+    <div id="growing"></div>
+    <p class="row">
+      <button id="moving" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <input id="moving-field" type="text" aria-label="Name" />
+    </p>
+    <div class="band"></div>
+    <div class="band" style="background: #fff"></div>
+    <div class="band"></div>
+    <script>
+      const growing = document.getElementById('growing');
+      let height = 0;
+      setInterval(() => {
+        height += 7;
+        growing.style.height = height + 'px';
+      }, 4);
+    </script>
+  </body>
+</html>

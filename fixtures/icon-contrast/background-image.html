@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: background-image</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .bg { width: 42px; height: 42px; padding: 0; border: 1px solid #595959; border-radius: 4px; background: #fff center / 24px 24px no-repeat; }
+      /* The icon colour is inside the image, so only pixels can tell it. */
+      .low { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23c0c0c0' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E"); }
+      .good { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%231a1a1a' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E"); }
+      .near { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23999999' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E"); }
+      /* 0.4 CSS px strokes: no pixel shows the true colour, so a low reading is not certain. */
+      .hairline { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%23c0c0c0' stroke-width='0.4' d='M5 5l14 14M19 5L5 19'/%3E%3C/svg%3E"); }
+      .plain { padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; display: inline-flex; }
+      .sprite { display: block; width: 24px; height: 24px; }
+      img, input[type="image"] { display: block; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <button id="low" class="bg low" aria-label="Menu"></button>
+      <button id="good" class="bg good" aria-label="Menu"></button>
+      <button id="near" class="bg near" aria-label="Menu"></button>
+      <button id="hairline-low" class="bg hairline" aria-label="Close"></button>
+    </p>
+    <p class="row">
+      <button id="child-low" class="plain" aria-label="Menu"><span class="sprite low"></span></button>
+      <button id="child-good" class="plain" aria-label="Menu"><span class="sprite good"></span></button>
+    </p>
+    <p class="row">
+      <a id="img-low" class="plain" href="#top"><img alt="Menu" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23c0c0c0' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E" /></a>
+      <a id="img-good" class="plain" href="#top"><img alt="Menu" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%231a1a1a' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E" /></a>
+      <input id="input-image-low" type="image" alt="Search" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23c0c0c0' d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E" />
+    </p>
+  </body>
+</html>

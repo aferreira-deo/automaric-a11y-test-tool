@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: mask-image</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      .mask, .pseudo::before {
+        display: block; width: 24px; height: 24px; background-color: currentColor;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E") center / contain no-repeat;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z'/%3E%3C/svg%3E") center / contain no-repeat;
+      }
+      .pseudo::before { content: ""; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <button id="low" class="icon" style="color: #c0c0c0" aria-label="Menu"><span class="mask"></span></button>
+      <button id="good" class="icon" aria-label="Menu"><span class="mask"></span></button>
+      <button id="near" class="icon" style="color: #999" aria-label="Menu"><span class="mask"></span></button>
+    </p>
+    <p class="row">
+      <button id="pseudo-low" class="icon pseudo" style="color: #c0c0c0" aria-label="Menu"></button>
+      <button id="pseudo-good" class="icon pseudo" aria-label="Menu"></button>
+    </p>
+  </body>
+</html>

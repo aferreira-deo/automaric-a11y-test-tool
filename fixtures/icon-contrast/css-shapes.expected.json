@@ -1,0 +1,12 @@
+{
+  "description": "Icons drawn with CSS: empty elements with a background colour, pseudo-element borders, and a symbol character as pseudo-element content.",
+  "checks": ["icon-contrast"],
+  "expected": [
+    { "selector": "#bars-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["css-shape"] },
+    { "selector": "#bars-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#chevron-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["pseudo-element"] },
+    { "selector": "#chevron-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#symbol-low", "check": "icon-contrast", "status": "fail", "wcag": "1.4.11", "rule": "icon-contrast/icon-low-contrast", "flags": ["font-glyph"] },
+    { "selector": "#symbol-good", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" }
+  ]
+}

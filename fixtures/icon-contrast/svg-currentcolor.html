@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: svg-currentcolor</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 32px; }
+      .icon { display: inline-flex; padding: 8px; background: #fff; border: 1px solid #595959; border-radius: 4px; color: #1a1a1a; }
+      svg { display: block; }
+      .dark { background: #1a1a1a; border-color: #1a1a1a; }
+    </style>
+  </head>
+  <body>
+    <!-- #c0c0c0 on white is 1.82:1, #999 is 2.85:1, #949494 is 3.03:1. -->
+    <p class="row">
+      <button id="low" class="icon" style="color: #c0c0c0" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="good" class="icon" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="near" class="icon" style="color: #999" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="just-above" class="icon" style="color: #949494" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+    </p>
+    <p class="row">
+      <button id="stroke-low" class="icon" style="color: #c0c0c0" aria-label="Close"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg></button>
+      <button id="stroke-good" class="icon" aria-label="Close"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg></button>
+      <!-- 0.4 CSS px strokes never reach their own colour on screen; the declared colour is what counts. -->
+      <button id="hairline-good" class="icon" style="color: #595959" aria-label="Close"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.4" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg></button>
+    </p>
+    <p class="row">
+      <!-- White on #1a1a1a is 17.4:1; #4a4a4a on #1a1a1a is 1.96:1. -->
+      <button id="on-dark" class="icon dark" style="color: #fff" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <button id="on-dark-low" class="icon dark" style="color: #4a4a4a" aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v3H3zM3 10.5h18v3H3zM3 16h18v3H3z" /></svg></button>
+      <a id="link-low" href="#top" style="color: #c0c0c0" aria-label="Back to top"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4l8 8h-5v8H9v-8H4z" /></svg></a>
+    </p>
+  </body>
+</html>

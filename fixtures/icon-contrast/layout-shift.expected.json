@@ -1,0 +1,11 @@
+{
+  "description": "A page whose layout keeps moving. Controls that move between being measured and being captured are not judged: the capture would show whatever took their place. Found on a real page.",
+  "checks": ["icon-contrast"],
+  "exact": true,
+  "expected": [
+    { "selector": "#still", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/icon-measured" },
+    { "selector": "#moving", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured" },
+    { "selector": "#moving-field", "check": "icon-contrast", "status": "info", "wcag": "1.4.11", "rule": "icon-contrast/not-measured" },
+    { "selector": "html", "check": "icon-contrast", "status": "info", "rule": "icon-contrast/survey" }
+  ]
+}

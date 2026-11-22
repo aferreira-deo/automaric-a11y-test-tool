@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>icon-contrast: custom-checkbox</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .row { margin: 0 0 28px; }
+      .box { display: inline-block; width: 18px; height: 18px; border: 2px solid #595959; background: #fff; vertical-align: middle; box-sizing: border-box; }
+      .box.low { border: 1px solid #ccc; }
+      .box.checked { background: #0b5fff; border-color: #0b5fff; }
+      .box svg { display: block; }
+      input.custom { appearance: none; -webkit-appearance: none; margin: 0; width: 18px; height: 18px; border: 2px solid #595959; background: #fff; vertical-align: middle; }
+      input.custom.low { border: 1px solid #d0d0d0; }
+      .radio { display: inline-block; width: 18px; height: 18px; border: 2px solid #595959; border-radius: 50%; background: #fff; vertical-align: middle; box-sizing: border-box; }
+      .radio.thin { border: 1px solid #767676; }
+      .radio.low { border: 1px solid #ccc; }
+      .switch { display: inline-block; position: relative; width: 40px; height: 22px; border-radius: 11px; background: #595959; vertical-align: middle; }
+      .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+      .switch.low { background: #e6e6e6; }
+    </style>
+  </head>
+  <body>
+    <p class="row">
+      <span id="role-low" class="box low" role="checkbox" aria-checked="false" tabindex="0" aria-label="Low border"></span>
+      <span id="role-good" class="box" role="checkbox" aria-checked="false" tabindex="0" aria-label="Good border"></span>
+      <span id="role-checked" class="box checked" role="checkbox" aria-checked="true" tabindex="0" aria-label="Checked"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path fill="none" stroke="#fff" stroke-width="2" d="M2 7l3.5 3.5L12 4" /></svg></span>
+    </p>
+    <p class="row">
+      <input id="appearance-low" class="custom low" type="checkbox" aria-label="Low border" />
+      <input id="appearance-good" class="custom" type="checkbox" aria-label="Good border" />
+      <input id="native-checkbox" type="checkbox" aria-label="Browser default" />
+    </p>
+    <p class="row">
+      <span id="radio-good" class="radio" role="radio" aria-checked="false" tabindex="0" aria-label="Good border"></span>
+      <span id="radio-thin-good" class="radio thin" role="radio" aria-checked="false" tabindex="0" aria-label="Thin good border"></span>
+      <span id="radio-low" class="radio low" role="radio" aria-checked="false" tabindex="0" aria-label="Low border"></span>
+    </p>
+    <p class="row">
+      <button id="switch-good" class="switch" role="switch" aria-checked="false" aria-label="Good track" style="border: 0; padding: 0"></button>
+      <button id="switch-low" class="switch low" role="switch" aria-checked="false" aria-label="Low track" style="border: 0; padding: 0"></button>
+    </p>
+  </body>
+</html>
