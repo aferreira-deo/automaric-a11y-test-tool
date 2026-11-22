@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: shadow-and-iframe</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      iframe { border: 1px solid #595959; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Body text of the page, long enough to set the body style: sixteen pixels, normal weight.</p>
+      <div id="host"><p>Slotted body text, shown under the title of the shadow tree.</p></div>
+      <iframe id="frame" src="shadow-and-iframe-child.html" title="Child document" width="480" height="260"></iframe>
+    </main>
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+        '<style>.title, h2 { font-size: 26px; font-weight: 700; margin: 24px 0 8px; } p { margin: 0 0 16px; }</style>' +
+        '<div class="title" id="title">A title inside a shadow tree</div><slot></slot>' +
+        '<h2 id="real">A real heading inside a shadow tree</h2><p>Body text in the shadow tree.</p>';
+    </script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "description": "A fixed consent wall over the page. Its own title is an unmarked heading, captured as usual. The unmarked title of the page under it is still reported from its styles and position, but not captured: the capture would show the wall (flag covered).",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#wall-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#page-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["covered"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: false-positives</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 720px; }
+      p { margin: 0 0 16px; }
+      .big { font-size: 24px; font-weight: 700; margin: 24px 0 8px; }
+      .strong { font-weight: 700; margin: 24px 0 8px; }
+      label, legend, caption, th, dt, figcaption, summary { font-size: 20px; font-weight: 700; }
+      label { display: block; margin-top: 24px; }
+      input, button { font: inherit; }
+      button.big { display: block; }
+      a.big { display: block; color: #00539b; }
+      table { border-collapse: collapse; margin: 0 0 16px; }
+      th, td { border: 1px solid #595959; padding: 4px 12px; text-align: left; }
+      td.name { font-weight: 700; font-size: 20px; }
+      blockquote { margin: 24px 0 8px; font-size: 24px; font-weight: 700; }
+      nav { margin: 24px 0; }
+      nav a, .tabs span { display: inline-block; margin-right: 12px; font-size: 20px; font-weight: 700; }
+      .menu div { font-size: 20px; font-weight: 700; }
+      .row { display: flex; gap: 8px; margin-top: 24px; }
+      .lead { font-size: 22px; }
+      .badge { display: inline-block; padding: 0 6px; font-weight: 700; font-size: 20px; border: 1px solid #595959; }
+      .kicker { font-size: 20px; font-weight: 700; margin: 24px 0 0; }
+      .headline { font-size: 32px; font-weight: 700; margin: 0 0 8px; }
+      .plan { display: inline-block; width: 200px; vertical-align: top; }
+      .price { font-size: 30px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 class="headline" id="h1">Things that look like headings and are not</h1>
+      <p>Each block below is large or bold, and is followed by body text. None of them is reported as likely.</p>
+
+      <!-- Form labelling. -->
+      <label id="label" for="field">Your name</label>
+      <input id="field" type="text" />
+      <p>Body text under the field.</p>
+      <fieldset><legend id="legend">Delivery</legend><p>Body text inside the group.</p></fieldset>
+
+      <!-- Tables and captions. -->
+      <table>
+        <caption id="caption">Opening hours</caption>
+        <tr><th id="th">Day</th><th>Hours</th></tr>
+        <tr><td id="td" class="name">Monday</td><td>9 to 5</td></tr>
+      </table>
+      <figure><p>A figure.</p><figcaption id="figcaption">The figure, explained</figcaption><p>Body text under the caption.</p></figure>
+      <dl><dt id="term">Warranty</dt><dd>Two years, parts and labour.</dd></dl>
+
+      <!-- Controls. -->
+      <button class="big" id="button" type="button">Start the tour</button>
+      <p>Body text under the button.</p>
+      <a class="big" id="link" href="/more">Read the full story</a>
+      <p>Body text under the link.</p>
+      <details open><summary id="summary">More details</summary><p>Body text inside the disclosure.</p></details>
+      <div class="big" id="role-button" role="button" tabindex="0">A div with the role button</div>
+      <p>Body text under the div button.</p>
+
+      <!-- Prices and statistics. -->
+      <div class="big" id="price">$29.99</div>
+      <p>per month, billed yearly.</p>
+      <div class="big" id="stat">98%</div>
+      <p>of customers would recommend us.</p>
+      <div class="big" id="stat-unit">15 years</div>
+      <p>of experience in the field.</p>
+      <div class="plan"><div class="price">$10</div><p>Starter plan.</p></div>
+      <div class="plan"><div class="price">$40</div><p>Team plan.</p></div>
+      <div class="plan"><div class="price" id="price-word">Free</div><p>Hobby plan.</p></div>
+
+      <!-- Quotations. -->
+      <blockquote id="blockquote">It changed how we work</blockquote>
+      <p>Body text under the quotation.</p>
+      <div class="big" id="quote-marks">“It changed how we work”</div>
+      <p>Body text under the quoted line.</p>
+
+      <!-- Bold or large text that reads as a sentence, or leads into one. -->
+      <p><strong id="lead-in">Important:</strong> the lead-in is part of this paragraph, which goes on at the normal weight.</p>
+      <p class="strong" id="sentence">This whole paragraph is bold and ends as a sentence.</p>
+      <p>Body text under the bold sentence.</p>
+      <p class="strong" id="colon">You will need:</p>
+      <p>Body text under the line that ends with a colon.</p>
+      <p class="lead" id="long-lead">A lead paragraph in a larger size that runs over several lines, because it has many more words than any heading would have, is body text and nothing else at all.</p>
+      <p>Body text under the lead paragraph.</p>
+
+      <!-- Rows and series of peers. -->
+      <nav aria-label="Sections"><a id="nav-link" href="/a">Home</a><a href="/b">Products</a><a href="/c">About</a></nav>
+      <div class="tabs"><span id="tab">Overview</span><span>Details</span><span>Reviews</span></div>
+      <p>Body text under the row.</p>
+      <div class="menu"><div id="menu-item">Starters</div><div>Mains</div><div>Desserts</div></div>
+      <p>Body text under the series.</p>
+      <div class="row"><span class="strong" id="key">Status</span><span class="strong">Shipped</span></div>
+      <p>Body text under the pair.</p>
+      <p>Some text with a <span class="badge" id="badge">New</span> badge in the middle of the line.</p>
+
+      <!-- A line above a larger one is not its heading. -->
+      <div class="kicker" id="kicker">Case study</div>
+      <div class="headline" id="headline" role="heading" aria-level="2">How the harbour was saved</div>
+      <p>Body text under the headline.</p>
+
+      <!-- A category over the title of a card, both bold, the title slightly larger (seen on a health insurance site). -->
+      <ul>
+        <li><p class="strong" id="category" style="color: #0c419a; margin: 0">Health and prevention</p><a href="/flu" style="font-size: 18px; font-weight: 700">Flu vaccination: who should have it this winter</a></li>
+        <li><p class="strong" style="color: #0c419a; margin: 0">Health and prevention</p><a href="/smoke" style="font-size: 18px; font-weight: 700">A month without tobacco: thirty days to stop</a></li>
+      </ul>
+
+      <!-- The first item of a list set in bold (seen on a hosting site). -->
+      <ul>
+        <li class="strong" id="bold-item" style="margin: 0">We never sell or transfer your data</li>
+        <li>You choose where your data is stored and which law applies to it.</li>
+      </ul>
+
+      <!-- Hidden from assistive technology altogether: not a heading that lost its role. -->
+      <div class="big" id="aria-hidden" aria-hidden="true">Decorative words</div>
+      <p>Body text under the decorative words.</p>
+
+      <!-- Taglines over calls to action (seen on a product page). The first ends as a sentence, before a footnote mark. -->
+      <div class="lead" id="tagline-sentence">The most precise tide tables on any coast.<sup>1</sup></div>
+      <p><a href="/learn">Learn more</a> <a href="/buy">Buy</a></p>
+      <div class="big" id="tagline">Ready when you are</div>
+      <div><a href="/start">Start now</a> <a href="/sales">Talk to sales</a></div>
+      <p>Body text under the calls to action.</p>
+
+      <!-- Nothing follows it. -->
+      <div class="big" id="last">The end</div>
+    </main>
+  </body>
+</html>

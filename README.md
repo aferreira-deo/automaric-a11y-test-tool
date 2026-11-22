@@ -3,12 +3,14 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M2. Two checks are implemented, with no AI involved, and both run by default:
+Status: M3. Three checks are implemented, with no AI involved, and all run by default:
 
 - `focus-indicator`: 2.4.7, 1.4.11 for the indicator, 2.4.11.
 - `icon-contrast`: 1.4.11 for the icon of controls without visible text, and for the boundary of form controls.
+- `headings`: 1.3.1 for text that looks like a heading and is not exposed as one, and for heading levels that
+  contradict the visual order. It never reports a `fail`.
 
-`--checks focus-indicator` or `--checks icon-contrast` runs one of them.
+`--checks focus-indicator`, `--checks icon-contrast` or `--checks headings` runs one of them.
 
 ## Use
 
@@ -25,6 +27,56 @@ const result = await new A11yVision({ page }).analyze();
 ```
 
 Chromium only.
+
+### What `headings` reports
+
+Text that functions as a heading without being exposed as one, and heading levels that contradict the visual order
+(1.3.1). No model is involved, and nothing is ever a `fail`: whether text functions as a heading is a judgement.
+
+Candidates come from what is rendered, not from tags:
+
+1. **Text blocks.** Visible text nodes are grouped into blocks: the text laid out together in one block container.
+   A `br` splits a block only where the style changes across it (`<b>Title</b><br>text`). Hidden text is left out:
+   not displayed, clipped, transparent, off screen, of no size.
+2. **Body style.** The most common font size and weight by number of characters, inside `main` when it holds text.
+   Headings, links, buttons, labels, navigation, code and text under `aria-hidden` do not count, so that a wall of
+   links does not set it.
+3. **Exposed headings.** Taken from the accessibility tree of each document (`Accessibility.getFullAXTree`), not from
+   tags: an `h2` with `role="presentation"` is not one, a `div` with the role heading is.
+4. **Prominence.** A block that is no heading is looked at when it is larger than body text (`minSizeRatio`, 1.3),
+   bolder (`minWeightDelta`, 200; at about body size, or smaller when in capitals), or has exactly the style
+   (family, size, weight, colour, transform) of a real heading of the page that itself stands out from body text
+   (`matchesHeadingStyle`). It must be short (`maxWords` 20, `maxLines` 3; 12 words when it is only bolder) and of
+   one style.
+5. **Position, from boxes.** Alone on its line, followed by text that starts under it, and not by something set as
+   a title of its size or larger.
+
+- `likely` (`headings/unmarked-heading`): prominent, in position, and nothing speaks against it.
+- `info` (`headings/heading-candidate`): prominent, with a reason against it as a flag. By markup: `label`
+  (also legends), `caption`, `tableHeader`, `tableCell`, `term`, `button`, `link` (all of it is a link), `quote`,
+  `code`, `navigation`, `ariaHidden`, `listItem`. By content: `numeric` (a price, a statistic, a date),
+  `peersNumeric` ("Free" among prices), `quotation`, `sentence`, `colon`, `lineBreaks`. By position: `notFollowed`,
+  `repeated` (a series in one style), `headsControl` (a tagline over a call to action), `tightAbove` (bold text of
+  body size with less space above than below).
+- Not reported at all: text beside other text on its line, a row of peers, and text that has a reason by markup or
+  content and also heads nothing (a navigation link, a table cell).
+- `advisory` or `likely` (`headings/level-inversion`): inside one region (landmark, `article`, `dialog`), a heading
+  coded above a preceding heading that is visibly larger, or visibly larger than the heading it is coded under.
+  Visual rank is font size, from a ratio of 1.15. `likely` only when the two are at least 2 levels apart and differ
+  by 1.5 in size; both statuses are options (`inversionStatus`, `extremeInversionStatus`), an open decision of the
+  owner. Skipped levels, a missing or repeated `h1`, a page without headings and repeated heading text are never
+  reported.
+- `info` (`headings/survey`): counts, and the body style that was used.
+
+Every candidate comes with a capture of the block in context, its text, its style and that of body text, and the
+text that follows it. When the accessibility tree cannot be read, nothing is above `info` (`axIncomplete`).
+
+The patterns that end a sentence, open a quotation or number a title are options and hold no words of any language.
+
+`headingCandidates(snapshot.headings, config.headings)` in `@a11y-vision/core` gives the candidates as data, for the
+adjudicator layer (M4): each has the id of its finding (`findingId`), the capture (`crop`, a key of the snapshot
+clips; `box` is the part to outline), a compact `context` (text, style, body style, features, text before and
+after) and `adjudicate`, false where a judgement would change nothing (a label, a number, hidden text).
 
 ### What `icon-contrast` reports
 
@@ -100,6 +152,30 @@ that is larger than the device screen, so more of the page counts as on screen t
 
 The icon check also blurs the focused element before it looks at the controls, so that a focus ring is not measured
 as part of a control. Focus is put back with everything else.
+
+The headings check reads the accessibility tree of the page and of its same-origin iframes, and scrolls each block
+it reports into view to capture it. It changes nothing else.
+
+### Known limits of the headings check
+
+- One viewport width and one state: the page as it is. Text that shows only at another width, on hover or after an
+  interaction is not read. Text inside scroll containers is read; text clipped by `overflow: hidden` is not (the
+  slides of a carousel that are off screen).
+- Headings inside images, canvas and SVG are not found.
+- Bold text of body size, larger text of normal weight under 1.3 times the body size, and titles that are links
+  are common false positives, so they are held back: the first by a word limit and a spacing rule, the second
+  entirely, the third as `info`. Real unmarked headings of those kinds are missed or reported as `info`.
+- On a page with little plain text (a home page of links), the body style may be that of small print.
+- The site name in a header and a tagline above content can be `likely`: nothing measurable tells them from a
+  heading.
+- Whether text is a heading already is decided for the whole block: text half inside a heading is not one.
+- The capture is not taken when fixed or sticky content lies over the middle of the block (`covered`); other covers
+  are not looked for, and the capture is evidence of context only: nothing is measured on it.
+- Heading text that is visually hidden takes no part in the comparison of levels. Rank is font size alone: weight,
+  colour and capitals are not ranked.
+- Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. At most
+  `maxBlocks` (6000) blocks are read and `maxCandidates` (150) candidates reported.
+- Heading markup on text that is not a heading is not looked for yet.
 
 ### Known limits of the icon check
 

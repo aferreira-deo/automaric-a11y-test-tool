@@ -28,6 +28,11 @@ How a run is compared (`e2e/support/manifest.ts`):
   against the same manifests: results must not depend on the device pixel
   ratio the page comes with.
 
+The `headings/source-*` fixtures are well-marked pages: as they are, they must give no `fail` and no `likely`.
+`e2e/headings-mutation.spec.ts` replaces each of their headings with a `div` that keeps its attributes (their
+styles are set by class) and expects at least 90% of them back as candidates, and at least 90% as `likely`, with
+nothing else `likely`.
+
 `icon-contrast/assets/fixture-icons.ttf` is the icon font of the icon-contrast
 fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,
 so it carries no third-party licence.

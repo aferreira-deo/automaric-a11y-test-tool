@@ -57,7 +57,7 @@ test('focus-indicator is a default check: a fail exits 1 and lands in violations
 test('icon-contrast is a default check too, and can be selected alone', async ({ baseURL }, testInfo) => {
   const url = `${baseURL}/icon-contrast/svg-currentcolor.html`;
   const both = JSON.parse((await cli('scan', url)).stdout) as Report;
-  expect(new Set(both.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['focus-indicator', 'icon-contrast']));
+  expect(new Set(both.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['focus-indicator', 'icon-contrast', 'headings']));
 
   const html = testInfo.outputPath('out', 'report.html');
   const crops = testInfo.outputPath('out', 'crops');
@@ -134,4 +134,23 @@ test('an unreachable page exits 2', async () => {
   const { code, stderr } = await cli('scan', 'http://127.0.0.1:1/');
   expect(code).toBe(2);
   expect(stderr).toContain('Scan failed');
+});
+
+test('headings is a default check, never fails a scan, and shows its evidence in the HTML report', async ({ baseURL }, testInfo) => {
+  const url = `${baseURL}/headings/unmarked-headings.html`;
+  const html = testInfo.outputPath('out', 'report.html');
+  const crops = testInfo.outputPath('out', 'crops');
+  const { code, stdout } = await cli('scan', url, '--checks', 'headings', '--html', html, '--crops', crops);
+  // Seven unmarked headings, all `likely`: the exit code stays 0.
+  expect(code).toBe(0);
+  const report = JSON.parse(stdout) as Report;
+  expect(report.violations).toEqual([]);
+  expect(report.incomplete).toEqual([expect.objectContaining({ id: 'headings/unmarked-heading', tags: ['wcag131'] })]);
+  const likely = report.a11yVision.findings.filter((finding) => finding.status === 'likely');
+  expect(likely).toHaveLength(7);
+  expect((await readdir(`${crops}/headings`)).length).toBe(7);
+  const page = await readFile(html, 'utf8');
+  expect(page).toContain('<figcaption>In context</figcaption>');
+  expect(page).toContain('<dt>text</dt><dd>A title in a div</dd>');
+  expect(page).toContain('<dt>fontSizePx</dt><dd>28</dd>');
 });

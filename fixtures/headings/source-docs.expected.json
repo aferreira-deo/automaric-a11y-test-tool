@@ -1,0 +1,7 @@
+{
+  "description": "A well-marked documentation page in two columns, with headings of normal weight, bold headings of body size and small uppercase headings in the navigation. Nothing is reported as fail or likely: not the terms of the definition list, the legend, the labels, the button, the code or the bold lead-in. The mutation test strips the headings of this page.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

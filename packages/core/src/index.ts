@@ -8,3 +8,4 @@ export * from './measure/image.js';
 export * from './measure/diff.js';
 export * from './measure/indicator.js';
 export * from './measure/icon.js';
+export * from './measure/headings.js';

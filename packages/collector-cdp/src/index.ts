@@ -1,6 +1,7 @@
 import type { Config, Snapshot } from '@a11y-vision/core';
 import { createWorld, readEnvironment } from './environment.js';
 import { collectFocus } from './focus.js';
+import { collectHeadings } from './headings.js';
 import { collectIcons } from './icons.js';
 import { withStablePage } from './page.js';
 import type { CdpSession } from './session.js';
@@ -19,12 +20,15 @@ export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<
   };
   const focus = config.checks.includes('focus-indicator');
   const icons = config.checks.includes('icon-contrast');
-  if (focus || icons) {
+  const headings = config.checks.includes('headings');
+  if (focus || icons || headings) {
     const original = { ...environment, reducedMotion, mediaType };
     await withStablePage(cdp, world, original, config, snapshot.screenshots.clips, async (page) => {
       // The focus walk goes first: it needs focus where the page left it, and ends with nothing focused.
       if (focus) snapshot.focus = await collectFocus(page, config.focus);
       if (icons) snapshot.icons = await collectIcons(page, config.icon);
+      // Last: it reads the page as the other collectors left it and only scrolls.
+      if (headings) snapshot.headings = await collectHeadings(page, config.headings);
     });
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };

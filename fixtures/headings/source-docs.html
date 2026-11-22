@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: source-docs</title>
+    <style>
+      body { margin: 0; font: 15px/1.6 Verdana, Geneva, sans-serif; background: #fff; color: #222; }
+      .layout { display: flex; gap: 40px; padding: 24px 32px; }
+      nav { flex: 0 0 200px; }
+      nav ul { list-style: none; margin: 0 0 16px; padding: 0; }
+      nav a { color: #00539b; }
+      main { flex: 1; max-width: 640px; }
+      .n1 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #595959; margin: 0 0 4px; }
+      .d1 { font-size: 30px; font-weight: 400; margin: 0 0 16px; }
+      .d2 { font-size: 22px; font-weight: 400; margin: 32px 0 8px; border-bottom: 1px solid #595959; }
+      .d3 { font-size: 15px; font-weight: 700; margin: 20px 0 4px; }
+      p, dl, pre, form { margin: 0 0 16px; }
+      dt { font-weight: 700; }
+      dd { margin: 0 0 8px 24px; }
+      pre { padding: 8px; background: #f0f0f0; font: 14px/1.4 Consolas, monospace; }
+      fieldset { border: 1px solid #595959; }
+      legend { font-size: 18px; font-weight: 700; }
+      label { display: block; font-weight: 700; }
+      input, button { font: inherit; }
+      button { font-size: 18px; font-weight: 700; padding: 6px 16px; }
+      .note { padding: 8px 12px; border: 1px solid #595959; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <nav aria-label="Documentation">
+        <h2 class="n1" id="nav-start">Getting started</h2>
+        <ul><li><a href="/install">Install</a></li><li><a href="/first">First scan</a></li></ul>
+        <h2 class="n1" id="nav-ref">Reference</h2>
+        <ul><li><a href="/cli">Command line</a></li><li><a href="/config">Configuration</a></li></ul>
+      </nav>
+      <main>
+        <h1 class="d1" id="title">Configuration</h1>
+        <p>The scanner reads one configuration file. Every option has a default, so the file can be left out.</p>
+        <h2 class="d2" id="file">The configuration file</h2>
+        <p>The file is looked for in the working directory first, then in each parent directory.</p>
+        <pre>scanner --config ./scanner.json</pre>
+        <h3 class="d3" id="format">File format</h3>
+        <p>JSON with comments. Unknown keys are reported and ignored.</p>
+        <h3 class="d3" id="order">Order of precedence</h3>
+        <p>Command line flags win over the file, and the file wins over the defaults.</p>
+        <h2 class="d2" id="options">Options</h2>
+        <dl>
+          <dt>timeout</dt>
+          <dd>Seconds to wait for a page before giving up.</dd>
+          <dt>depth</dt>
+          <dd>How many links away from the start page the scanner goes.</dd>
+        </dl>
+        <p class="note"><strong>Note:</strong> a depth of zero scans the start page only.</p>
+        <h2 class="d2" id="try">Try it</h2>
+        <form>
+          <fieldset>
+            <legend>Scan settings</legend>
+            <label for="url">Start page</label>
+            <input id="url" type="url" />
+            <label for="depth">Depth</label>
+            <input id="depth" type="number" />
+          </fieldset>
+          <button type="button">Run the scan</button>
+        </form>
+        <h3 class="d3" id="limits">Limits of the demo</h3>
+        <p>The demo scans at most ten pages and keeps nothing.</p>
+      </main>
+    </div>
+  </body>
+</html>

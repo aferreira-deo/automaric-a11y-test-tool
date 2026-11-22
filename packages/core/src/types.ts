@@ -236,8 +236,112 @@ export interface IconSurvey {
   skipped: Record<string, number>;
 }
 
+/** Computed text style of a block: that of most of its characters. */
+export interface TextStyle {
+  /** First family of the computed `font-family`, lower case, without quotes. */
+  family: string;
+  /** Computed font size, CSS px. */
+  size: number;
+  /** Computed font weight, 1 to 1000. */
+  weight: number;
+  /** Computed colour: #rrggbb, or #rrggbbaa when it is translucent. */
+  color: string;
+  /** Computed `text-transform`. */
+  transform: string;
+  italic: boolean;
+}
+
+/**
+ * Where a text block sits in the page, read from its ancestors (across shadow roots and frames).
+ * A block has a context only when all of its text is inside one.
+ * - `label`: `label` or `legend`. `caption`: `caption` or `figcaption`.
+ * - `tableHeader`, `tableCell`: by tag or by role. `term`: `dt`.
+ * - `button`: `button`, `summary`, or a widget role (button, tab, menuitem, option, switch, checkbox, radio, treeitem).
+ * - `link`: `a[href]` or the role link.
+ * - `quote`: `blockquote` or `q`. `code`: `pre`, `code`, `kbd` or `samp`.
+ * - `navigation`: `nav`, or the role navigation, menu, menubar, tablist, toolbar, tree or listbox.
+ * - `ariaHidden`: `aria-hidden="true"` or `inert`: not exposed to assistive technology at all.
+ */
+export type TextContext =
+  | 'label'
+  | 'caption'
+  | 'tableHeader'
+  | 'tableCell'
+  | 'term'
+  | 'button'
+  | 'link'
+  | 'quote'
+  | 'code'
+  | 'navigation'
+  | 'ariaHidden';
+
+/**
+ * One block of visible text: the text nodes that are laid out together in one block container,
+ * between two block-level boundaries, whatever their tags. A forced line break splits a block
+ * only where the style changes across it. All boxes are CSS pixels in page coordinates.
+ */
+export interface TextBlock {
+  /** The lowest element that holds all the text of the block, or the block container when the block is all its text. */
+  selector: string;
+  /** Same convention as FocusStop.frame. */
+  frame: string;
+  /** Local name of that element. */
+  tag: string;
+  /** Text with white space collapsed, cut to `maxTextChars`. */
+  text: string;
+  /** Characters of the whole text that are not white space. */
+  chars: number;
+  /** Runs of characters separated by white space, in the whole text. */
+  words: number;
+  /** Union of the painted line boxes. */
+  box: Box;
+  /** Painted lines. */
+  lines: number;
+  firstLine: Box;
+  lastLine: Box;
+  /** Forced line breaks (`br`) inside the block. */
+  breaks: number;
+  style: TextStyle;
+  /** Share of the characters that have `style`, 0 to 1. Under 1, the block mixes styles (a bold lead-in). */
+  styleShare: number;
+  contexts: TextContext[];
+  /** Inside `main` or the role main. */
+  inMain: boolean;
+  /** Inside a list item (`li`, or the role listitem). */
+  inListItem: boolean;
+  /**
+   * The nearest enclosing region (a landmark element or role, `article`, `dialog`), as frame and
+   * selector; empty outside any. Heading levels are compared inside one region only.
+   */
+  region: string;
+  /**
+   * Set when the accessibility tree exposes the block as a heading: an ancestor of all its text
+   * is a node with the role heading that is not ignored. `selector` is that of the heading element.
+   */
+  heading: { level: number; selector: string } | null;
+  /** Crop id of the capture of the block with what surrounds it; null when it was not captured. */
+  crop: string | null;
+  /** Other content lay over the middle of the block when it was to be captured (a banner, a dialog), so it was not. */
+  covered?: boolean;
+}
+
+export interface HeadingSurvey {
+  /** Visible text blocks in document order, frames in place. */
+  blocks: TextBlock[];
+  /** Blocks found, including those beyond `maxBlocks`. */
+  total: number;
+  /**
+   * False when the accessibility tree of a document the survey looked into could not be read, or
+   * one of its headings could not be matched to its element: which text is exposed as a heading
+   * is then not known for certain, and nothing is reported above `info`.
+   */
+  axComplete: boolean;
+}
+
 export interface Snapshot {
   environment: Environment;
+  /** Present when the headings check was collected. */
+  headings?: HeadingSurvey;
   /** Present when the focus-indicator check was collected. */
   focus?: FocusWalk;
   /** Present when the icon-contrast check was collected. */
@@ -260,6 +364,8 @@ export interface Evidence {
   ratios: Record<string, number>;
   /** e.g. "forced", "authorModified". */
   flags: string[];
+  /** Other measured values and what was read from the page, keyed by name (font size, word count, text). */
+  values?: Record<string, string | number | boolean>;
 }
 
 export type Verdict = 'yes' | 'no' | 'unsure';
@@ -506,6 +612,101 @@ export interface IconConfig {
   captureAttempts: number;
 }
 
+export interface HeadingsConfig {
+  /** At most this many text blocks are read from the page, in document order. */
+  maxBlocks: number;
+  /** Text of a block kept in the snapshot, in characters. */
+  maxTextChars: number;
+  /** At most this many candidates are reported and captured: likely ones first, then in document order. */
+  maxCandidates: number;
+  /** Text smaller than this on either side, once clipped by its containers, is not visible text. */
+  minVisibleTextCssPx: number;
+  /** Text of a smaller font size paints nothing worth reading. */
+  minFontSizeCssPx: number;
+  /**
+   * Elements that bound a region (CSS selector). The visual rank and the level of two headings are
+   * compared only inside one region, and text of two regions never shares a line.
+   */
+  regionSelector: string;
+  /** Margin captured to the left and right of a candidate. */
+  clipMarginCssPx: number;
+  /** Captured above a candidate, to show what it follows. */
+  clipAboveCssPx: number;
+  /** Captured below a candidate, to show what it heads. */
+  clipBelowCssPx: number;
+
+  /**
+   * A block is larger than body text from this ratio of font sizes. Set well above the ratio
+   * that tells two sizes apart: text slightly larger than body text and no bolder is usually a
+   * lead paragraph or a tagline (seen on real pages), not a heading.
+   */
+  minSizeRatio: number;
+  /** A block is bolder than body text from this difference of font weights. */
+  minWeightDelta: number;
+  /** Bold text counts as prominent from this ratio to the body size: bold text of body size, not bold small print. */
+  boldMinSizeRatio: number;
+  /** The same for bold text in capitals (`text-transform: uppercase`), which is commonly set smaller. */
+  uppercaseBoldMinSizeRatio: number;
+  /** Longest heading, in words. Longer text is body text however it is styled. */
+  maxWords: number;
+  /** Longest heading, in characters that are not white space: the limit for text without spaces between words. */
+  maxChars: number;
+  /** Longest heading, in painted lines. */
+  maxLines: number;
+  /** Tighter word limit for text that is only bolder than body text: not larger, and not styled as a real heading. */
+  maxBoldOnlyWords: number;
+  /** Share of the characters of a block that must have its style: under it the block mixes styles. */
+  uniformStyleMinShare: number;
+  /** From this many forced line breaks, a block is lines of text (an address), not a heading. */
+  maxBreaks: number;
+  /**
+   * Text ending like this (pattern, Unicode flag) reads as a sentence or a clause, not as a heading.
+   * Question and exclamation marks are left out: headings do end with them.
+   */
+  sentenceEndPattern: string;
+  /** Text ending like this introduces what follows (a lead-in). Whether it heads it is a judgement. */
+  leadInEndPattern: string;
+  /** Text opening like this is a quotation. */
+  quoteStartPattern: string;
+  /** Share of digits among letters and digits from which text is a number (a price, a statistic, a date). */
+  numericMinDigitShare: number;
+  /** Text that starts with a number and has at most this many words is a statistic ("15 years", "3x faster"). */
+  statisticMaxWords: number;
+  /** Text opening like this is numbered ("1. Scope", "2) Method"), not a statistic. */
+  ordinalStartPattern: string;
+  /**
+   * A candidate is taken for a number when at least this share of the other blocks with its
+   * exact style are numbers: "Free" among prices, "On request" among statistics.
+   */
+  peerDemotionMinShare: number;
+  /** Fewest such look-alikes for that to apply. */
+  peerDemotionMinPeers: number;
+  /** Two lines overlap vertically from this share of the lower of the two. */
+  sameLineMinOverlap: number;
+  /**
+   * Text before a candidate on its line, and no further from it than this many times its font
+   * size, shares the line with it. Further away it is in another column.
+   */
+  sameLineMaxGapEm: number;
+  /** Slack when boxes are compared: stacked, aligned, overlapping. */
+  boxToleranceCssPx: number;
+  /** Font sizes closer than this are one size. */
+  sizeToleranceCssPx: number;
+  /**
+   * Open decision (section 10.3 of the brief): status of a heading level that contradicts the
+   * visual order. `advisory` or `likely`; never `fail`.
+   */
+  inversionStatus: 'advisory' | 'likely';
+  /** Status when the contradiction is extreme (both limits below). */
+  extremeInversionStatus: 'advisory' | 'likely';
+  /** A heading is visually above another from this ratio of font sizes. */
+  inversionMinSizeRatio: number;
+  /** Extreme: at least this ratio of font sizes... */
+  extremeInversionMinSizeRatio: number;
+  /** ...and at least this many levels apart. */
+  extremeInversionMinLevelGap: number;
+}
+
 export interface Config {
   /** Checks to run, in any order. */
   checks: CheckId[];
@@ -515,6 +716,7 @@ export interface Config {
    */
   focus: FocusConfig;
   icon: IconConfig;
+  headings: HeadingsConfig;
 }
 
 export interface ScanResult {

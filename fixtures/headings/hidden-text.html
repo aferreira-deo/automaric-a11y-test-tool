@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: hidden-text</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .title { font-size: 28px; font-weight: 700; margin: 24px 0 8px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+      .off { position: absolute; left: -9999px; }
+      .clip { height: 0; overflow: hidden; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Text that would be a candidate if it could be seen. None of it is reported.</p>
+      <div class="title" style="display: none">Not displayed</div>
+      <p>Body text.</p>
+      <div class="title" style="visibility: hidden">Not visible</div>
+      <p>Body text.</p>
+      <div class="title sr-only">Visually hidden</div>
+      <p>Body text.</p>
+      <div class="title" style="opacity: 0">Fully transparent</div>
+      <p>Body text.</p>
+      <div class="title off">Off screen</div>
+      <p>Body text.</p>
+      <div class="title" style="font-size: 0">No size</div>
+      <p>Body text.</p>
+      <div class="title" style="color: transparent">No colour</div>
+      <p>Body text.</p>
+      <div class="title clip">Clipped away</div>
+      <p>Body text.</p>
+      <div class="title" hidden>Hidden attribute</div>
+      <p>Body text.</p>
+      <details><summary>Closed disclosure</summary><div class="title">Inside a closed disclosure</div><p>Body text.</p></details>
+      <p>Body text.</p>
+      <!-- A visually hidden real heading is not compared with the visible ones either. -->
+      <h2 class="sr-only">Visually hidden heading</h2>
+      <h3 id="visible-h3" style="font-size: 20px">A visible heading</h3>
+      <p>Body text.</p>
+    </main>
+  </body>
+</html>

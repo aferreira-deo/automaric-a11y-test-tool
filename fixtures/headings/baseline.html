@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: baseline</title>
+    <style>
+      body { margin: 32px; font: 13px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; font-size: 20px; }
+      p { margin: 0 0 16px; }
+      h4 { font: inherit; margin: 0; }
+      .title { font-size: 28px; font-weight: 700; margin: 24px 0 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>The header holds much more text than main, all of it at thirteen pixels: a long notice about cookies, a long notice about the newsletter, a long notice about opening hours, a long notice about deliveries, and a long notice about returns, repeated so that it outweighs everything else on the page. A long notice about cookies, a long notice about the newsletter, a long notice about opening hours, a long notice about deliveries, and a long notice about returns.</p>
+    </header>
+    <main>
+      <!-- A real heading that has the style of body text: its style says nothing about other text. -->
+      <h4 id="plain-h4">A heading styled as body text</h4>
+      <p>Body text of main at twenty pixels.</p>
+      <!-- Larger than the text of the header, but the body size of main. -->
+      <div id="short-line">A short line of body text</div>
+      <p>More body text of main.</p>
+      <div class="title" id="title">A title in main</div>
+      <p>Body text under the title.</p>
+    </main>
+  </body>
+</html>

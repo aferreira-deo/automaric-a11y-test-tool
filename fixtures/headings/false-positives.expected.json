@@ -1,0 +1,29 @@
+{
+  "description": "Precision controls: large or bold text followed by body text that is not a heading. Labels, legends, captions, table cells, terms, buttons, links, prices, statistics, quotations, bold sentences, lead-ins, rows and series of peers, a line above a larger one, taglines over calls to action, a bold list item, text hidden from assistive technology. None is fail or likely. Those that stand alone above body text remain candidates, as info with the reason as a flag; table cells, navigation links, tabs and badges, which also sit beside other text, and the items of a series in one style, are not reported at all.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#label", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["label"] },
+    { "selector": "#legend", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["label"] },
+    { "selector": "#figcaption", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["caption"] },
+    { "selector": "#term", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["term"] },
+    { "selector": "#button", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["button"] },
+    { "selector": "#link", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["link"] },
+    { "selector": "#summary", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["button"] },
+    { "selector": "#role-button", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["button"] },
+    { "selector": "#price", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["numeric"] },
+    { "selector": "#stat", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["numeric"] },
+    { "selector": "#stat-unit", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["numeric"] },
+    { "selector": "#price-word", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["peersNumeric"] },
+    { "selector": "#blockquote", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["quote"] },
+    { "selector": "#quote-marks", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["quotation"] },
+    { "selector": "#sentence", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["sentence"] },
+    { "selector": "#colon", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["colon"] },
+    { "selector": "#category", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["notFollowed"] },
+    { "selector": "#bold-item", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["listItem"] },
+    { "selector": "#kicker", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["notFollowed"] },
+    { "selector": "#aria-hidden", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["ariaHidden"] },
+    { "selector": "#tagline", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["headsControl"] },
+    { "selector": "#last", "check": "headings", "status": "info", "rule": "headings/heading-candidate", "flags": ["notFollowed"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

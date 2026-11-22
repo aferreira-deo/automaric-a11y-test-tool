@@ -58,6 +58,7 @@ function cropLabel(id: string): string {
   if (id.endsWith('-focused.png')) return 'Focused';
   if (id.endsWith('-unfocused.png')) return 'Not focused';
   if (id.startsWith('icon-contrast/')) return 'At rest';
+  if (id.startsWith('headings/')) return 'In context';
   return 'Capture';
 }
 
@@ -67,6 +68,7 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     colors: finding.evidence?.colors ?? {},
     ratios: finding.evidence?.ratios ?? {},
     flags: finding.evidence?.flags ?? [],
+    values: finding.evidence?.values ?? {},
   };
   const status = statusOf(finding);
   const rows: [string, string][] = [
@@ -82,6 +84,10 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     // Only a plain hex colour goes into a style attribute: anything else could carry a url().
     const swatch = HEX_COLOR.test(color) ? `<span class="swatch" style="background:${escape(color)}"></span>` : '';
     rows.push([`Colour: ${escape(role)}`, `${swatch}<code>${escape(color)}</code>`]);
+  }
+  for (const [name, value] of Object.entries(evidence.values)) {
+    // Text read from the page is among these values: escaped like everything else.
+    rows.push([escape(name), typeof value === 'boolean' ? (value ? 'yes' : 'no') : escape(value)]);
   }
   if (evidence.flags.length > 0) rows.push(['Flags', evidence.flags.map(escape).join(', ')]);
   if (finding.box) {

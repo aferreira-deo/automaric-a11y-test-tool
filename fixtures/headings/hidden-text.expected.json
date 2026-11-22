@@ -1,0 +1,8 @@
+{
+  "description": "Text styled as a title that cannot be seen: display none, visibility hidden, visually hidden by clipping, opacity 0, off screen, font size 0, transparent, clipped by its container, the hidden attribute, inside a closed details. Candidates come from what is painted, so none is reported.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

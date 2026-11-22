@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: unmarked-headings</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .title { font-size: 28px; font-weight: 700; margin: 24px 0 8px; }
+      .block { display: block; font-size: 22px; margin: 24px 0 8px; }
+      h2, .h2 { font-size: 24px; font-weight: 700; margin: 24px 0 8px; }
+      h3, .h3 { font-size: 15px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; color: #595959; margin: 24px 0 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- Text that looks like a heading and is not exposed as one. -->
+      <div class="title" id="div-title">A title in a div</div>
+      <p>Body text under the title, long enough to be a paragraph of its own.</p>
+
+      <p id="p-bold"><strong>A bold paragraph used as a heading</strong></p>
+      <p>Body text under the bold paragraph. It has the size of the bold line above it.</p>
+
+      <p><b id="br-title">Bold line before a line break</b><br />Body text in the same paragraph, after the line break, at the normal weight.</p>
+
+      <span class="block" id="span-block">A span displayed as a block</span>
+      <p>Body text under the span.</p>
+
+      <!-- The tag says heading, the accessibility tree does not. -->
+      <h2 id="presentational" role="presentation">A heading made presentational</h2>
+      <p>Body text under the presentational heading.</p>
+
+      <div class="title" id="question">Does a question count?</div>
+      <p>Body text under the question.</p>
+
+      <!-- Exposed as headings: not reported. -->
+      <h2 id="real-h2">A real heading</h2>
+      <p>Body text under the real heading.</p>
+      <div class="h2" id="role-heading" role="heading" aria-level="2">A heading by role</div>
+      <p>Body text under the heading by role.</p>
+      <h3 id="real-h3">A small uppercase heading</h3>
+      <p>Body text under the small heading.</p>
+
+      <!-- Neither larger nor bolder than body text, but styled exactly as the h3 above. -->
+      <div class="h3" id="same-as-h3">Styled as the small heading</div>
+      <p>Body text under the look-alike.</p>
+    </main>
+  </body>
+</html>

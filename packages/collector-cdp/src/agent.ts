@@ -16,6 +16,75 @@ export interface AgentOptions {
   opaqueCoverMinAlpha: number;
   invisibleCoverMaxOpacity: number;
   icon: AgentIconOptions;
+  headings: AgentHeadingsOptions;
+}
+
+/** Subset of HeadingsConfig the agent needs; documented there. */
+export interface AgentHeadingsOptions {
+  maxBlocks: number;
+  maxTextChars: number;
+  minVisibleTextCssPx: number;
+  minFontSizeCssPx: number;
+  regionSelector: string;
+  clipMarginCssPx: number;
+  clipAboveCssPx: number;
+  clipBelowCssPx: number;
+}
+
+/** Mirrors TextContext, TextStyle and TextBlock of core (the agent cannot import). */
+export type AgentTextContext =
+  | 'label'
+  | 'caption'
+  | 'tableHeader'
+  | 'tableCell'
+  | 'term'
+  | 'button'
+  | 'link'
+  | 'quote'
+  | 'code'
+  | 'navigation'
+  | 'ariaHidden';
+
+export interface AgentTextStyle {
+  family: string;
+  size: number;
+  weight: number;
+  color: string;
+  transform: string;
+  italic: boolean;
+}
+
+export interface AgentTextBlock {
+  selector: string;
+  frame: string;
+  tag: string;
+  text: string;
+  chars: number;
+  words: number;
+  box: AgentRect;
+  lines: number;
+  firstLine: AgentRect;
+  lastLine: AgentRect;
+  breaks: number;
+  style: AgentTextStyle;
+  styleShare: number;
+  contexts: AgentTextContext[];
+  inMain: boolean;
+  inListItem: boolean;
+  region: string;
+  heading: { level: number; selector: string } | null;
+}
+
+export interface AgentHeadingSurvey {
+  blocks: AgentTextBlock[];
+  total: number;
+}
+
+export interface AgentHeadingPrepared {
+  /** Region to capture, page coordinates, whole CSS pixels. Null when the block cannot be shown. */
+  clip: AgentRect | null;
+  /** Other content lies over the middle of the block. */
+  covered: boolean;
 }
 
 /** Subset of IconConfig the agent needs; documented there. */
@@ -166,6 +235,12 @@ export interface Agent {
   coveredBelow(key: number, x: number, y: number, mode: 'icon' | 'focus'): boolean;
   connected(key: number): boolean;
   element(key: number): Element;
+  /** Records that the accessibility tree exposes this element as a heading. Called on the node itself. */
+  markHeading(element: unknown, level: number): boolean;
+  /** True for a frame element whose document the agent can look into. */
+  frameReadable(element: unknown): boolean;
+  headingSurvey(): AgentHeadingSurvey;
+  prepareHeading(index: number): Promise<AgentHeadingPrepared>;
   cleanup(): void;
 }
 
@@ -1582,6 +1657,448 @@ export function agentFactory(options: AgentOptions): Agent {
     return { ...result, clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } };
   }
 
+  // ---------------------------------------------------------------------------------------
+  // headings: blocks of visible text, whatever their tags.
+  // ---------------------------------------------------------------------------------------
+
+  const TEXT_SKIPPED = [
+    'script', 'style', 'noscript', 'template', 'head', 'title', 'svg', 'math', 'select', 'option', 'optgroup', 'datalist',
+    'textarea', 'input', 'canvas', 'video', 'audio', 'object', 'embed', 'img', 'picture', 'map', 'meter', 'progress',
+  ];
+  const WIDGET_ROLES = ['button', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch', 'checkbox', 'radio', 'treeitem'];
+  const NAVIGATION_ROLES = ['navigation', 'menu', 'menubar', 'tablist', 'toolbar', 'tree', 'listbox'];
+  const CONTEXT_ORDER: AgentTextContext[] = [
+    'label', 'caption', 'tableHeader', 'tableCell', 'term', 'button', 'link', 'quote', 'code', 'navigation', 'ariaHidden',
+  ];
+
+  /** Elements the accessibility tree exposes as headings, with their level. Filled by the collector before the survey. */
+  const headingMarks = new Map<Element, number>();
+  /** The text nodes and the element of each block of the last survey, by position. */
+  let surveyedBlocks: { nodes: Text[]; element: Element }[] = [];
+
+  function markHeading(element: unknown, level: number): boolean {
+    if (!element || (element as Node).nodeType !== 1) return false;
+    headingMarks.set(element as Element, level);
+    return true;
+  }
+
+  function frameReadable(element: unknown): boolean {
+    return !!element && (element as Node).nodeType === 1 && isFrame(element as Element) && frameDocument(element as Element) !== null;
+  }
+
+  function ownContexts(element: Element): AgentTextContext[] {
+    const name = element.localName;
+    const role = (element.getAttribute('role') ?? '').trim().toLowerCase();
+    const found: AgentTextContext[] = [];
+    if (name === 'label' || name === 'legend') found.push('label');
+    if (name === 'caption' || name === 'figcaption') found.push('caption');
+    if (name === 'th' || name === 'td') {
+      // A table used for layout has no cells as far as assistive technology is concerned.
+      const tableRole = (element.closest('table')?.getAttribute('role') ?? '').trim().toLowerCase();
+      if (tableRole !== 'presentation' && tableRole !== 'none') found.push(name === 'th' ? 'tableHeader' : 'tableCell');
+    }
+    if (role === 'columnheader' || role === 'rowheader') found.push('tableHeader');
+    if (role === 'cell' || role === 'gridcell') found.push('tableCell');
+    if (name === 'dt') found.push('term');
+    if (name === 'button' || name === 'summary' || WIDGET_ROLES.includes(role)) found.push('button');
+    if ((name === 'a' && element.hasAttribute('href')) || role === 'link') found.push('link');
+    if (name === 'blockquote' || name === 'q') found.push('quote');
+    if (name === 'pre' || name === 'code' || name === 'kbd' || name === 'samp') found.push('code');
+    if (name === 'nav' || NAVIGATION_ROLES.includes(role)) found.push('navigation');
+    if (element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert')) found.push('ariaHidden');
+    return found;
+  }
+
+  function headingSurvey(): AgentHeadingSurvey {
+    const limits = options.headings;
+    const blocks: AgentTextBlock[] = [];
+    surveyedBlocks = [];
+    let total = 0;
+
+    interface Place {
+      contexts: Set<AgentTextContext>;
+      inMain: boolean;
+      inListItem: boolean;
+      region: Element | null;
+      heading: Element | null;
+    }
+    interface Look {
+      visible: boolean;
+      style: AgentTextStyle;
+      signature: string;
+    }
+    interface Piece {
+      node: Text;
+      holder: Element;
+      rects: AgentRect[];
+      text: string;
+      chars: number;
+      look: Look;
+    }
+    const places = new Map<Element, Place>();
+    const looks = new Map<Element, Look>();
+    const clips = new Map<Element, AgentRect | null>();
+    const offsets = new Map<Document, { x: number; y: number }>();
+    const textCounts = new Map<Element, number>();
+    const regionNames = new Map<Element, string>();
+    const pending: { pieces: Piece[]; breaks: number }[] = [];
+
+    const outerElement = (element: Element): Element | null => parentElementOf(element) ?? frameElementOf(element);
+
+    function placeOf(element: Element): Place {
+      const known = places.get(element);
+      if (known) return known;
+      // Iterative: the chain of ancestors can be long, and most of it is cached.
+      const chain: Element[] = [];
+      let base: Place | undefined;
+      for (let current: Element | null = element; current; current = outerElement(current)) {
+        base = places.get(current);
+        if (base) break;
+        chain.push(current);
+      }
+      let place: Place = base ?? { contexts: new Set(), inMain: false, inListItem: false, region: null, heading: null };
+      for (let index = chain.length - 1; index >= 0; index--) {
+        const current = chain[index]!;
+        const own = ownContexts(current);
+        let matchesRegion = false;
+        let matchesMain = false;
+        try {
+          matchesRegion = current.matches(limits.regionSelector);
+          matchesMain = current.matches('main,[role="main"]');
+        } catch {
+          // An invalid selector in the configuration: no regions.
+        }
+        const isHeading = headingMarks.has(current);
+        const isItem = current.localName === 'li' || (current.getAttribute('role') ?? '').trim().toLowerCase() === 'listitem';
+        if (own.length > 0 || matchesRegion || matchesMain || isHeading || isItem) {
+          place = {
+            contexts: own.length > 0 ? new Set([...place.contexts, ...own]) : place.contexts,
+            inMain: place.inMain || matchesMain,
+            inListItem: place.inListItem || isItem,
+            region: matchesRegion ? current : place.region,
+            heading: isHeading ? current : place.heading,
+          };
+        }
+        places.set(current, place);
+      }
+      return place;
+    }
+
+    function lookOf(holder: Element): Look {
+      const known = looks.get(holder);
+      if (known) return known;
+      const view = holder.ownerDocument.defaultView;
+      const computed = view?.getComputedStyle(holder);
+      const color = computed ? parseColor(computed.color) : null;
+      const hex = color
+        ? '#' +
+          [color.r, color.g, color.b, ...(color.a < 1 ? [Math.round(color.a * 255)] : [])]
+            .map((channel) => channel.toString(16).padStart(2, '0'))
+            .join('')
+        : (computed?.color ?? '');
+      const style: AgentTextStyle = {
+        family: (computed?.fontFamily ?? '').split(',')[0]!.trim().replace(/^["']|["']$/g, '').toLowerCase(),
+        size: computed ? parseFloat(computed.fontSize) || 0 : 0,
+        weight: computed ? Number(computed.fontWeight) || 400 : 400,
+        color: hex,
+        transform: computed?.textTransform ?? 'none',
+        italic: computed ? computed.fontStyle !== 'normal' : false,
+      };
+      const look: Look = {
+        visible:
+          !!computed &&
+          holder.checkVisibility(VISIBLE) &&
+          style.size >= limits.minFontSizeCssPx &&
+          (color ? color.a > 0 : alphaOf(computed.color) > 0),
+        style,
+        signature: [style.family, Math.round(style.size * 10) / 10, style.weight, style.color, style.transform].join('|'),
+      };
+      looks.set(holder, look);
+      return look;
+    }
+
+    /** What clips the content of an element, in the client coordinates of its frame: its hidden-overflow ancestors. */
+    function clipOf(element: Element): AgentRect | null {
+      const chain: Element[] = [];
+      let clip: AgentRect | null = null;
+      for (let current: Element | null = element; current; current = parentElementOf(current)) {
+        if (clips.has(current)) {
+          clip = clips.get(current) ?? null;
+          break;
+        }
+        chain.push(current);
+      }
+      for (let index = chain.length - 1; index >= 0; index--) {
+        const current = chain[index]!;
+        const own = current.ownerDocument.defaultView?.getComputedStyle(current);
+        const hides = (value: string): boolean => value === 'hidden' || value === 'clip';
+        if (own && (hides(own.overflowX) || hides(own.overflowY) || own.clip !== 'auto' || own.clipPath !== 'none')) {
+          const rect = plainRect(current.getBoundingClientRect());
+          clip = clip ? intersect(clip, rect) : rect;
+        }
+        clips.set(current, clip);
+      }
+      return clip;
+    }
+
+    function pieceOf(node: Text): Piece | null {
+      if (!/\S/.test(node.data)) return null;
+      const holder = node.parentElement ?? hostOf(node.parentNode);
+      const view = holder?.ownerDocument.defaultView;
+      if (!holder || !view) return null;
+      const look = lookOf(holder);
+      if (!look.visible) return null;
+      const range = holder.ownerDocument.createRange();
+      range.selectNodeContents(node);
+      const clip = clipOf(holder);
+      const root = holder.ownerDocument.documentElement;
+      const page = { x: -view.scrollX, y: -view.scrollY, width: root.scrollWidth, height: root.scrollHeight };
+      const rects: AgentRect[] = [];
+      for (const raw of range.getClientRects()) {
+        let rect = intersect(plainRect(raw), page);
+        if (clip) rect = intersect(rect, clip);
+        if (rect.width >= limits.minVisibleTextCssPx && rect.height >= limits.minVisibleTextCssPx) rects.push(rect);
+      }
+      if (rects.length === 0) return null;
+      const text = node.data.replace(/\s+/g, ' ');
+      return { node, holder, rects, text, chars: text.replace(/\s/g, '').length, look };
+    }
+
+    function dominant(pieces: Piece[]): { look: Look; share: number } {
+      const weights = new Map<string, { look: Look; chars: number }>();
+      let all = 0;
+      for (const piece of pieces) {
+        const entry = weights.get(piece.look.signature) ?? { look: piece.look, chars: 0 };
+        entry.chars += piece.chars;
+        weights.set(piece.look.signature, entry);
+        all += piece.chars;
+      }
+      let best: { look: Look; chars: number } | null = null;
+      for (const entry of weights.values()) {
+        if (!best || entry.chars > best.chars || (entry.chars === best.chars && entry.look.signature < best.look.signature)) best = entry;
+      }
+      return { look: best!.look, share: all > 0 ? best!.chars / all : 1 };
+    }
+
+    /** The inline content of one block container, split at forced line breaks. */
+    let open: Piece[][] | null = null;
+
+    function flush(): void {
+      const segments = (open ?? []).filter((segment) => segment.length > 0);
+      open = null;
+      if (segments.length === 0) return;
+      // A forced line break splits the block only where the style changes across it.
+      let group: Piece[] = [];
+      let breaks = 0;
+      let signature = '';
+      const close = (): void => {
+        if (group.length === 0) return;
+        total++;
+        if (pending.length < limits.maxBlocks) {
+          pending.push({ pieces: group, breaks });
+          for (const piece of group) {
+            for (let current: Element | null = piece.holder; current; current = parentElementOf(current)) {
+              textCounts.set(current, (textCounts.get(current) ?? 0) + 1);
+            }
+          }
+        }
+        group = [];
+        breaks = 0;
+      };
+      for (const segment of segments) {
+        const own = dominant(segment).look.signature;
+        if (group.length > 0 && own !== signature) close();
+        else if (group.length > 0) breaks++;
+        if (group.length === 0) signature = own;
+        group.push(...segment);
+      }
+      close();
+    }
+
+    function visit(node: Node): void {
+      if (node.nodeType === 3) {
+        const piece = pieceOf(node as Text);
+        if (!piece) return;
+        open ??= [[]];
+        open[open.length - 1]!.push(piece);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      const element = node as Element;
+      const name = element.localName;
+      if (TEXT_SKIPPED.includes(name)) return;
+      const view = element.ownerDocument.defaultView;
+      if (!view) return;
+      const display = view.getComputedStyle(element).display;
+      if (display === 'none') return;
+      if (name === 'br') {
+        if (open && open[open.length - 1]!.length > 0) open.push([]);
+        return;
+      }
+      if (isFrame(element)) {
+        flush();
+        const doc = frameDocument(element);
+        // Where a transformed frame puts its content cannot be worked out from its box.
+        if (doc?.body && !inTransformedFrame(doc.body)) visit(doc.body);
+        flush();
+        return;
+      }
+      const inline = display === 'inline' || display === 'contents' || display.startsWith('ruby');
+      if (!inline) flush();
+      for (const child of composedChildren(element)) visit(child);
+      if (!inline) flush();
+    }
+
+    if (document.body) visit(document.body);
+    flush();
+
+    const offsetOf = (element: Element): { x: number; y: number } => {
+      const doc = element.ownerDocument;
+      let offset = offsets.get(doc);
+      if (!offset) {
+        offset = frameOffset(element);
+        offsets.set(doc, offset);
+      }
+      return offset;
+    };
+    const regionName = (region: Element | null): string => {
+      if (!region) return '';
+      let name = regionNames.get(region);
+      if (name === undefined) {
+        const frame = frameOf(region);
+        name = (frame ? frame + JOIN : '') + selectorOf(region);
+        regionNames.set(region, name);
+      }
+      return name;
+    };
+
+    for (const { pieces, breaks } of pending) {
+      const first = pieces[0]!;
+      // Lines, from the painted boxes of the text.
+      const rects = pieces.flatMap((piece) => piece.rects).sort((a, b) => a.y - b.y || a.x - b.x);
+      const lines: AgentRect[] = [];
+      for (const rect of rects) {
+        const last = lines[lines.length - 1];
+        const overlap = last ? Math.min(last.y + last.height, rect.y + rect.height) - Math.max(last.y, rect.y) : 0;
+        if (last && overlap >= 0.5 * Math.min(last.height, rect.height)) lines[lines.length - 1] = union(last, rect);
+        else lines.push(rect);
+      }
+      const offset = offsetOf(first.holder);
+      const page = (rect: AgentRect): AgentRect => toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y });
+
+      let element = first.holder;
+      for (const piece of pieces) {
+        while (!composedContains(element, piece.holder)) {
+          const parent = parentElementOf(element);
+          if (!parent) break;
+          element = parent;
+        }
+      }
+      // An inline wrapper that holds all the text of its parent stands for nothing: name the parent.
+      for (;;) {
+        const parent = element.parentElement;
+        const display = element.ownerDocument.defaultView?.getComputedStyle(element).display;
+        if (!parent || parent === element.ownerDocument.body || (display !== 'inline' && display !== 'contents')) break;
+        if ((textCounts.get(parent) ?? 0) !== pieces.length) break;
+        element = parent;
+      }
+
+      const place = placeOf(element);
+      const piecePlaces = pieces.map((piece) => placeOf(piece.holder));
+      const headingElement = piecePlaces[0]!.heading;
+      const isHeading = headingElement !== null && piecePlaces.every((own) => own.heading === headingElement);
+      const { look, share } = dominant(pieces);
+      const text = pieces
+        .map((piece) => piece.text)
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim();
+      surveyedBlocks.push({ nodes: pieces.map((piece) => piece.node), element });
+      blocks.push({
+        selector: selectorOf(element),
+        frame: frameOf(element),
+        tag: element.localName,
+        text: text.slice(0, limits.maxTextChars),
+        chars: text.replace(/\s/g, '').length,
+        words: text.split(' ').filter(Boolean).length,
+        box: page(lines.reduce(union)),
+        lines: lines.length,
+        firstLine: page(lines[0]!),
+        lastLine: page(lines[lines.length - 1]!),
+        breaks,
+        style: look.style,
+        styleShare: share,
+        contexts: CONTEXT_ORDER.filter((context) => piecePlaces.every((own) => own.contexts.has(context))),
+        inMain: piecePlaces.every((own) => own.inMain),
+        inListItem: piecePlaces.every((own) => own.inListItem),
+        region: regionName(place.region),
+        heading: isHeading ? { level: headingMarks.get(headingElement) ?? 0, selector: selectorOf(headingElement) } : null,
+      });
+    }
+    return { blocks, total };
+  }
+
+  /** Scrolls a block of the last survey into view and says what to capture: the block with what is above and below it. */
+  async function prepareHeading(index: number): Promise<AgentHeadingPrepared> {
+    const block = surveyedBlocks[index];
+    if (!block || !block.element.isConnected) return { clip: null, covered: false };
+    const { element } = block;
+    // Registered, so that the scroll positions of what holds it are put back by cleanup().
+    keyOf(element);
+    ensureStableAround(element);
+    element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    await settle();
+    if (!element.isConnected || inTransformedFrame(element)) return { clip: null, covered: false };
+    const rectOf = (nodes: Text[]): AgentRect | null => {
+      let box: AgentRect | null = null;
+      for (const node of nodes) {
+        if (!node.isConnected) continue;
+        const range = node.ownerDocument.createRange();
+        range.selectNodeContents(node);
+        const rect = plainRect(range.getBoundingClientRect());
+        if (rect.width > 0 && rect.height > 0) box = box ? union(box, rect) : rect;
+      }
+      return box;
+    };
+    const own = rectOf(block.nodes);
+    if (!own) return { clip: null, covered: false };
+    // A capture is evidence only if it shows the block: not when a banner or a dialog lies over it.
+    const doc = element.ownerDocument;
+    const view = doc.defaultView;
+    const middleX = own.x + own.width / 2;
+    const middleY = own.y + own.height / 2;
+    if (view && middleX >= 0 && middleY >= 0 && middleX < view.innerWidth && middleY < view.innerHeight) {
+      // Only content that floats over the page counts (fixed or sticky, outside what holds the
+      // block): a stretched link over a card also answers the hit test, and hides nothing.
+      let floating = false;
+      for (let current: Node | null = topElementAt(doc, middleX, middleY); current; current = composedParent(current)) {
+        if (current.nodeType !== 1) continue;
+        if (composedContains(current, element)) break;
+        const position = view.getComputedStyle(current as Element).position;
+        if (position === 'fixed' || position === 'sticky') floating = true;
+      }
+      if (floating || frameCoveredAt(element, middleX, middleY)) return { clip: null, covered: true };
+    }
+    const limits = options.headings;
+    const next = surveyedBlocks[index + 1];
+    const after = next && next.element.ownerDocument === element.ownerDocument ? rectOf(next.nodes) : null;
+    const offset = frameOffset(element);
+    const top = own.y + offset.y - limits.clipAboveCssPx;
+    const low = own.y + own.height + offset.y + limits.clipBelowCssPx;
+    // As wide as the block and the one after it, when that one is under it.
+    const wide = after && after.y >= own.y && after.y < own.y + own.height + limits.clipBelowCssPx ? union(own, after) : own;
+    const left = Math.max(0, wide.x + offset.x - limits.clipMarginCssPx);
+    const right = Math.min(window.innerWidth, wide.x + wide.width + offset.x + limits.clipMarginCssPx);
+    const upper = Math.max(0, top);
+    const lower = Math.min(window.innerHeight, low);
+    if (right - left < 1 || lower - upper < 1) return { clip: null, covered: false };
+    const x0 = Math.floor(left + window.scrollX);
+    const y0 = Math.floor(upper + window.scrollY);
+    const x1 = Math.ceil(right + window.scrollX);
+    const y1 = Math.ceil(lower + window.scrollY);
+    return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, covered: false };
+  }
+
   return {
     async stabilise() {
       ensureStable(document);
@@ -1725,6 +2242,10 @@ export function agentFactory(options: AgentOptions): Agent {
     prepareIcon,
     hitKind,
     coveredBelow,
+    markHeading,
+    frameReadable,
+    headingSurvey,
+    prepareHeading,
 
     connected(key) {
       return get(key).isConnected;

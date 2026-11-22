@@ -1,0 +1,7 @@
+{
+  "description": "A page without any heading and without text that functions as one. A page with no headings is not a failure. Bold and large words inside a sentence, and lines separated by line breaks in one style, are not candidates; a bold postal address is a candidate at most (info: it starts with a number).",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

@@ -19,6 +19,8 @@ export interface MatchedStyles {
 /** The stabilised page, as the collectors of the individual checks use it. */
 export interface StablePage {
   cdp: CdpSession;
+  /** Execution context of the isolated world the agent lives in. */
+  contextId: number;
   /** Calls a method of the in-page agent, e.g. `agent('prepare(3)')`. */
   agent: <T>(call: string) => Promise<T>;
   /** Screenshot of a region given in page coordinates, with the scale it was really taken at. */
@@ -165,6 +167,7 @@ export async function withStablePage<T>(
 
   const page: StablePage = {
     cdp,
+    contextId: world.contextId,
     clips,
     agent,
     screenshot,
@@ -208,6 +211,16 @@ export async function withStablePage<T>(
         boundaryWrapperLevels: config.icon.boundaryWrapperLevels,
         boundaryWrapperSlackCssPx: config.icon.boundaryWrapperSlackCssPx,
         coverGrid: config.icon.coverGrid,
+      },
+      headings: {
+        maxBlocks: config.headings.maxBlocks,
+        maxTextChars: config.headings.maxTextChars,
+        minVisibleTextCssPx: config.headings.minVisibleTextCssPx,
+        minFontSizeCssPx: config.headings.minFontSizeCssPx,
+        regionSelector: config.headings.regionSelector,
+        clipMarginCssPx: config.headings.clipMarginCssPx,
+        clipAboveCssPx: config.headings.clipAboveCssPx,
+        clipBelowCssPx: config.headings.clipBelowCssPx,
       },
     };
     await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);

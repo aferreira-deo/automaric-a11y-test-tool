@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: consent-wall</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .title { font-size: 28px; font-weight: 700; margin: 24px 0 8px; }
+      .wall { position: fixed; inset: 10% 10%; padding: 24px; background: #fff; border: 2px solid #1a1a1a; }
+      button { font: inherit; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Body text of the page, under a consent wall that covers most of the viewport, as on a news site before the visitor has chosen.</p>
+      <!-- Under the wall wherever it is scrolled to: reported, but a capture would show the wall. -->
+      <div class="title" id="page-title">A title of the page</div>
+      <p>Body text under the title of the page, long enough to be a paragraph of its own.</p>
+    </main>
+    <div class="wall">
+      <!-- The title of the wall itself is an unmarked heading too (seen on a news site). -->
+      <div class="title" id="wall-title">Support reliable journalism</div>
+      <p>Body text of the wall: read for free by accepting the use of your data, or subscribe.</p>
+      <button type="button">Accept</button>
+    </div>
+  </body>
+</html>

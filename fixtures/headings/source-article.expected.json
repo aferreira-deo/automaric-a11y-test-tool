@@ -1,0 +1,7 @@
+{
+  "description": "A well-marked article: every heading is exposed as one. Nothing is reported as fail or likely: not the site name, the navigation, the byline, the lead paragraph, the pull quote, the table headers, the caption or the bold sentence. The mutation test strips the headings of this page (e2e/headings-mutation.spec.ts).",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

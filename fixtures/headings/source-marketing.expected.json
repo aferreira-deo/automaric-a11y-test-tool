@@ -1,0 +1,7 @@
+{
+  "description": "A well-marked marketing page in French: hero, card grids, statistics, prices, a testimonial, questions and footer columns. Nothing is reported as fail or likely: not the brand, the menu, the call to action, the statistics, the prices or the quotation. 'Sur devis' in the place of a price is recorded as a candidate (info) at most. The mutation test strips the headings of this page.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

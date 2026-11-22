@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: level-inversion</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main, aside, section { max-width: 640px; }
+      h1, h2, h3, h4 { margin: 24px 0 8px; font-weight: 700; line-height: 1.2; }
+      h1 { font-size: 32px; }
+      h2 { font-size: 24px; }
+      h3 { font-size: 18px; }
+      h4 { font-size: 16px; }
+      p { margin: 0 0 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">Levels that follow the visual order</h1>
+      <p>Body text.</p>
+      <h2 id="ok-h2">A section</h2>
+      <p>Body text.</p>
+      <h3 id="ok-h3">A subsection</h3>
+      <p>Body text.</p>
+      <!-- A skipped level is not a contradiction. -->
+      <h4 id="ok-h4">A detail</h4>
+      <p>Body text.</p>
+      <h2 id="ok-h2b">A section</h2>
+      <p>Body text. The heading above repeats the text of an earlier one, which is not a failure either.</p>
+
+      <!-- Larger than the h2 it is coded under: one level apart. -->
+      <h3 id="big-h3" style="font-size: 30px">A subsection that looks like a section</h3>
+      <p>Body text.</p>
+      <!-- Coded above the h3 before it, and much smaller than it. -->
+      <h2 id="small-h2" style="font-size: 16px">A section that looks like a detail</h2>
+      <p>Body text.</p>
+      <!-- Two levels under that h2, and more than twice its size. -->
+      <h4 id="huge-h4" style="font-size: 36px">A detail that looks like the page title</h4>
+      <p>Body text.</p>
+    </main>
+    <!-- Another region: its headings are not compared with those of main. -->
+    <aside>
+      <h2 id="aside-h2" style="font-size: 14px">Small heading of the sidebar</h2>
+      <p>Body text.</p>
+      <h3 id="aside-h3" style="font-size: 14px">Same size, one level down</h3>
+      <p>Body text.</p>
+    </aside>
+    <section aria-label="Second title">
+      <h1 id="second-h1">A second h1</h1>
+      <p>Body text.</p>
+    </section>
+  </body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: source-article</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      header, main, footer { max-width: 760px; margin: 0 auto; padding: 16px 32px; }
+      header { display: flex; align-items: center; gap: 32px; border-bottom: 1px solid #595959; }
+      .site { font-size: 20px; font-weight: 700; color: #1a1a1a; text-decoration: none; }
+      nav a { margin-right: 16px; font-weight: 700; color: #00539b; }
+      .t1 { font-size: 34px; font-weight: 700; line-height: 1.2; margin: 24px 0 8px; }
+      .t2 { font-size: 24px; font-weight: 700; line-height: 1.25; margin: 32px 0 8px; }
+      .t3 { font-size: 19px; font-weight: 700; line-height: 1.3; margin: 24px 0 4px; }
+      .t4 { font-size: 16px; font-weight: 700; margin: 16px 0 0; }
+      p { margin: 0 0 16px; }
+      .byline { font-size: 14px; color: #595959; }
+      .lead { font-size: 20px; }
+      blockquote { margin: 24px 0; padding-left: 16px; border-left: 4px solid #595959; font-size: 24px; font-style: italic; }
+      table { border-collapse: collapse; margin: 0 0 16px; }
+      th, td { border: 1px solid #595959; padding: 4px 12px; text-align: left; }
+      figure { margin: 0 0 16px; }
+      figcaption { font-weight: 700; }
+      .box { width: 200px; height: 60px; background: #d0d7de; }
+      aside { border-top: 1px solid #595959; margin-top: 32px; }
+      footer { font-size: 14px; color: #595959; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="site" href="/">The Daily Tide</a>
+      <nav aria-label="Sections"><a href="/a">Harbours</a><a href="/b">Weather</a><a href="/c">Boats</a></nav>
+    </header>
+    <main>
+      <h1 class="t1" id="title">Dredging the old harbour, one season at a time</h1>
+      <p class="byline">By Jane Doe, 12 March</p>
+      <p class="lead">The silt came back faster than anyone had planned for, and the town had to decide whether the harbour was worth keeping open at all.</p>
+      <h2 class="t2" id="s1">Why the channel fills up</h2>
+      <p>Every spring the river carries sand down from the hills and drops it where the current slows, right at the harbour mouth.</p>
+      <h3 class="t3" id="s1a">The river</h3>
+      <p>Most of the sediment arrives in three or four storms. The rest of the year the water runs clear.</p>
+      <h3 class="t3" id="s1b">The tide</h3>
+      <p>Twice a day the tide pushes some of that sand back in. <strong>This is the part nobody measured.</strong> The old charts only show depth at low water.</p>
+      <blockquote><p>We were dredging the same sand three times.</p></blockquote>
+      <h2 class="t2" id="s2">What the town tried</h2>
+      <p>Three approaches were tested over five years, with mixed results.</p>
+      <table>
+        <caption>Cost by approach</caption>
+        <tr><th>Approach</th><th>Cost</th></tr>
+        <tr><td>Suction dredger</td><td>€120,000</td></tr>
+        <tr><td>Groyne</td><td>€310,000</td></tr>
+      </table>
+      <h4 class="t4" id="s2a">A note on the figures</h4>
+      <p>Costs are those voted by the council, not what was finally spent.</p>
+      <figure><div class="box"></div><figcaption>The dredger at work in April.</figcaption></figure>
+      <h2 class="t2" id="s3">What happens next?</h2>
+      <p>The council votes in June. Until then the channel stays open at half depth.</p>
+      <aside>
+        <h2 class="t2" id="related">Related reading</h2>
+        <h3 class="t3" id="r1"><a href="/x">How the lighthouse was moved</a></h3>
+        <p>A hundred metres inland, on rails, in 1911.</p>
+      </aside>
+    </main>
+    <footer><p>Published by The Daily Tide. Fictional content for testing.</p></footer>
+  </body>
+</html>

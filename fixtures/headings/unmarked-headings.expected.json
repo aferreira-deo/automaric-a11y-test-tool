@@ -1,0 +1,15 @@
+{
+  "description": "Text that functions as a heading and is not exposed as one: a styled div, a bold paragraph, a bold line before a line break, a span displayed as a block, an h2 made presentational (the accessibility tree decides, not the tag), and a div that has the exact style of a real h3 while being neither larger nor bolder than body text. Real headings, by tag or by role, are not reported.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#div-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["larger", "bolder"] },
+    { "selector": "#p-bold", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#br-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["bolder"] },
+    { "selector": "#span-block", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["larger"] },
+    { "selector": "#presentational", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["matchesHeadingStyle"] },
+    { "selector": "#question", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#same-as-h3", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["matchesHeadingStyle"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { CheckId, Config, FocusConfig, IconConfig } from './types.js';
+import type { CheckId, Config, FocusConfig, HeadingsConfig, IconConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +6,7 @@ import type { CheckId, Config, FocusConfig, IconConfig } from './types.js';
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings'],
   focus: {
     deviceScaleFactor: 2,
     captureSizeTolerancePx: 1,
@@ -82,14 +82,59 @@ export const defaultConfig: Config = {
     boundaryClusterDeltaE: 2,
     captureAttempts: 3,
   },
+  headings: {
+    maxBlocks: 6000,
+    maxTextChars: 300,
+    maxCandidates: 150,
+    minVisibleTextCssPx: 2,
+    minFontSizeCssPx: 1,
+    regionSelector:
+      'main,nav,aside,header,footer,article,dialog,form,search,[role="main"],[role="navigation"],[role="complementary"],[role="banner"],[role="contentinfo"],[role="region"],[role="article"],[role="dialog"],[role="alertdialog"],[role="form"],[role="search"]',
+    clipMarginCssPx: 16,
+    clipAboveCssPx: 48,
+    clipBelowCssPx: 96,
+    minSizeRatio: 1.3,
+    minWeightDelta: 200,
+    boldMinSizeRatio: 0.95,
+    uppercaseBoldMinSizeRatio: 0.7,
+    maxWords: 20,
+    maxChars: 160,
+    maxLines: 3,
+    maxBoldOnlyWords: 12,
+    uniformStyleMinShare: 0.9,
+    maxBreaks: 2,
+    sentenceEndPattern: '([.\\u3002;\\uff1b,\\uff0c\\u3001\\u2026]|\\p{L}[.\\u3002][\\p{N}*\\u2020\\u2021]{1,2})$',
+    leadInEndPattern: '[:\\uff1a]$',
+    quoteStartPattern: '^["\\u00ab\\u2039\\u201c\\u201e\\u201a\\u2018\\u300c\\u300e]',
+    numericMinDigitShare: 0.5,
+    statisticMaxWords: 3,
+    ordinalStartPattern: '^\\p{N}+(\\.\\p{N}+)*[.)]\\s',
+    peerDemotionMinShare: 0.66,
+    peerDemotionMinPeers: 2,
+    sameLineMinOverlap: 0.5,
+    sameLineMaxGapEm: 1,
+    boxToleranceCssPx: 2,
+    sizeToleranceCssPx: 0.25,
+    inversionStatus: 'advisory',
+    extremeInversionStatus: 'likely',
+    inversionMinSizeRatio: 1.15,
+    extremeInversionMinSizeRatio: 1.5,
+    extremeInversionMinLevelGap: 2,
+  },
 };
 
-export type ConfigInput = { checks?: CheckId[]; focus?: Partial<FocusConfig>; icon?: Partial<IconConfig> };
+export type ConfigInput = {
+  checks?: CheckId[];
+  focus?: Partial<FocusConfig>;
+  icon?: Partial<IconConfig>;
+  headings?: Partial<HeadingsConfig>;
+};
 
 export function resolveConfig(input: ConfigInput = {}): Config {
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
+    headings: { ...defaultConfig.headings, ...input.headings },
   };
 }

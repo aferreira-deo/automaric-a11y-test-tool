@@ -67,7 +67,7 @@ describe('runChecks', () => {
     expect(runChecks(snapshot, resolveConfig({ checks: ['noop', 'noop'] }))).toHaveLength(1);
   });
   it('rejects a check that is not registered', () => {
-    expect(() => runChecks(snapshot, resolveConfig({ checks: ['headings'] }))).toThrow(/Unknown check "headings"/);
+    expect(() => runChecks(snapshot, resolveConfig({ checks: ['lists'] }))).toThrow(/Unknown check "lists"/);
   });
   it('gives identical findings on two runs', () => {
     const config = resolveConfig({ checks: ['noop'] });

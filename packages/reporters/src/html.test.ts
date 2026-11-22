@@ -162,3 +162,40 @@ describe('toHtmlReport with hostile values', () => {
     expect(html).toContain('Viewport unknown by unknown CSS px');
   });
 });
+
+describe('toHtmlReport for headings findings', () => {
+  const page = toHtmlReport({
+    ...result,
+    findings: [
+      {
+        id: 'h1',
+        check: 'headings',
+        rule: 'headings/unmarked-heading',
+        status: 'likely',
+        wcag: { sc: '1.3.1', level: 'A' },
+        selector: '#title',
+        frame: '',
+        box: { x: 1, y: 2, width: 30, height: 40 },
+        evidence: {
+          crops: ['headings/x.png'],
+          colors: { text: '#1a1a1a' },
+          ratios: { sizeToBodyText: 1.5 },
+          flags: ['larger'],
+          values: { text: '<img src=x onerror=alert(1)>', 'font<b>': 24, followedByBody: true, broken: { toString: () => '<i>' } as unknown as string },
+        },
+        message: 'm',
+        help: 'h',
+      },
+    ],
+  }, { 'headings/x.png': Uint8Array.of(1, 2, 3) });
+
+  it('shows the values read from the page, escaped', () => {
+    expect(page).toContain('<dt>text</dt><dd>&lt;img src=x onerror=alert(1)&gt;</dd>');
+    expect(page).toContain('<dt>font&lt;b&gt;</dt><dd>24</dd>');
+    expect(page).toContain('<dt>followedByBody</dt><dd>yes</dd>');
+    expect(page).toContain('<dt>broken</dt><dd></dd>');
+    expect(page).not.toContain('<img src=x');
+    expect(page).not.toContain('<i>');
+    expect(page).toContain('<figcaption>In context</figcaption>');
+  });
+});

@@ -8,7 +8,7 @@ import { compareToManifest, loadFixtures } from './support/manifest.js';
  * fixtures of the checks that take captures in contexts at other ratios, among them the
  * capture scale itself (2), and expects the same manifests.
  */
-const captureChecks = ['focus-indicator', 'icon-contrast'];
+const captureChecks = ['focus-indicator', 'icon-contrast', 'headings'];
 const fixtures = loadFixtures().filter((fixture) => fixture.manifest.checks.some((check) => captureChecks.includes(check)));
 
 for (const deviceScaleFactor of [1.5, 2]) {

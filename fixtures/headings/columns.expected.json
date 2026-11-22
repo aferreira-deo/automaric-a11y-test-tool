@@ -1,0 +1,11 @@
+{
+  "description": "Layout in columns without landmarks. A title at the top of the right column sits on the same line as text of the left column and is still alone on its line, as are the titles of three cards side by side. Two pieces of bold text next to each other on one line are not likely.",
+  "checks": ["headings"],
+  "expected": [
+    { "selector": "#column-title", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#card-1", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#card-2", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "#card-3", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading" },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}
