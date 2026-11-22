@@ -3,7 +3,8 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M3. Three checks are implemented, with no AI involved, and all run by default:
+Status: M4. Three checks are implemented, and all run by default. None of them needs a model. When a model is
+configured it judges the heading candidates, and nothing else (see "Having a model judge candidates").
 
 - `focus-indicator`: 2.4.7, 1.4.11 for the indicator, 2.4.11.
 - `icon-contrast`: 1.4.11 for the icon of controls without visible text, and for the boundary of form controls.
@@ -28,10 +29,146 @@ const result = await new A11yVision({ page }).analyze();
 
 Chromium only.
 
+### Having a model judge candidates
+
+Optional, and off unless you configure it: with no provider, no model is asked, nothing is sent anywhere, and the
+report is the one deterministic code gives. There is no default endpoint and no default model.
+
+At present the model is asked one thing: for each heading candidate, whether the text functions as a heading for
+what follows it. The checks find and measure; the model only answers `yes`, `no` or `unsure`.
+
+```sh
+node packages/cli/dist/bin.js scan https://example.com \
+  --ai-base-url http://127.0.0.1:<port>/v1 --ai-model <model> --html report.html
+```
+
+| Option | Environment | Meaning |
+|---|---|---|
+| `--ai-base-url <url>` | `A11Y_VISION_AI_BASE_URL` | Base URL of an OpenAI-compatible endpoint, up to `/v1`. |
+| `--ai-model <name>` | `A11Y_VISION_AI_MODEL` | Model name, passed through as it is. |
+| `--ai-key-env <NAME>` | `A11Y_VISION_AI_KEY_ENV` | NAME of the environment variable that holds the API key. The key is never given on the command line or in a file. Leave it out for an endpoint that takes no key. |
+| `--ai-label <text>` | | Name shown in reports for the provider (default `openai-compatible`). |
+| `--ai-allow-remote` | | Allow an endpoint that is not on this machine. |
+| `--ai-text-only` | | Send no captures, for a model without vision. |
+| `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
+| `--no-ai` | | Ask no model, whatever the environment or the config file say. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `adjudication`). Options win over the environment, which wins over the file. |
+
+Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
+variable that is not set. A scan is never run half configured.
+
+```ts
+const { result, adjudication } = await new A11yVision({ page })
+  .withAdjudication({ baseUrl: 'http://127.0.0.1:<port>/v1', model: '<model>' }, { cacheFile: 'verdicts.json' })
+  .analyzeWithEvidence();
+```
+
+With the API nothing is cached unless `cacheFile` or `cache` is given; `adjudicator` takes an adapter of your own.
+
+**What a verdict changes.** Only the status of a heading candidate, and only between `likely` and `info`:
+
+| Deterministic status | `yes` | `no` | `unsure` |
+|---|---|---|---|
+| `likely` | `likely` | `info` (`headingNoStatus: "likely"` keeps it) | `likely` |
+| `info`, held back for a reason that is a matter of judgement | `likely` | `info` | `info` |
+| `info`, held back for what it is (a label, a price, hidden from assistive technology) | not sent | not sent | not sent |
+
+- Never `fail`, whatever is configured and whatever the model says. The exit code does not depend on a model.
+- The id of a finding, its selector and its evidence are those of deterministic code. The finding gains an `ai`
+  part: provider label, model as configured, prompt version, the votes, the verdict, `confidence` (`high` or
+  `low`), the model's rationale, `statusBefore` (the status without the model), `inputs` (`text` or `text+image`)
+  and, when calls failed, `problems`. The message of deterministic code is kept and one sentence is added.
+- `unsure` is also what every failure becomes: a timeout, an HTTP error, an answer that is not the JSON object
+  asked for, a refusal, a cut-off answer. The status then stays as it was and `problems` says why (`timeout`,
+  `network`, `http`, `invalid-output`, `refusal`, `truncated`, `too-large`). One candidate failing does not
+  affect the others, and never fails the scan.
+- Two votes per candidate (`votes`), at temperature 0. `yes` or `no` needs both votes to agree with high
+  confidence; a second vote is not asked for when the first already settles `unsure`.
+- A candidate without a capture (under a banner, for instance) is judged from its text, its style and the text
+  around it, and its finding says `inputs: "text"`. `judgeWithoutImage: false` leaves such candidates alone.
+- The counts in `headings/survey` are those of deterministic code.
+
+**What is sent, and where.** For each candidate: fixed instructions, the fixed question, the candidate's context as
+JSON (its text, style, measurements, the text before and after it) and, unless `--ai-text-only`, the capture of
+the block with a rectangle drawn around the text. That is text and pictures of the page under test. It goes to the
+endpoint you configured and nowhere else; redirects are refused. An endpoint on another host than this machine
+(anything but `localhost`, `127.0.0.0/8`, `::1`) is refused unless `--ai-allow-remote` (`allowRemote`) is set,
+and the CLI then says on stderr where page content goes. Whether cloud providers should be allowed by default is
+an open decision of the owner; until it is taken the default is the conservative one.
+
+**The key.** Read from the environment variable you name, sent as a bearer token to the endpoint, and used for
+nothing else. It is not written to reports, to the cache, to stderr or to error messages; what an endpoint
+answers when a call fails is not copied anywhere either, only a problem code is.
+
+**Untrusted text.** Page text goes to the model as data: inside JSON strings, between two marker lines derived
+from the data, under instructions that say to judge it and never to follow it, with the task repeated after it.
+No prompt makes a model immune to injected text, so the damage is bounded instead: the answer must be exactly
+`{"verdict", "confidence", "rationale"}` with allowed values or it counts as `unsure`; no selector, colour or
+number is taken from a model; a verdict moves one candidate between `likely` and `info` and can do nothing else.
+The rationale is the model's own words: reports show it escaped, and it should be read as a hint, not as a fact.
+
+**Limits and the cache.** At most `maxCallsPerPage` (120) requests per page, retries included; candidates
+beyond that are left as they are, and the line on stderr says how many. `concurrency` (2) requests at a time,
+`timeoutMs` (120000) each, up to `maxRetries` (2) retries for network errors and HTTP 408, 425, 429, 500, 502,
+503 and 504 with a doubling wait; timeouts are not retried. Verdicts are cached in a local JSON file under a
+SHA-256 of the generator version, the candidate's context, a perceptual hash of its capture, the endpoint, the
+model and its settings, the prompt version and the number of votes, so an unchanged page costs no calls and a
+changed candidate is judged again. Failures are not cached. The file holds verdicts and rationales, which can
+quote the page; it is read back with every entry validated, and it is never sent anywhere. Delete it to start over.
+All of these are settings under `adjudication` in the config file; `packages/core/src/types.ts` documents each.
+
+#### With a local Ollama model
+
+Checked against Ollama's documentation ([OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility),
+[structured outputs](https://docs.ollama.com/capabilities/structured-outputs), [FAQ](https://docs.ollama.com/faq),
+[CLI](https://docs.ollama.com/cli)) in November 2026, not against a running server: check there if something
+differs.
+
+1. Install Ollama and pull a model that accepts images. Which models do changes often: pick one from Ollama's
+   model library and use its name wherever `<model>` stands below.
+
+   ```sh
+   ollama pull <model>
+   ```
+
+2. The server listens on `127.0.0.1:11434` by default and serves the OpenAI-compatible API under `/v1`. It needs
+   no key, so `--ai-key-env` is left out.
+
+   ```sh
+   node packages/cli/dist/bin.js scan https://example.com \
+     --ai-base-url http://127.0.0.1:11434/v1 --ai-model <model> --html report.html
+   ```
+
+What the documentation says, and what follows from it here:
+
+- Images are accepted as base64 data only, not as URLs. That is what is sent.
+- The documented examples write an image part as `{"type": "image_url", "image_url": "data:image/png;base64,..."}`,
+  where the chat completions reference of OpenAI has `"image_url": {"url": "data:..."}`. The second form is the
+  default here. If the server rejects it (every call then fails with `http`), set
+  `{"adjudication": {"imageUrlShape": "string"}}` in the config file.
+- `response_format` is supported, and structured outputs are said to work through it. The default here is
+  `json_schema`; `"responseFormat": "json_object"` asks for plain JSON mode and `"none"` relies on the
+  instructions alone, which also carry the schema, as Ollama advises. The answer is validated the same way in all
+  three cases.
+- `temperature`, `seed` and `max_tokens` are supported; `max_tokens` is the field used by default
+  (`maxTokensField`).
+- The default context window is 4096 tokens. If answers come back cut off (`truncated`) or invalid with a
+  capture attached, start the server with a larger one (`OLLAMA_CONTEXT_LENGTH=8192 ollama serve`).
+- A model is loaded on first use, which can take longer than a later call: `timeoutMs` allows two minutes.
+- Requests are handled one at a time per model unless the server is configured otherwise, so `concurrency` above
+  1 only queues.
+- Ollama can also serve cloud-hosted models through the same local address. With such a model, page content
+  leaves the machine although the endpoint is local, and this tool cannot tell. `OLLAMA_NO_CLOUD=1` keeps the
+  server local.
+- A model without vision still works with `--ai-text-only`.
+
+Other servers that speak the same API (LM Studio, llama.cpp, vLLM, hosted ones with `--ai-allow-remote`) are
+configured the same way; `max_completion_tokens` is available for those that have dropped `max_tokens`.
+
 ### What `headings` reports
 
 Text that functions as a heading without being exposed as one, and heading levels that contradict the visual order
-(1.3.1). No model is involved, and nothing is ever a `fail`: whether text functions as a heading is a judgement.
+(1.3.1). No model is needed, and nothing is ever a `fail`: whether text functions as a heading is a judgement.
 
 Candidates come from what is rendered, not from tags:
 
@@ -92,7 +229,7 @@ the block in context when one could be taken. When the accessibility tree cannot
 
 The patterns that end a sentence, open a quotation or number a title are options and hold no words of any language.
 
-#### Hand-off to the adjudicator layer (M4)
+#### How the adjudicator layer takes the candidates
 
 `headingCandidates(snapshot.headings, config.headings)` in `@a11y-vision/core` gives the candidates as data. Each
 has:
@@ -104,16 +241,33 @@ has:
   nothing (a label, a price, text hidden from assistive technology, an accessibility tree that could not be read).
   Short titles that open with a number, text in the style of prices, repeated text and what the position says are
   left to a judgement.
-- `crop`: a key of the snapshot clips, **or null**. A candidate with `adjudicate` true can have no capture: under
-  a fixed banner or dialog (`covered`), in a transformed frame, outside the viewport. M4 has to handle that case:
-  judge from `context` alone, or leave the candidate as it is. `box` is the part of the capture to outline.
+- `crop`: a key of the snapshot clips, **or null** (under a fixed banner or dialog, in a transformed frame,
+  outside the viewport), and `cropTarget`: where the text is inside the capture, measured when it was taken. The
+  model is sent a copy with a rectangle drawn there; the capture kept as evidence is not touched.
 - `context`: text, style, body style, features, reasons, the text before and after (cut to
-  `contextBeforeMaxChars` and `contextAfterMaxChars`), and `sameTextAndStyle`, the number of blocks of the page
-  with this text in this style: one judgement can serve them all.
+  `contextBeforeMaxChars` and `contextAfterMaxChars`), and `sameTextAndStyle`.
 
 `context` and the captures hold text of the page under test. They leave the machine only when they are sent to a
-model, which happens only when a provider is configured; without one nothing is sent anywhere, and the candidates
-are reported as they are. Page text is untrusted data.
+model, which happens only when a provider is configured. Page text is untrusted data.
+
+#### Adding a check to the adjudicator layer
+
+What is asked and what an answer may change is decided in `core`, per check; asking is the same for all.
+
+1. In `packages/core/src/checks/<check>-adjudication.ts`, export a function
+   `(snapshot, findings, config) => Judgement[]`. A `Judgement` is a `request` (the `findingId`, a fixed
+   `question` with its `questionVersion`, the `generatorVersion` of the candidate code, a `crop` with the target
+   outlined or null, its `cropHash`, and a compact `context`) and an `apply(finding, ai, config)` that returns the
+   finding after the verdict. `headings-adjudication.ts` is the model to copy.
+2. Register it in `SOURCES` in `packages/core/src/adjudication.ts`.
+3. Give the candidates what `headingCandidates` gives: the id of their finding, whether a judgement could change
+   anything, a capture with the place of the target in it.
+
+`applyVerdicts` enforces the rest whatever `apply` returns: the id, selector and evidence stay, and a status that
+depends on a model is never `fail`. Votes, retries, the cap on calls, the cache, the prompt frame and the
+validation of answers are in `packages/adjudicators` and need no change. A new provider is one more
+implementation of `Adjudicator` (`judge` sends one request and returns a verdict or a problem code, and never
+throws) plus a case in `createAdjudicator`.
 
 ### What `icon-contrast` reports
 
@@ -320,10 +474,10 @@ node e2e/support/dump.mjs focus-indicator/gradient
 |---|---|
 | `packages/core` | Types, result schema, pure checks and measurers. No Node or DOM APIs: its tsconfig loads neither. |
 | `packages/collector-cdp` | Builds a `Snapshot` over a minimal CDP session interface. |
-| `packages/adjudicators` | Model adapters (interface only until M4). |
+| `packages/adjudicators` | The adjudicator layer: the OpenAI-compatible adapter, the prompt and the validation of answers, votes, retries, limits and the verdict cache. The only package that calls a model, through the global `fetch`. |
 | `packages/reporters` | JSON report in the axe result shape; our data sits under `a11yVision`. |
 | `packages/playwright` | `new A11yVision({ page }).analyze()` |
 | `packages/cli` | `scan <url>` |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, the collector and the CLI. |
+| `e2e/` | Browser tests: every fixture against its manifest, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |

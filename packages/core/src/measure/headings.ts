@@ -20,6 +20,11 @@ export const LEVEL_INVERSION_RULE = 'headings/level-inversion';
  * the same when its status changes, from one run to the next or after a model's verdict.
  */
 export const CANDIDATE_FINGERPRINT_RULE = 'headings/candidate';
+/**
+ * Version of the candidate generator, part of the key of cached verdicts: raise it when what a
+ * candidate is, or what its `context` holds, changes in a way that makes old verdicts stale.
+ */
+export const HEADINGS_GENERATOR_VERSION = '1';
 
 /** The style of body text: the most common size and weight, by number of characters. */
 export interface BodyBaseline {
@@ -144,6 +149,8 @@ export interface HeadingCandidate {
    * `context` is always there), or leave the candidate as it is.
    */
   crop: string | null;
+  /** The text of the block inside that capture, CSS pixels from its top-left corner; null when it is not known. */
+  cropTarget: Box | null;
   /** No capture because other content (a banner, a dialog) lay over the block. */
   covered: boolean;
   /**
@@ -610,6 +617,7 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
       features,
       text: block.text,
       crop: block.crop,
+      cropTarget: block.crop && block.cropTarget ? { ...block.cropTarget } : null,
       covered: block.covered === true,
       adjudicate: survey.axComplete && !reasons.some((reason) => STRUCTURAL.has(reason)),
       context: {

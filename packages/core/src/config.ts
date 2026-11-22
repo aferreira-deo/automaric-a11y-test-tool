@@ -1,4 +1,4 @@
-import type { CheckId, Config, FocusConfig, HeadingsConfig, IconConfig } from './types.js';
+import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, IconConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -134,6 +134,37 @@ export const defaultConfig: Config = {
     extremeInversionMinSizeRatio: 1.5,
     extremeInversionMinLevelGap: 2,
   },
+  adjudication: {
+    provider: 'none',
+    baseUrl: '',
+    model: '',
+    apiKeyEnv: '',
+    providerLabel: '',
+    allowRemote: false,
+    votes: 2,
+    temperature: 0,
+    seed: null,
+    timeoutMs: 120000,
+    concurrency: 2,
+    maxRetries: 2,
+    retryBaseDelayMs: 500,
+    retryMaxDelayMs: 8000,
+    maxCallsPerPage: 120,
+    maxOutputTokens: 400,
+    maxTokensField: 'max_tokens',
+    responseFormat: 'json_schema',
+    imageUrlShape: 'object',
+    sendImages: true,
+    maxImageBytes: 4000000,
+    judgeWithoutImage: true,
+    maxResponseChars: 100000,
+    maxRationaleChars: 400,
+    cacheMaxEntries: 5000,
+    outlineColor: '#ff00ff',
+    outlineWidthCssPx: 2,
+    outlineGapCssPx: 3,
+    headingNoStatus: 'info',
+  },
 };
 
 export type ConfigInput = {
@@ -141,6 +172,7 @@ export type ConfigInput = {
   focus?: Partial<FocusConfig>;
   icon?: Partial<IconConfig>;
   headings?: Partial<HeadingsConfig>;
+  adjudication?: Partial<AdjudicationConfig>;
 };
 
 /**
@@ -154,6 +186,57 @@ export function clampInversionStatus(value: unknown, fallback: 'advisory' | 'lik
   return value === 'fail' ? 'likely' : fallback;
 }
 
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+function atLeast(value: unknown, min: number, fallback: number, whole = true): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.max(min, whole ? Math.floor(value) : value);
+}
+
+/**
+ * Settings of the adjudicator layer, with anything that is not a usable value put back to its
+ * default: a configuration can come from a JSON file. Whatever is configured, a status that
+ * depends on a model is `likely` at most (`headingNoStatus` takes `info` or `likely` only).
+ */
+export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): AdjudicationConfig {
+  const base = defaultConfig.adjudication;
+  const merged = { ...base, ...input };
+  const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  return {
+    provider: oneOf(merged.provider, ['none', 'openai-compatible'], base.provider),
+    baseUrl: text(merged.baseUrl),
+    model: text(merged.model),
+    apiKeyEnv: text(merged.apiKeyEnv),
+    providerLabel: text(merged.providerLabel),
+    allowRemote: merged.allowRemote === true,
+    votes: atLeast(merged.votes, 1, base.votes),
+    temperature: atLeast(merged.temperature, 0, base.temperature, false),
+    seed: typeof merged.seed === 'number' && Number.isInteger(merged.seed) ? merged.seed : null,
+    timeoutMs: atLeast(merged.timeoutMs, 1, base.timeoutMs),
+    concurrency: atLeast(merged.concurrency, 1, base.concurrency),
+    maxRetries: atLeast(merged.maxRetries, 0, base.maxRetries),
+    retryBaseDelayMs: atLeast(merged.retryBaseDelayMs, 0, base.retryBaseDelayMs),
+    retryMaxDelayMs: atLeast(merged.retryMaxDelayMs, 0, base.retryMaxDelayMs),
+    maxCallsPerPage: atLeast(merged.maxCallsPerPage, 0, base.maxCallsPerPage),
+    maxOutputTokens: atLeast(merged.maxOutputTokens, 1, base.maxOutputTokens),
+    maxTokensField: oneOf(merged.maxTokensField, ['max_tokens', 'max_completion_tokens', 'none'], base.maxTokensField),
+    responseFormat: oneOf(merged.responseFormat, ['json_schema', 'json_object', 'none'], base.responseFormat),
+    imageUrlShape: oneOf(merged.imageUrlShape, ['object', 'string'], base.imageUrlShape),
+    sendImages: merged.sendImages !== false,
+    maxImageBytes: atLeast(merged.maxImageBytes, 0, base.maxImageBytes),
+    judgeWithoutImage: merged.judgeWithoutImage !== false,
+    maxResponseChars: atLeast(merged.maxResponseChars, 1, base.maxResponseChars),
+    maxRationaleChars: atLeast(merged.maxRationaleChars, 0, base.maxRationaleChars),
+    cacheMaxEntries: atLeast(merged.cacheMaxEntries, 0, base.cacheMaxEntries),
+    outlineColor: /^#[0-9a-f]{6}$/i.test(text(merged.outlineColor)) ? text(merged.outlineColor) : base.outlineColor,
+    outlineWidthCssPx: atLeast(merged.outlineWidthCssPx, 0, base.outlineWidthCssPx, false),
+    outlineGapCssPx: atLeast(merged.outlineGapCssPx, 0, base.outlineGapCssPx, false),
+    headingNoStatus: oneOf(merged.headingNoStatus, ['info', 'likely'], base.headingNoStatus),
+  };
+}
+
 export function resolveConfig(input: ConfigInput = {}): Config {
   const headings = { ...defaultConfig.headings, ...input.headings };
   headings.inversionStatus = clampInversionStatus(headings.inversionStatus, defaultConfig.headings.inversionStatus);
@@ -163,5 +246,6 @@ export function resolveConfig(input: ConfigInput = {}): Config {
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
     headings,
+    adjudication: resolveAdjudication(input.adjudication),
   };
 }

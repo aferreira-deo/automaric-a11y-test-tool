@@ -7,6 +7,7 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "files": ["dist"],
   "dependencies": {
+    "@a11y-vision/adjudicators": "workspace:*",
     "@a11y-vision/collector-cdp": "workspace:*",
     "@a11y-vision/core": "workspace:*"
   },

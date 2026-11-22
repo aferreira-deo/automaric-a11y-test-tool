@@ -94,10 +94,19 @@ function renderFinding(finding: Finding, crops: Record<string, Png>): string {
     const { x, y, width, height } = finding.box;
     rows.push(['Box (CSS px)', `${num(width, true)} by ${num(height, true)} at ${num(x, true)}, ${num(y, true)}`]);
   }
-  if (finding.ai) {
-    rows.push(['Model', `${escape(finding.ai.model)}, prompt ${escape(finding.ai.promptVersion)}`]);
-    rows.push(['Model votes', finding.ai.votes.map(escape).join(', ')]);
-    rows.push(['Model rationale', escape(finding.ai.rationale)]);
+  // What a model said is text from outside, like text of the page: every part is escaped, and
+  // none of it is used for anything but display. A report can also be built from JSON written by
+  // something else, so no field is assumed to be there or to have its type.
+  const ai = finding.ai as Partial<NonNullable<Finding['ai']>> | undefined;
+  if (ai !== undefined && ai !== null && typeof ai === 'object') {
+    const votes = Array.isArray(ai.votes) ? ai.votes : [];
+    const problems = Array.isArray(ai.problems) ? ai.problems : [];
+    rows.push(['Model', `${escape(ai.model)} (${escape(ai.provider)}), prompt ${escape(ai.promptVersion)}`]);
+    rows.push(['Model verdict', `${escape(ai.verdict)}, ${escape(ai.confidence)} confidence, from ${ai.inputs === 'text+image' ? 'the text and the capture' : 'the text alone'}`]);
+    rows.push(['Model votes', votes.map(escape).join(', ')]);
+    if (problems.length > 0) rows.push(['Model calls failed', problems.map(escape).join(', ')]);
+    rows.push(['Model rationale', escape(ai.rationale)]);
+    rows.push(['Status without the model', escape(ai.statusBefore)]);
   }
 
   const figures = evidence.crops
@@ -179,7 +188,11 @@ ${byStatus
 <h1>Evidence report</h1>
 <p><code>${escape(result.url)}</code></p>
 <p class="note">Scanned ${escape(result.timestamp)} with ${escape(result.tool.name)} ${escape(result.tool.version)}. Viewport ${num(viewport?.width)} by ${num(viewport?.height)} CSS px, device pixel ratio ${num(environment?.devicePixelRatio)}, ${colorScheme} colour scheme.</p>
-<p>This report lists what the tool found and measured to assist a tester. It covers a small set of checks and makes no statement of conformance: a page with no findings here has not been shown to meet WCAG.</p>
+${
+    result.findings.some((finding) => finding.ai)
+      ? '<p>A model was asked to judge some of the candidates. Its verdict can move a finding between Likely and Info, and never makes one a Fail. Each such finding shows the verdict, the model\u2019s own words and the status it had without the model; the measurements are those of the tool, not of the model.</p>\n'
+      : ''
+  }<p>This report lists what the tool found and measured to assist a tester. It covers a small set of checks and makes no statement of conformance: a page with no findings here has not been shown to meet WCAG.</p>
 <table>
 <caption>Findings by status</caption>
 <thead><tr><th scope="col">Status</th><th scope="col">Count</th><th scope="col">Meaning</th></tr></thead>

@@ -321,6 +321,12 @@ export interface TextBlock {
   heading: { level: number; selector: string } | null;
   /** Crop id of the capture of the block with what surrounds it; null when it was not captured. */
   crop: string | null;
+  /**
+   * Where the text of the block is inside that capture: CSS pixels from the top-left corner of
+   * the capture, as measured when it was taken (the block was scrolled to first, so `box` does
+   * not say). Absent when there is no capture.
+   */
+  cropTarget?: Box;
   /** Other content lay over the middle of the block when it was to be captured (a banner, a dialog), so it was not. */
   covered?: boolean;
   /**
@@ -377,11 +383,48 @@ export interface Evidence {
 
 export type Verdict = 'yes' | 'no' | 'unsure';
 
+/**
+ * Why a call to a model gave no usable vote. A fixed list of codes: nothing a server answered and
+ * no error message is ever copied into a finding, so neither a key nor text of an endpoint can end up there.
+ * - `timeout`: no answer within `timeoutMs`.
+ * - `network`: the request did not get through (connection refused, a redirect, a broken response).
+ * - `http`: an HTTP status that is not 2xx.
+ * - `invalid-output`: the answer is not the JSON object that was asked for.
+ * - `refusal`: the model declined, or a content filter cut the answer.
+ * - `truncated`: the answer stopped at the token limit.
+ * - `too-large`: the answer is longer than `maxResponseChars`.
+ */
+export type AiProblem = 'timeout' | 'network' | 'http' | 'invalid-output' | 'refusal' | 'truncated' | 'too-large';
+
+/**
+ * What a model said about a finding. Present only when a model was asked. The measurements of
+ * the finding (`evidence`) are never changed by it, and `statusBefore` keeps what deterministic
+ * code had reported.
+ */
 export interface AiEvidence {
+  /** Label of the provider, as configured (`providerLabel`), or the kind of adapter. Never a URL. */
+  provider: string;
+  /** Model name exactly as configured. */
   model: string;
+  /** Version of the instructions and of the question that were sent. */
   promptVersion: string;
+  /** One entry per vote taken. A vote that failed counts as `unsure`. */
   votes: Verdict[];
+  /** All votes agree on `yes` or on `no`, with high confidence: that. Anything else: `unsure`. */
+  verdict: Verdict;
+  /**
+   * `high` only when every vote was given with high confidence and they agree. It is a word the
+   * model picks from two, not a number: no number is taken from a model.
+   */
+  confidence: 'high' | 'low';
+  /** The model's own words, cut to `maxRationaleChars`. Untrusted text: display it escaped, never act on it. */
   rationale: string;
+  /** Status reported by deterministic code, before the verdict was applied. */
+  statusBefore: Status;
+  /** What was sent: the context alone, or the context with the capture. */
+  inputs: 'text' | 'text+image';
+  /** Why votes failed, when some did; sorted, without repeats. */
+  problems?: AiProblem[];
 }
 
 export interface Finding {
@@ -782,6 +825,90 @@ export interface HeadingsConfig {
   extremeInversionMinLevelGap: number;
 }
 
+/**
+ * The adjudicator layer (section 6 of the brief): a model judges candidates that deterministic
+ * code found. Nothing is sent anywhere while `provider` is `none`, which is the default.
+ */
+export interface AdjudicationConfig {
+  /** `none`: no model is asked, and results are those of deterministic code alone. */
+  provider: 'none' | 'openai-compatible';
+  /** Base URL of the endpoint, up to and including the version segment (`.../v1`). No default: it is never guessed. */
+  baseUrl: string;
+  /** Model name, passed through as it is. No default. */
+  model: string;
+  /**
+   * NAME of the environment variable that holds the API key; empty for an endpoint that takes
+   * none. The key itself is never part of the configuration, of a report or of a message.
+   */
+  apiKeyEnv: string;
+  /** Shown in findings as the provider; empty for the kind of adapter. */
+  providerLabel: string;
+  /**
+   * Open decision (section 10.6 of the brief): whether an endpoint that is not on this machine
+   * may be used. False, the conservative choice, refuses every host but loopback (`localhost`,
+   * `127.0.0.0/8`, `::1`), so page text and captures cannot leave the machine by a
+   * configuration slip.
+   */
+  allowRemote: boolean;
+  /** Votes per candidate. Votes that disagree give `unsure`. */
+  votes: number;
+  temperature: number;
+  /** Sent as `seed` when not null. Left out by default: two votes with one seed would only repeat each other. */
+  seed: number | null;
+  /** One request may take this long. */
+  timeoutMs: number;
+  /** Requests in flight at once. */
+  concurrency: number;
+  /** A request that failed in a way worth trying again (network, 408, 429, 5xx) is sent again at most this many times. Timeouts are not retried. */
+  maxRetries: number;
+  /** Wait before the first retry; doubled for each further one, up to `retryMaxDelayMs`. */
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  /** Upper bound on requests for one page, retries included. Candidates beyond what it allows are left as they are. */
+  maxCallsPerPage: number;
+  /** Limit on the answer, sent in the field named by `maxTokensField`. */
+  maxOutputTokens: number;
+  /** `max_tokens` is what local servers document; `max_completion_tokens` is its replacement at OpenAI; `none` sends neither. */
+  maxTokensField: 'max_tokens' | 'max_completion_tokens' | 'none';
+  /**
+   * How JSON is asked for: `json_schema` (structured outputs), `json_object` (JSON mode) or
+   * `none` (the instructions alone). The answer is validated the same way whichever is used.
+   */
+  responseFormat: 'json_schema' | 'json_object' | 'none';
+  /**
+   * Shape of an image part: `object` is `{"image_url": {"url": "data:..."}}`, as the chat
+   * completions reference of OpenAI has it; `string` is `{"image_url": "data:..."}`, as the
+   * examples of Ollama's compatibility page have it.
+   */
+  imageUrlShape: 'object' | 'string';
+  /** False: only text is sent (a model without vision). */
+  sendImages: boolean;
+  /** A capture larger than this, in bytes, is not sent; the candidate is then judged from text. */
+  maxImageBytes: number;
+  /**
+   * Whether a candidate without a capture (or with one that is not sent) is judged from its
+   * context alone. False leaves such candidates as they are.
+   */
+  judgeWithoutImage: boolean;
+  /** A longer answer is not read (`too-large`). */
+  maxResponseChars: number;
+  /** The rationale kept in a finding is cut to this. */
+  maxRationaleChars: number;
+  /** A verdict cache keeps at most this many verdicts; the oldest go first. */
+  cacheMaxEntries: number;
+  /** The target is outlined in the capture that is sent, in this colour (#rrggbb)... */
+  outlineColor: string;
+  /** ...with a line this wide... */
+  outlineWidthCssPx: number;
+  /** ...this far outside the box of the text, so that it covers none of it. */
+  outlineGapCssPx: number;
+  /**
+   * Status of a heading candidate that deterministic code reported as `likely` and the model
+   * judged not to be a heading. `info` lowers it (precision before recall); `likely` keeps it.
+   */
+  headingNoStatus: 'info' | 'likely';
+}
+
 export interface Config {
   /** Checks to run, in any order. */
   checks: CheckId[];
@@ -792,6 +919,7 @@ export interface Config {
   focus: FocusConfig;
   icon: IconConfig;
   headings: HeadingsConfig;
+  adjudication: AdjudicationConfig;
 }
 
 export interface ScanResult {

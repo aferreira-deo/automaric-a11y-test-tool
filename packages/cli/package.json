@@ -8,6 +8,7 @@
   "files": ["dist"],
   "bin": { "a11y-vision": "./dist/bin.js" },
   "dependencies": {
+    "@a11y-vision/adjudicators": "workspace:*",
     "@a11y-vision/core": "workspace:*",
     "@a11y-vision/playwright": "workspace:*",
     "@a11y-vision/reporters": "workspace:*",

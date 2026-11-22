@@ -86,6 +86,8 @@ export interface AgentHeadingSurvey {
 export interface AgentHeadingPrepared {
   /** Region to capture, page coordinates, whole CSS pixels. Null when the block cannot be shown. */
   clip: AgentRect | null;
+  /** The text of the block when the clip was worked out, same coordinates. Null with no clip. */
+  target?: AgentRect | null;
   /** Other content lies over the middle of the block. */
   covered: boolean;
 }
@@ -2223,7 +2225,8 @@ export function agentFactory(options: AgentOptions): Agent {
     const y0 = Math.floor(upper + window.scrollY);
     const x1 = Math.ceil(right + window.scrollX);
     const y1 = Math.ceil(lower + window.scrollY);
-    return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, covered: false };
+    const target = { x: own.x + offset.x + window.scrollX, y: own.y + offset.y + window.scrollY, width: own.width, height: own.height };
+    return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, target, covered: false };
   }
 
   return {

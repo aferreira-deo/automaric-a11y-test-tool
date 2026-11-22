@@ -21,6 +21,18 @@ function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** The order of findings in a result. Sorts in place and returns the array. */
+export function sortFindings(findings: Finding[]): Finding[] {
+  return findings.sort(
+    (a, b) =>
+      compare(a.check, b.check) ||
+      compare(a.frame, b.frame) ||
+      compare(a.selector, b.selector) ||
+      compare(a.rule, b.rule) ||
+      compare(a.id, b.id),
+  );
+}
+
 /** Runs the configured checks. Output order is independent of check order and collection order. */
 export function runChecks(snapshot: Snapshot, config: Config): Finding[] {
   const findings: Finding[] = [];
@@ -31,14 +43,7 @@ export function runChecks(snapshot: Snapshot, config: Config): Finding[] {
       findings.push({ id: fingerprint({ ...draft, rule: fingerprintRule ?? draft.rule }), ...draft });
     }
   }
-  return findings.sort(
-    (a, b) =>
-      compare(a.check, b.check) ||
-      compare(a.frame, b.frame) ||
-      compare(a.selector, b.selector) ||
-      compare(a.rule, b.rule) ||
-      compare(a.id, b.id),
-  );
+  return sortFindings(findings);
 }
 
 export function buildResult(snapshot: Snapshot, config: Config, now: Date): ScanResult {

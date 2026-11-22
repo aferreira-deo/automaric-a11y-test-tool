@@ -15,6 +15,7 @@
     "check": "tsc -b && eslint . && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
   },
   "devDependencies": {
+    "@a11y-vision/adjudicators": "workspace:*",
     "@a11y-vision/cli": "workspace:*",
     "@a11y-vision/core": "workspace:*",
     "@a11y-vision/playwright": "workspace:*",

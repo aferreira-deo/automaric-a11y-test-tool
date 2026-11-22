@@ -4,3 +4,4 @@ dist/
 test-results/
 playwright-report/
 a11y-vision-report/
+.a11y-vision/

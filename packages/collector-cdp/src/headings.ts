@@ -109,6 +109,16 @@ export async function collectHeadings(page: StablePage, config: HeadingsConfig):
     if (!prepared.clip) continue;
     await page.capture(id, prepared.clip);
     block.crop = id;
+    // Where the text is inside the capture: what the adjudicator layer outlines for a model.
+    if (prepared.target) {
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      block.cropTarget = {
+        x: round(prepared.target.x - prepared.clip.x),
+        y: round(prepared.target.y - prepared.clip.y),
+        width: round(prepared.target.width),
+        height: round(prepared.target.height),
+      };
+    }
   }
   return survey;
 }
