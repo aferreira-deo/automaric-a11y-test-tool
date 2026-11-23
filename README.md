@@ -589,9 +589,14 @@ status is a policy), nor the inventory.
 ### What `grouping` reports
 
 Form controls that belong together under a visible text, where nothing ties that text to them (1.3.1, related
-3.3.2 and 4.1.2). No model is needed, and nothing is ever a `fail`: the brief rules it out for this check
-(section 3E), and that a text is the label of a set, or that names say too little without it, is a judgement a
-tester confirms.
+3.3.2 and 4.1.2: the mapping section 3E of the brief gives, for every rule of this check). No model is needed,
+and nothing is ever a `fail`: the brief rules it out for this check (section 3E), and that a text is the label of
+a set, or that names say too little without it, is a judgement a tester confirms.
+
+What 1.3.1 asks for is that the relationship between the text and the controls can be programmatically
+determined. It does not say how: a fieldset with a legend (H71) and a named `role="group"` (ARIA17) are
+sufficient techniques, and so is the question in the accessible name of each control. The check reports where it
+finds none of these; the help of each finding says so in those words, and names no technique as required.
 
 What a control is, what it is called and what groups it are taken from the accessibility tree of each document
 (`Accessibility.getFullAXTree`), never worked out from tags or attributes. Verified against Chrome in November
@@ -608,7 +613,11 @@ What a control is, what it is called and what groups it are taken from the acces
   `InputTime`. Sliders, colour and file inputs are not looked at. The parts Chrome builds inside a date input are in a shadow tree of the browser and are not read.
 - The name of a control is the one Chrome computes: from `aria-labelledby`, `aria-label` or `label`, and
   failing those from `title` or `placeholder`; a `select` without any of them has an empty name.
-  `aria-describedby` gives the description.
+  `aria-describedby` gives the description. The property `required` is read too; Chrome gives it for text
+  fields, so for a native checkbox the attribute is read.
+- `Accessibility.getFullAXTree` lists the nodes level by level (the children of the root, then theirs), not in
+  document order. They are put back in document order from `childIds` before anything is marked, so that a
+  limit on what is marked cuts the page at one point, with everything before it read.
 - A control that is not rendered (`display: none`, `visibility: hidden`), inert or under `aria-hidden` has no
   node and is never looked at. One that is only transparent or clipped to a pixel has: a native radio hidden
   under a styled label is read, and its label is what is measured and captured (`styledLabels`).
@@ -616,24 +625,51 @@ What a control is, what it is called and what groups it are taken from the acces
 Text is read as for `headings`: the same blocks of visible text, from the same walk. For each block the page also
 says where it stands among the controls and what it is tied to: a control (inside its `label`, or a target of its
 `aria-labelledby`), a group (its `legend`, or a target of its `aria-labelledby`), a description (a target of an
-`aria-describedby`), or nothing. Only text that is tied to nothing can be the visible label of a set.
+`aria-describedby`, with the controls it describes), or nothing. Only text that is tied to nothing can be the
+visible label of a set that is reported as `likely`.
+
+Three things are read from attributes, because the accessibility tree does not have them, and only ever to hold
+a finding back or to tell two cases apart: the `placeholder` of a field (to know that a name is nothing but the
+placeholder), the tokens `section-*`, `shipping` and `billing` of `autocomplete`, and whether a link stands in
+the label of a checkbox.
+
+Words are counted, never looked up. A run of text between spaces is one word; a run in a script that is written
+without spaces (`unspacedScriptPattern`: Chinese, Japanese, Thai, Lao, Khmer, Burmese) is cut by
+`Intl.Segmenter`, which is part of ECMAScript (it is in Node and in the browsers, and is neither a DOM nor a Node
+API, so core stays pure), and where it is missing every `unspacedCharsPerWord` (3) characters count as a word.
+A name or a sentence in Japanese therefore gets the status of its English equivalent.
 
 **Sets of radios and checkboxes** (section 5.5, steps 1 to 4). A set is: native radios of one `name` in one
 form; custom radios inside one `role="radiogroup"`; otherwise radios, or checkboxes and switches, that follow
 each other with no other control between them and no text between them that could start a new set. From
-`minSetSize` (2) to `maxSetSize` (40) controls. For each set:
+`minSetSize` (2) to `maxSetSize` (40) controls; longer runs are not looked at and are counted in the survey
+(`setsOverMaxSize`). For each set:
 
 1. **The visible label.** Going back from the first control: its own labels are passed over; hints (targets of
-   `aria-describedby`), text of links and buttons, code, and text hidden from assistive technology are passed
-   over, `labelMaxSkipped` (2) at most; another control, or the label of one, ends the search with nothing. What
-   is found first is the possible label. No such text: nothing is reported (`setsWithoutVisibleLabel` in the
-   survey).
+   `aria-describedby` that read as prose, or that describe something else), text of links and buttons, code,
+   and text hidden from assistive technology are passed over, `labelMaxSkipped` (2) at most; another control, or
+   the label of one, ends the search with nothing. What is found first is the possible label. No such text:
+   nothing is reported (`setsWithoutVisibleLabel` in the survey). Three things end the search early:
+   - a text that is the description of every control of the set and reads as a label does (not a paragraph, not
+     a sentence): the question is that text, and the text before it is not taken in its place (see `describedBy`
+     below);
+   - a note about the marks of the form (`labelNotePattern`: an asterisk or a dagger, in brackets or not, before
+     the first letter: "* Required", "(*) Pflichtfeld"): it is the label of nothing, and what stands before it is
+     not looked at. A label that ends with the asterisk ("Title *") is a label;
+   - the label of another control on the same visual line, right before the text ("Nickname" tied to a field,
+     then "(optional)"): the text is a fragment of that label.
+
+   Free texts on one visual line, no further apart than `labelLineMaxGapEm` (1.5 font sizes), are one label
+   (`labelLine`): "Required mark" and "(optional)" in two boxes of a flex line are reported as "Required mark
+   (optional)", not as "(optional)".
 2. **Already tied.** Nothing is reported when that text is the legend of a fieldset, or what a group, a dialog or
    a region is named by, that holds the set; when the set is inside a named `group` or `radiogroup` and the text
    stands before that group, or the group holds the set and at most `groupExtraControlsMax` (1) other control (an
    "Other" field); or when the text is part of the accessible name of every control of the set
-   (`aria-labelledby="question option"`), compared as whole words after `nameTrimPattern` has taken the colon and
-   the asterisk off.
+   (`aria-labelledby="question option"`, `aria-label="Size: S"`, "Marital status, single"): its words, in order,
+   are words of the name that follow each other, whatever punctuation stands between and around them. Words are
+   runs of letters, digits and marks; "art" is not in "party". In a script without spaces the text only has to be
+   in the name.
 3. **Status.**
    - `likely` (`grouping/unassociated-label`): a plain text, right above the set (no more than `labelMaxGapEm`,
      3 font sizes) or beside its first control on one row (`labelInlineMaxGapEm`, 20 font sizes: the label
@@ -643,14 +679,18 @@ each other with no other control between them and no text between them that coul
    - `advisory` (`grouping/ungrouped-controls`): the text is a heading in the accessibility tree
      (`headingLabel`) or the button that opens the set (`disclosureLabel`, a button with `aria-expanded` or a
      `summary`); or the controls are switches (`switches`); or most names are longer (`selfExplanatory`: "I
-     agree to the terms and conditions").
+     agree to the terms and conditions"); or the text is the `aria-describedby` target of every control
+     (`describedBy`): the relationship is programmatically determinable, but a description is announced with each
+     control, after its name, and not once before the set as the name of a group is.
    - `info` (`grouping/group-candidate`), with the reason as a flag: `labelFar` (further than a label is),
      `labelLong` (more than `labelMaxChars`, 160, or `labelMaxLines`, 3), `labelSentence` (ends with a full
      stop, an exclamation mark or an ellipsis and has `labelSentenceMinWords`, 3, words or more: a sentence of
      prose before an example, a hint; a question mark and a colon do not count), `labelNearerPrevious` (its
      distance to the control before it is less than `hintNearerShare`, 0.5, of its distance to the set: a hint
      under a field), `labelNamesContainer` (a region, a form, a dialog or a group around the set has the words
-     of the text in its name).
+     of the text in its name), `independentControls` (checkboxes that no shared `name` ties to each other, one of
+     which is required on its own, has a link in its label, or is named by a full sentence: lines of consent
+     under the title of a step, "Almost done" over "I agree to the terms" and "Newsletter").
 
    Flags say more: `radios` or `checkboxes`, `unnamedGroup` (inside a fieldset or a group without a name),
    `inLargerGroup` (inside a named group that holds more), `labelBeside`, `styledLabels`.
@@ -669,28 +709,53 @@ at most `splitMaxParts` (6). Likely when their names do not say which part each 
 - `unnamedPart`: a part has no name, while a visible label is tied to another part, or a text right before the
   row or a fieldset around it stands for the whole (one `label` for three fields of a date, a prefix without a
   name beside the number). Fields without names and without any label at all are left to rule engines;
-- `namedAsWhole`: a part has exactly the name of the text over the row, or of the fieldset around it.
+- `namedAsWhole`: a part has exactly the name of the text over the row, or of the fieldset around it;
+- `placeholderPart`: the only visible label is tied to the first part, a later part has no name but its
+  placeholder, and the first part shows a placeholder of its own that is not its name ("Expiry date" tied to a
+  field that shows "MM", then a field named "YY"): the label stands for the row and is the name of one part.
+  These are facts of the accessibility tree and of the attributes. Without the placeholder on the first part
+  ("Phone", then a field named by "Ext."), the label may be that of the first field alone: `advisory`.
+
+A text is the label of a row only when it spans the row or stands at its start. A text that stands over one of
+the later parts only, or that is the name of a later part and not of the first, is the caption of that part:
+"Day", "Month" and "Year" over three fields, tied to nothing, do not make "Year" the label of the row, whether
+the fields are named like their captions or have no name at all.
 
 When every part has a name of its own, a plain text right before the row that is tied to nothing gives an
 `advisory` (`grouping/ungrouped-controls`, flag `fields`); a heading there gives nothing.
 
-**Sections with the same field names** (`grouping/duplicate-names`, `likely`). The fields of one form are cut
-into sections where a name comes back and where the named container around them changes. Two sections are
-reported, once, on the second of them, when at least `duplicateMinShared` (2) names are in both, the fields are
-in no named container that differs, and their descriptions do not differ: billing and delivery address with
-"Street" and "City" twice, the two dates of a period. `advisory` when every section stands under a heading
-(`headingLabel`): headings are exposed as structure, but are not read when moving from field to field. `info`
-(`grouping/group-candidate`, flag `noForm`) when the fields are in no `form` element: that the sections are
-parts of one form is then not known (two examples on a page of documentation have the same names too). Fields
-in the cells of a table are left out. A row of parts inside such sections is not reported a second time.
+**Sections with the same field names** (`grouping/duplicate-names`, `likely`). The fields of one form, inside
+one region of it (`headings.regionSelector`: `header`, `main`, `article`, `aside`, a dialog …), are cut into
+sections where a name comes back and where the named container around them changes. Two sections are reported,
+once, on the second of them, when at least `duplicateMinShared` (2) names are in both: billing and delivery
+address with "Street" and "City" twice, the two dates of a period. Nothing is reported when the sections are
+told apart programmatically: each in a named group, region or fieldset of its own; names that differ
+(`aria-labelledby` with the title of the section); descriptions that differ (`aria-describedby`); two `form`
+elements; two regions of one form (log in in the `header` and sign up in `main`). A heading over each section
+(`headingLabel`) is exposed as structure, but it is not announced when moving from field to field and does not
+tell the names apart: `likely` as well, which is what section 3E of the brief says ("two visually separate
+sections with identical control names … and nothing that disambiguates them programmatically");
+`duplicateUnderHeadingsStatus: "advisory"` lowers it. `info` (`grouping/group-candidate`) when the tokens
+`section-*`, `shipping` or `billing` of `autocomplete` differ for every such field and its twin
+(`autocompleteSections`: told apart for the browser, though a screen reader does not announce the tokens), and
+when the fields are in no `form` element (`noForm`): that the sections are parts of one form is then not known
+(two examples on a page of documentation have the same names too). Fields in the cells of a table are left out.
+A row of parts inside such sections is not reported a second time.
 
 `grouping/survey` (`info`) gives the counts, and the flag `truncated` when something was left out: at most
 `maxControls` (600) controls are read, in document order, `maxCandidates` (150) findings reported (`likely`
 first, then `advisory`, then `info`, each in document order) and `maxCaptures` (120) captures taken. A finding
 beyond the captures, under a fixed banner or in a place that cannot be shown carries `notCaptured` or `covered`
-and keeps its status: nothing is measured on a capture here. When the accessibility tree cannot be read, or a
-document has more controls or more groups than can be marked (`maxAxMarks`, 1500), nothing is above `info`
-(`axIncomplete`).
+and keeps its status: nothing is measured on a capture here. When the accessibility tree cannot be read, nothing
+is above `info` (`axIncomplete`).
+
+When a document has more controls or more groups than are marked (`maxAxMarks`, 1500 of each), the first ones in
+document order are marked and the page is told where reading stopped. What stands before that point was read in
+full and keeps its status. Only a set, a row or sections that reach it (a control at or after it, or nothing
+that was read between their last control and it, so that the set may go on) are `info`, with `axIncomplete`
+and `atReadLimit`. The survey carries `axLimited`, the number of controls after that point
+(`controlsBeyondAxLimit`) and the real number of controls (`totalControls`: all those the tree exposes and
+that show, read or not). Three questions followed by a table of 1,600 checkboxes keep their three findings.
 
 A finding names the lowest element that holds the controls, their labels and the text taken for their label,
 and no other control; failing that, the first control. It gives the number of controls, the text, the first
@@ -701,11 +766,18 @@ Every pattern is an option and holds no word of any language.
 
 #### Decisions left to the owner, and their defaults
 
-- **A heading over a set** (not in section 10 of the brief, which only says "not programmatically associated
-  (no fieldset/legend, no named group)"): `advisory` by default, `grouping.headingLabelStatus: "likely"` reports
-  such sets like the others. The option takes those two values only: `fail` is turned into `likely`, anything
-  else into `advisory`, when the configuration is resolved and again where the status is computed. The same
-  option rules sections under headings and sets under a button that opens them.
+- **A heading over a set of radios or checkboxes** (not in section 10 of the brief, which only says "not
+  programmatically associated (no fieldset/legend, no named group)"): `advisory` by default,
+  `grouping.headingLabelStatus: "likely"` reports such sets like the others. The option takes those two values
+  only: `fail` is turned into `likely`, anything else into `advisory`, when the configuration is resolved and
+  again where the status is computed. The same option rules sets under a button that opens them.
+- **Headings over sections with the same field names**: `likely` by default. This default follows section 3E of
+  the brief, which gives that case as `likely` unless something disambiguates the sections programmatically; a
+  visible heading alone does not. `grouping.duplicateUnderHeadingsStatus: "advisory"` lowers it (`fail` and
+  anything else become `likely`). It is a separate option from the one above on purpose: for a set, the brief
+  leaves the case open; for sections, it does not.
+- **A question that is the `aria-describedby` target of every option**: `advisory`, never `likely`. The
+  relationship is programmatically determinable; that a group name would serve better is a best practice.
 - **What a "no" of a model does** to a `likely` set: nothing by default, as for headings and lists
   (`adjudication.groupNoStatus: "likely"`); `"info"` or `--ai-lower-on-no` lowers it.
 - **What makes names ambiguous.** The brief gives "Yes"/"No" as the example. Without a list of words, the test is
@@ -729,8 +801,9 @@ number, the visible text and where it stands, up to `contextMaxItems` (12) acces
 Only sets of radios and checkboxes under a plain text are sent to a model: the `likely` ones, and those held
 back as `info` for `labelFar`, `labelLong`, `labelSentence` or `labelNearerPrevious` whose names are short. The
 question is fixed (`GROUP_QUESTION`, version `grouping-1`): is the target text the question or the title the set
-of controls answers. Sets under a heading or a button, sets of switches and sets with longer names are not sent
-(their status is a policy), nor are split fields and sections with the same names (names and groups are facts
+of controls answers. Sets under a heading or a button, sets of switches, sets with longer names and sets whose question is their
+description are not sent (their status is a policy), nor are checkboxes held back as `independentControls` and
+what reaches the limit of `maxAxMarks`, nor are split fields and sections with the same names (names and groups are facts
 read from the accessibility tree), nor the inventory.
 
 ### Known limits of the grouping check
@@ -745,11 +818,24 @@ read from the accessibility tree), nor the inventory.
   A real question that ends with a full stop ("Please tell us how you heard of us.") is held back as `info`.
 - A label above a set of independent checkboxes ("Notifications" over "Email" and "SMS") and a title above
   settings that each stand for themselves look the same: both are `likely` when the names are short. Switches
-  are the only ones told apart.
+  are told apart, and so are checkboxes of which one is required on its own, has a link in its label or is
+  named by a full sentence (`independentControls`, `info`). Two lines of consent with short names, no link and
+  nothing required ("Almost done" over "I agree" and "Newsletter") cannot be told from a question and its
+  options without knowing the words, and stay `likely`.
+- A note about required fields is known by the mark it opens with. A label that is written with the asterisk
+  first ("* Title") is taken for such a note and the set under it is not reported.
 - Names are short or not by their length. "Samsung" under "Brand" is as short as "Yes"; a long name that still
   needs its question ("In the last twelve months") is `advisory`.
-- A text that is the `aria-describedby` target of a control is a hint and is passed over: a set whose question
-  is only its description is not reported, although a description is not announced as a group label is.
+- A text that is the `aria-describedby` target of every control of a set ends the search when it reads as a
+  label, and is passed over as a hint when it is a sentence or a paragraph. A short hint without a full stop
+  ("Select one") under the real question is therefore reported as the described text, at `advisory`, and the
+  question above it is not reported.
+- Words are counted with `Intl.Segmenter` in scripts without spaces. Where words end in Japanese or Thai is its
+  judgement (it comes with the JavaScript engine, ICU), so a name right at `shortNameMaxWords` can fall on
+  either side with another version of the engine.
+- A row with one label on the first part and a later part named by its placeholder is `likely` only when the
+  first part has a placeholder of its own; with a `title` or an `aria-label` on the later part, each part has a
+  name and nothing is reported.
 - Containment is that of the DOM: `aria-owns` is not followed, and a group counts as holding a control when its
   element does. A named `group` that holds the set and more than one other control is not taken for the group
   of the set when a text of its own stands before the set.
@@ -763,7 +849,10 @@ read from the accessibility tree), nor the inventory.
   no row.
 - Sections with the same names are found by the names coming back. Sections whose names differ by a word
   ("Billing street", "Delivery street"), or that share one name only (several "Quantity" in a basket), are not
-  reported; fields outside any `form` are `info` at most.
+  reported; fields outside any `form` are `info` at most. Two regions of one form are never compared, also when
+  they are two `article` elements that hold a billing and a delivery address.
+- Beyond `maxAxMarks` the controls of a document are not read: sets that stand wholly after that point are not
+  reported at all, and the survey says how many controls that is.
 - Radios of one set that have no `name` and no radiogroup, each in a wrapper with text between them that is tied
   to nothing, are cut into sets of one and not reported.
 - Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. A set

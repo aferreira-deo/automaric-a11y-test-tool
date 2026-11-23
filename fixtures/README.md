@@ -50,15 +50,23 @@ The `grouping/source-*` fixtures are well-marked forms. `e2e/grouping-mutation.s
 `fieldset` and `legend` by a `div` that keeps its attributes, removes the group roles and their names, and
 expects each set back at the status its `data-expect` attribute says: `likely` for sets of radios or checkboxes
 and for a section whose field names are those of another, `advisory` for the parts of a date that each have a
-name, with nothing else `likely`.
+name, with nothing else `likely`. Eight of the nine sets come back; the ninth is the first of two sections with
+the same names, which is reported once, with the second.
 
 `grouping/choice-sets`, `grouping/grouped-sets` and `grouping/precision` go together: the first holds sets
 under a text that nothing ties to them, the second the ways such a set is tied or needs no group, the third
 whole forms as careful sites build them (login, signup, checkout, filters, settings, a cookie banner), which
 must give no `likely`. `grouping/real-pages` holds the patterns that were reported wrongly or missed on real
 pages while the check was built; each comment says where. `grouping/formulaire-fr` is in French: the rules use
-no word of any language. `e2e/grouping.spec.ts` has the tests that look at the page during the scan, at what a
-model is asked, and at the work done on a large page.
+no word of any language. `grouping/review-sets` and `grouping/review-fields` hold what a review of the check
+found: sets and rows that were reported wrongly (the question in the names after a colon, captions over the parts
+of a date, a note about required fields, lines of consent, log in and sign up in two regions of one form), at
+the wrong status (names and sentences in Japanese, a question that is the description of the options, sections
+under headings), with the wrong text (a label in two boxes on one line) or not at all (a part named by its
+placeholder only). `e2e/grouping.spec.ts` has the tests that look at the page during the scan, at what a model
+is asked, at the work done on a large page, and at a page with more controls than are marked from the
+accessibility tree: what stands before the limit keeps its status, and the survey gives the real number of
+controls.
 
 `icon-contrast/assets/fixture-icons.ttf` is the icon font of the icon-contrast
 fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,

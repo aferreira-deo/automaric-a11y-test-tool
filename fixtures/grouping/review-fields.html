@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: review-fields</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main, header { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      form { margin: 0 0 40px; padding: 0 0 24px; border-bottom: 1px solid #595959; }
+      .t { font-weight: 700; margin: 16px 0 8px; }
+      h2 { font-size: 20px; margin: 16px 0 8px; }
+      label.o { display: block; margin: 8px 0 2px; }
+      input, select { font: inherit; box-sizing: border-box; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      .cap { display: grid; grid-template-columns: 80px 80px 80px; gap: 8px; }
+      .cap input { width: 80px; }
+      .row { display: flex; gap: 8px; align-items: flex-end; }
+      .n2 { width: 56px; }
+      .n4 { width: 80px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Fields found in review</h1>
+      <p>Rows of fields and sections of forms that were reported wrongly, or missed, when the check was reviewed. Each comment says what is expected.</p>
+
+      <!-- A caption over each part, tied to nothing, and each part named like its caption: the last caption is not the label of the row. Nothing. -->
+      <form action="#" id="v-captions">
+        <label class="o" for="v1c">Card number</label><input id="v1c" />
+        <div class="cap"><span>Day</span><span>Month</span><span>Year</span></div>
+        <div class="cap"><input aria-label="Day" /><input aria-label="Month" /><input aria-label="Year" /></div>
+      </form>
+      <form action="#" id="v-captions-city">
+        <label class="o" for="v2s">Street</label><input id="v2s" />
+        <div class="cap"><span>City</span><span>Postcode</span></div>
+        <div class="cap"><input title="City" /><input title="Postcode" /></div>
+      </form>
+      <!-- The same captions over parts without any name: fields without names are for a rule engine. Nothing. -->
+      <form action="#" id="v-captions-unnamed">
+        <label class="o" for="v3c">Reference</label><input id="v3c" />
+        <div class="cap"><span>Day</span><span>Month</span><span>Year</span></div>
+        <div class="cap"><input name="d" /><input name="m" /><input name="y" /></div>
+      </form>
+
+      <!-- One label, tied to the first part, which has a hint of its own; the second part is named by its placeholder only. Likely. -->
+      <form action="#" id="v-placeholder-part">
+        <label class="o" for="v4n">Card number</label><input id="v4n" />
+        <div id="v-expiry">
+          <label class="o" for="v4m">Expiry date</label>
+          <div class="row"><input id="v4m" class="n2" placeholder="MM" /> <input id="v4y" class="n2" placeholder="YY" /></div>
+        </div>
+      </form>
+      <!-- A labelled field beside one named by its placeholder only, and nothing says the label is that of both: advisory. -->
+      <form action="#" id="v-placeholder-beside">
+        <label class="o" for="v5n">Name</label><input id="v5n" />
+        <div id="v-phone">
+          <label class="o" for="v5p">Phone</label>
+          <div class="row"><input id="v5p" type="tel" /> <input class="n4" placeholder="Ext." /></div>
+        </div>
+      </form>
+
+      <!-- Log in at the top of the page and sign up in its main part, in one form: different regions. Nothing. -->
+      <form action="#" id="v-regions">
+        <header>
+          <div class="row"><label>Email <input type="email" /></label><label>Password <input type="password" /></label><button type="button">Log in</button></div>
+        </header>
+        <article>
+          <p>The two parts of the page are far from each other and stand in regions of their own.</p>
+          <p class="t">Create an account</p>
+          <label class="o">Email <input type="email" /></label>
+          <label class="o">Password <input type="password" /></label>
+        </article>
+      </form>
+
+      <!-- Two sections under headings, with the same names: a heading is not read when moving between fields. Likely (section 3E of the brief). -->
+      <form action="#" id="v-headings">
+        <h2>Shipping address</h2>
+        <div id="v-ship">
+          <label class="o" for="v7a">Street</label><input id="v7a" />
+          <label class="o" for="v7b">City</label><input id="v7b" />
+        </div>
+        <h2>Billing address</h2>
+        <div id="v-bill">
+          <label class="o" for="v7c">Street</label><input id="v7c" />
+          <label class="o" for="v7d">City</label><input id="v7d" />
+        </div>
+      </form>
+      <!-- The same, told apart for the browser by the tokens of `autocomplete`: info. -->
+      <form action="#" id="v-autocomplete">
+        <h2>Shipping address</h2>
+        <div id="v-ac-ship">
+          <label class="o" for="v8a">Street</label><input id="v8a" autocomplete="shipping street-address" />
+          <label class="o" for="v8b">City</label><input id="v8b" autocomplete="shipping address-level2" />
+        </div>
+        <h2>Billing address</h2>
+        <div id="v-ac-bill">
+          <label class="o" for="v8c">Street</label><input id="v8c" autocomplete="billing street-address" />
+          <label class="o" for="v8d">City</label><input id="v8d" autocomplete="billing address-level2" />
+        </div>
+      </form>
+      <!-- The same in two regions with names of their own. Nothing. -->
+      <form action="#" id="v-named-regions">
+        <section aria-labelledby="v9s">
+          <h2 id="v9s">Shipping address</h2>
+          <label class="o" for="v9a">Street</label><input id="v9a" />
+          <label class="o" for="v9b">City</label><input id="v9b" />
+        </section>
+        <section aria-labelledby="v9t">
+          <h2 id="v9t">Billing address</h2>
+          <label class="o" for="v9c">Street</label><input id="v9c" />
+          <label class="o" for="v9d">City</label><input id="v9d" />
+        </section>
+      </form>
+    </main>
+  </body>
+</html>

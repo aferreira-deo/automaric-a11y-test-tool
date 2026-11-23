@@ -1,0 +1,12 @@
+{
+  "description": "Rows of fields and sections that were reported wrongly, or missed, when the check was reviewed. Nothing for captions over each part that are tied to nothing, when the parts are named like their captions or have no name at all: the last caption is not the label of the row. Likely for a row whose only label is tied to the first part while a later part is named by its placeholder alone and the first part shows a hint of its own; advisory when nothing says that the label is that of both. Nothing for log in and sign up in two regions of one form. Likely for two sections with the same names under headings (section 3E of the brief); info when the tokens of autocomplete tell them apart; nothing when each is a named region.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#v-expiry", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "placeholderPart"] },
+    { "selector": "#v-phone", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["fields", "placeholderPart"] },
+    { "selector": "#v-bill", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/duplicate-names", "flags": ["fields", "headingLabel"] },
+    { "selector": "#v-ac-bill", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["fields", "autocompleteSections"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

@@ -127,13 +127,65 @@ test('without the accessibility tree nothing is reported above info, and the sur
   expect(survey.message).toContain('could not be read in full');
 });
 
-test('more controls than can be marked in the page count as an accessibility tree that was not read', async ({ page }) => {
+test('with more controls than are marked, what stands before the limit keeps its status and only the set that reaches it is info', async ({ page }) => {
   await page.goto('/grouping/choice-sets.html');
+  const full = await grouping(page).analyze();
+  const total = full.findings.find((finding) => finding.rule === 'grouping/survey')!.evidence.values!['totalControls'];
+  // Four controls: the two radios of the first set, and two of the three checkboxes of the second.
   const { findings } = await grouping(page).options({ grouping: { maxAxMarks: 4 } }).analyze();
-  expect(findings.length).toBeGreaterThan(1);
-  expect(findings.filter((finding) => finding.status !== 'info')).toEqual([]);
-  expect(findings.find((finding) => finding.rule === 'grouping/survey')?.evidence.flags).toContain('axIncomplete');
-  expect(findings.find((finding) => finding.selector === '#q-car')?.evidence.flags).toContain('axIncomplete');
+  const sets = findings.filter((finding) => finding.rule !== 'grouping/survey');
+  expect(sets.map((finding) => [finding.selector, finding.status])).toEqual([
+    ['#q-car', 'likely'],
+    ['#q-contact', 'info'],
+  ]);
+  expect(sets[0]).toEqual(full.findings.find((finding) => finding.selector === '#q-car'));
+  expect(sets[1]!.evidence.flags).toEqual(expect.arrayContaining(['axIncomplete', 'atReadLimit']));
+  expect(sets[1]!.message).toContain('reach the point where reading stopped');
+  const survey = findings.find((finding) => finding.rule === 'grouping/survey')!;
+  expect(survey.evidence.flags).toEqual(expect.arrayContaining(['truncated', 'axLimited']));
+  // The tree itself was read: this is not the case of a tree that could not be read.
+  expect(survey.evidence.flags).not.toContain('axIncomplete');
+  // The real number of controls, not the number that was marked.
+  expect(Number(total)).toBeGreaterThan(20);
+  expect(survey.evidence.values).toMatchObject({ controls: 4, totalControls: total, controlsBeyondAxLimit: Number(total) - 4, heldAtAxLimit: 1 });
+  expect(survey.message).toContain(`${Number(total) - 4} control(s) after that point were not read, out of ${String(total)} in all`);
+});
+
+test('controls are marked in document order: questions deep in the page come before a long run of checkboxes after them', async ({ page }) => {
+  // `Accessibility.getFullAXTree` lists nodes level by level: the checkboxes, which are children
+  // of the form, come before the radios, which are six elements deep. Marked in that order, the
+  // limit would be used up by the checkboxes and the three questions would not be read at all.
+  await page.setContent('<!doctype html><html lang="en"><body style="font: 16px Arial"><main><form id="form"></form></main></body></html>');
+  await page.evaluate(() => {
+    const form = document.getElementById('form')!;
+    for (let index = 0; index < 3; index++) {
+      const set = document.createElement('div');
+      set.style.margin = '0 0 24px';
+      set.innerHTML = `<div><div><div><div id="q-${index}"><p style="margin: 0 0 4px">Question number ${index}</p><label><input type="radio" name="q${index}"> Yes</label> <label><input type="radio" name="q${index}"> No</label></div></div></div></div>`;
+      form.append(set);
+    }
+    const title = document.createElement('p');
+    title.textContent = 'Matrix';
+    form.append(title);
+    for (let index = 0; index < 200; index++) {
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.setAttribute('aria-label', `cell ${index}`);
+      form.append(box);
+    }
+  });
+  const scan = () => grouping(page).options({ grouping: { maxAxMarks: 60 } }).analyze();
+  const { findings } = await scan();
+  const likely = findings.filter((finding) => finding.status === 'likely');
+  expect(likely.map((finding) => finding.selector)).toEqual(['#q-0', '#q-1', '#q-2']);
+  for (const finding of likely) expect(finding.evidence.flags).toEqual(['radios']);
+  const survey = findings.find((finding) => finding.rule === 'grouping/survey')!;
+  // 6 radios and 200 checkboxes, of which the first 60 controls were read; the run of checkboxes is longer than a set is.
+  expect(survey.evidence.values).toMatchObject({ controls: 60, totalControls: 206, controlsBeyondAxLimit: 146, sets: 3, setsOverMaxSize: 1, likely: 3 });
+  expect(survey.evidence.flags).toEqual(expect.arrayContaining(['truncated', 'axLimited']));
+  expect(survey.message).toContain('146 control(s) after that point were not read, out of 206 in all');
+  expect(survey.message).toContain('1 run(s) of more than 40 radio buttons or checkboxes were not looked at as a set');
+  expect((await scan()).findings).toEqual(findings);
 });
 
 test('the status under a heading is an option that never gives a fail', async ({ page }) => {

@@ -21,7 +21,7 @@
   <body>
     <main>
       <h1>Sections with the same field names</h1>
-      <p>Forms with two sections whose fields have the same accessible names. Only the first and the last form leave a screen reader user without a way to tell them apart.</p>
+      <p>Forms with two sections whose fields have the same accessible names. In the first, the third and the last form nothing tells them apart programmatically.</p>
 
       <!-- Titles in bold, tied to nothing. -->
       <form action="#" id="f-plain">
@@ -53,7 +53,7 @@
         </fieldset>
       </form>
 
-      <!-- The same under headings: advisory. -->
+      <!-- The same under headings: a heading is not announced when moving between fields. Likely. -->
       <form action="#" id="f-headings">
         <h2>Billing address</h2>
         <div id="h-billing">

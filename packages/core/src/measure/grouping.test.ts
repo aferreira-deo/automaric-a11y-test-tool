@@ -4,6 +4,7 @@ import type { Box, GroupingBlock, GroupingConfig, GroupingControl, GroupingGroup
 import {
   besideEachOther,
   containsWords,
+  countWords,
   DUPLICATE_NAMES_RULE,
   GROUP_CANDIDATE_RULE,
   groupingReport,
@@ -318,7 +319,7 @@ describe('sets of radios and checkboxes', () => {
     });
     expect(report(unnamed).candidates[0]).toMatchObject({ status: 'likely', selector: '#fs', flags: ['radios', 'unnamedGroup'] });
   });
-  it('reports nothing when the question is in the name of every option, and nothing when it is their description', () => {
+  it('reports nothing when the question is in the name of every option, and passes over a hint', () => {
     expect(
       summary(
         question((page) => {
@@ -331,6 +332,7 @@ describe('sets of radios and checkboxes', () => {
     expect(
       summary(
         question((page) => {
+          // The description of something else: a hint, passed over.
           page.text('Preferred time', { free: false, describes: true });
           page.radios('time', ['Morning', 'Evening']);
         }),
@@ -630,12 +632,12 @@ describe('sections with the same field names', () => {
     expect(candidate).toMatchObject({ status: 'info', rule: GROUP_CANDIDATE_RULE, selector: '#two', adjudicate: false });
     expect(candidate!.flags).toContain('noForm');
   });
-  it('is advisory when each section stands under a heading', () => {
+  it('is likely when each section stands under a heading: a heading does not tell the names apart', () => {
     const page = sections((own) => {
       address(own, 'billing', 'Billing address', { heading: 2 });
       address(own, 'delivery', 'Delivery address', { heading: 2 });
     });
-    expect(report(page).candidates[0]).toMatchObject({ status: 'advisory', flags: ['fields', 'headingLabel'] });
+    expect(report(page).candidates[0]).toMatchObject({ status: 'likely', flags: ['fields', 'headingLabel'] });
   });
   it('reports nothing when named groups, descriptions or the names themselves tell the sections apart', () => {
     const grouped = sections((own) => {
@@ -733,5 +735,397 @@ describe('the report as a whole', () => {
   it('gives each finding an id of its own', () => {
     const ids = report(many(5)).candidates.map((candidate) => candidate.findingId);
     expect(new Set(ids).size).toBe(5);
+  });
+});
+
+describe('found in review', () => {
+  const form = (build: (page: Page) => void): Page => {
+    const page = new Page();
+    page.begin('form');
+    build(page);
+    return page;
+  };
+  const named = (page: Page, key: string, names: string[]): void => {
+    for (const name of names) page.control('radio', name, { setKey: `n:0:0:${key}` }, name.slice(-1));
+  };
+
+  describe('words', () => {
+    it('finds the question in a name whatever sets it off: a colon, a comma, a dash, brackets', () => {
+      expect(containsWords('size: s', 'size')).toBe(true);
+      expect(containsWords('newsletter frequency: daily', 'newsletter frequency')).toBe(true);
+      expect(containsWords('marital status, single', 'marital status')).toBe(true);
+      expect(containsWords('(marital status) single', 'marital status')).toBe(true);
+      expect(containsWords('single – marital status', 'marital status')).toBe(true);
+      expect(containsWords('do you own a car - yes', 'do you own a car?')).toBe(true);
+      // Words in another order, or parts of longer words, are not the question.
+      expect(containsWords('status of marital things', 'marital status')).toBe(false);
+      expect(containsWords('party', 'art')).toBe(false);
+      expect(containsWords('résumé: oui', 'resume')).toBe(false);
+      expect(containsWords('?!', '?')).toBe(false);
+      // Without spaces between words the text only has to be there.
+      expect(containsWords('サイズs', 'サイズ', config)).toBe(true);
+      expect(containsWords('サイズ：小', 'サイズ', config)).toBe(true);
+      expect(containsWords('色：赤', 'サイズ', config)).toBe(false);
+    });
+    it('reports nothing for a set whose names carry the question after a colon or a comma', () => {
+      for (const names of [
+        ['Size: S', 'Size: M'],
+        ['Size, S', 'Size, M'],
+        ['Size – S', '(Size) M'],
+      ]) {
+        const page = form((own) => {
+          own.text('Size');
+          named(own, 'size', names);
+        });
+        expect(summary(page), names.join()).toEqual([]);
+        expect(report(page).setsAssociated).toBe(1);
+      }
+    });
+    it('counts the words of a text that is written without spaces, with a segmenter or by its characters', () => {
+      expect(countWords('Receive the monthly newsletter by email', config)).toBe(6);
+      expect(countWords('e-mail address', config)).toBe(2);
+      expect(countWords('', config)).toBe(0);
+      // Japanese, Chinese and Thai: more than one word in a run without spaces.
+      expect(countWords('毎月のニュースレターをメールで受け取る', config)).toBeGreaterThanOrEqual(5);
+      expect(countWords('以下の項目は任意です。必要に応じて選択してください。', config)).toBeGreaterThanOrEqual(6);
+      expect(countWords('ไม่แน่ใจ', config)).toBeLessThanOrEqual(2);
+      expect(countWords('はい', config)).toBe(1);
+      // Without Intl.Segmenter: three characters to a word.
+      expect(countWords('毎月のニュースレターをメールで受け取る', config, null)).toBe(7);
+      expect(countWords('はい', config, null)).toBe(1);
+      expect(countWords('はい いいえ', config, null)).toBe(2);
+      // A cutter that is given is the one that is used.
+      expect(countWords('はい', config, { segment: () => [{ isWordLike: true }, { isWordLike: false }, { isWordLike: true }] })).toBe(2);
+      // Without the pattern, or with one that does not compile, runs between spaces are counted, as for any text.
+      expect(countWords('毎月のニュースレターをメールで受け取る')).toBe(1);
+      expect(countWords('毎月のニュースレターをメールで受け取る', { unspacedScriptPattern: '(' })).toBe(1);
+    });
+    it('gives a name and a sentence in Japanese the answer of their English equivalents', () => {
+      expect(isShortName('毎月のニュースレターをメールで受け取る', config)).toBe(isShortName('receive the monthly newsletter by email', config));
+      expect(isShortName('はい', config)).toBe(isShortName('yes', config));
+      expect(isSentence('以下の項目は任意です。必要に応じて選択してください。', config)).toBe(isSentence('The following items are optional and can be skipped.', config));
+      expect(isSentence('車をお持ちですか？', config)).toBe(isSentence('Do you own a car?', config));
+      // Counted between spaces only, as before, the long name is one word and the two sentences are no sentence.
+      expect(isShortName('毎月のニュースレターをメールで受け取る', { ...config, unspacedScriptPattern: '' })).toBe(true);
+      expect(isSentence('以下の項目は任意です。必要に応じて選択してください。', { ...config, unspacedScriptPattern: '' })).toBe(false);
+      expect(isShortName('毎月のニュースレターをメールで受け取る', config)).toBe(false);
+      expect(isSentence('以下の項目は任意です。必要に応じて選択してください。', config)).toBe(true);
+      // Sentences that end as they do in other scripts.
+      for (const text of ['यह एक वाक्य है।', 'ይህ አንድ ዓረፍተ ነገር ነው።', 'یہ ایک جملہ ہے۔']) expect(isSentence(text, config), text).toBe(true);
+    });
+    it('gives sets in Japanese the status of the same sets in English', () => {
+      const long = (title: string, names: string[]): Page =>
+        form((own) => {
+          own.text(title);
+          own.checkboxes(names);
+        });
+      const english = report(long('Notification settings', ['Receive the monthly newsletter by email', 'Receive announcements about new products'])).candidates[0]!;
+      const japanese = report(long('お知らせの設定', ['毎月のニュースレターをメールで受け取る', '新製品に関するお知らせを受け取る'])).candidates[0]!;
+      expect([english.status, japanese.status]).toEqual(['advisory', 'advisory']);
+      expect(japanese.flags).toContain('selfExplanatory');
+      const under = (text: string, names: string[]): Page =>
+        form((own) => {
+          own.text(text);
+          own.radios('r', names);
+        });
+      expect(report(under('The following items are optional and can be skipped.', ['Yes', 'No'])).candidates[0]).toMatchObject({ status: 'info', reasons: ['labelSentence'] });
+      expect(report(under('以下の項目は任意です。必要に応じて選択してください。', ['はい', 'いいえ'])).candidates[0]).toMatchObject({ status: 'info', reasons: ['labelSentence'] });
+      expect(report(under('車をお持ちですか？', ['はい', 'いいえ'])).candidates[0]).toMatchObject({ status: 'likely' });
+    });
+  });
+
+  describe('a question that is the description of the options', () => {
+    const described = (text: string, over: Partial<GroupingBlock> = {}): Page =>
+      form((own) => {
+        own.begin('q');
+        own.text('Vehicle details');
+        own.text(text, { free: false, describes: true, described: [0, 1], ...over });
+        own.radios('boat', ['Yes', 'No']);
+      });
+    it('is reported as advisory under that text, and the text before it is not taken for the label', () => {
+      const [candidate] = report(described('Do you own a boat?')).candidates;
+      expect(candidate).toMatchObject({ status: 'advisory', rule: UNGROUPED_CONTROLS_RULE, selector: '#q', label: 'Do you own a boat?', adjudicate: false });
+      expect(candidate!.flags).toEqual(['radios', 'describedBy']);
+    });
+    it('passes over a description that reads as a hint, and one that is not that of every option', () => {
+      expect(report(described('You can change this answer later in your account.')).candidates[0]).toMatchObject({ status: 'likely', label: 'Vehicle details' });
+      expect(report(described('Do you own a boat?', { described: [0] })).candidates[0]).toMatchObject({ status: 'likely', label: 'Vehicle details' });
+      expect(report(described('Do you own a boat?', { described: [] })).candidates[0]).toMatchObject({ status: 'likely', label: 'Vehicle details' });
+    });
+    it('is nothing when the set is in a named group, and info when the text is far', () => {
+      const grouped = form((own) => {
+        own.begin('fs', 'group', 'Do you agree?');
+        own.legend('Do you agree?');
+        own.text('Select an option', { free: false, describes: true, described: [0, 1] });
+        own.radios('agree', ['Yes', 'No']);
+      });
+      expect(summary(grouped)).toEqual([]);
+      const far = form((own) => {
+        own.text('Do you own a boat?', { free: false, describes: true, described: [0, 1] });
+        own.gap(80);
+        own.radios('boat', ['Yes', 'No']);
+      });
+      expect(report(far).candidates[0]).toMatchObject({ status: 'info', reasons: ['labelFar'] });
+      expect(report(far).candidates[0]!.flags).toContain('describedBy');
+    });
+  });
+
+  describe('texts that are no labels', () => {
+    it('takes a note about required fields for the label of nothing, and looks no further', () => {
+      for (const note of ['* Required', '*Required', '(*) Pflichtfeld', '＊ 必須', '† Champs obligatoires', '* = required']) {
+        const page = form((own) => {
+          own.text('Your title');
+          own.text(note);
+          own.radios('title', ['Mr', 'Mrs']);
+        });
+        expect(summary(page), note).toEqual([]);
+        expect(report(page).setsWithoutLabel, note).toBe(1);
+      }
+      // A label with the asterisk of a required set is a label.
+      for (const label of ['Title *', 'Title*', 'Title (*)', 'Size (cm)', '2 * 3']) {
+        const page = form((own) => {
+          own.text(label);
+          own.radios('title', ['Mr', 'Mrs']);
+        });
+        expect(report(page).candidates[0], label).toMatchObject({ status: 'likely', label });
+      }
+      // A pattern that does not compile takes nothing away.
+      const kept = form((own) => {
+        own.text('* Required');
+        own.radios('title', ['Mr', 'Mrs']);
+      });
+      expect(report(kept, { labelNotePattern: '(' }).candidates[0]).toMatchObject({ status: 'likely' });
+    });
+    it('holds checkboxes back that stand for themselves: required alone, a link in the label, a sentence as a name', () => {
+      const consent = (over: Partial<GroupingControl>, names = ['I agree', 'Newsletter']): Page =>
+        form((own) => {
+          own.text('Almost done');
+          own.control('checkbox', names[0]!, over);
+          own.control('checkbox', names[1]!);
+        });
+      for (const over of [{ required: true }, { linkedLabel: true }]) {
+        const [candidate] = report(consent(over)).candidates;
+        expect(candidate, JSON.stringify(over)).toMatchObject({ status: 'info', rule: GROUP_CANDIDATE_RULE, reasons: ['independentControls'], adjudicate: false });
+      }
+      expect(report(consent({}, ['I have read the privacy notice.', 'Newsletter'])).candidates[0]).toMatchObject({ status: 'info', reasons: ['independentControls'] });
+      // Checkboxes of one name are one answer, and radios are never independent.
+      const one = form((own) => {
+        own.text('Interests');
+        own.control('checkbox', 'Art', { setKey: 'n:0:0:interest', linkedLabel: true });
+        own.control('checkbox', 'Music', { setKey: 'n:0:0:interest' });
+      });
+      expect(report(one).candidates[0]).toMatchObject({ status: 'likely' });
+      const radios = form((own) => {
+        own.text('Title');
+        own.radios('title', ['Mr', 'Mrs'], { required: true });
+      });
+      expect(report(radios).candidates[0]).toMatchObject({ status: 'likely' });
+      // Short names, no link, nothing required: these cannot be told from a question and its options.
+      expect(report(consent({})).candidates[0]).toMatchObject({ status: 'likely' });
+    });
+  });
+
+  describe('a label in several boxes on one line', () => {
+    const line = (first: Partial<GroupingBlock>, gap = 4): Page =>
+      form((own) => {
+        own.begin('q');
+        const at = own.text('Required mark', { ...first, box: { x: 32, y: 0, width: 100, height: 18 } });
+        own.text('(optional)', { box: { x: 132 + gap, y: 0, width: 70, height: 18 } });
+        own.blocks[at]!.box.y = own.blocks[at + 1]!.box.y = 0;
+        own.radios('mark', ['Default', 'Hidden']);
+      });
+    it('takes the whole line for the label when no part of it is tied to anything', () => {
+      const [candidate] = report(line({})).candidates;
+      expect(candidate).toMatchObject({ status: 'likely', selector: '#q', label: 'Required mark (optional)' });
+      expect(candidate!.flags).toEqual(['radios', 'labelLine']);
+      expect(candidate!.capture.blocks).toEqual([0, 1]);
+      expect(candidate!.box.x).toBe(32);
+    });
+    it('takes a fragment after the label of another control for nothing', () => {
+      expect(summary(line({ free: false, otherLabel: true }))).toEqual([]);
+    });
+    it('takes texts far apart on a line, or on two lines, for texts of their own', () => {
+      expect(report(line({}, 60)).candidates[0]).toMatchObject({ status: 'likely', label: '(optional)' });
+      const stacked = form((own) => {
+        own.text('Required mark');
+        own.text('(optional)');
+        own.radios('mark', ['Default', 'Hidden']);
+      });
+      expect(report(stacked).candidates[0]).toMatchObject({ label: '(optional)' });
+    });
+    it('starts a new set after the label of the option before it on the same line', () => {
+      // "( ) Yes ( ) No  Second question ( ) Yes ( ) No" on one line.
+      const page = form((own) => {
+        own.text('First question');
+        own.control('radio', 'Yes', { setKey: 'n:0:0:a', box: { x: 32, y: 40, width: 16, height: 16 } }, null);
+        own.text('Yes', { free: false, labels: [0], box: { x: 52, y: 40, width: 30, height: 18 } });
+        own.text('Second question', { box: { x: 90, y: 40, width: 120, height: 18 } });
+        own.control('radio', 'Yes', { setKey: 'n:0:0:b', box: { x: 220, y: 40, width: 16, height: 16 } }, null);
+        own.control('radio', 'No', { setKey: 'n:0:0:b', box: { x: 260, y: 40, width: 16, height: 16 } }, null);
+      });
+      expect(report(page).candidates[0]).toMatchObject({ status: 'likely', label: 'Second question' });
+    });
+  });
+
+  describe('limits', () => {
+    it('counts the runs of more controls than a set has, which are not looked at', () => {
+      const page = form((own) => {
+        own.text('Countries');
+        own.checkboxes(Array.from({ length: 41 }, (_, index) => `Country ${index}`));
+      });
+      const result = report(page);
+      expect(result.candidates).toEqual([]);
+      expect(result).toMatchObject({ sets: 0, setsOverMaxSize: 1 });
+      expect(report(page, { maxSetSize: 41 })).toMatchObject({ sets: 1, setsOverMaxSize: 0 });
+    });
+    it('holds back only what reaches the point where reading the accessibility tree stopped', () => {
+      const page = new Page();
+      page.begin('form');
+      for (let index = 0; index < 3; index++) {
+        page.begin(`q${index}`);
+        page.text(`Question ${index}?`);
+        page.radios(`q${index}`, ['Yes', 'No']);
+        page.end();
+        page.gap(24);
+      }
+      const survey = page.survey();
+      const limit = (from: number, frame = '') => groupingReport({ ...survey, unread: [{ frame, from }] }, config);
+      const statuses = (result: ReturnType<typeof limit>) => Object.fromEntries(result.candidates.map((candidate) => [candidate.selector, candidate.status]));
+      // Far after the last control: nothing known stands between the last set and that point.
+      const after = limit(survey.controls[5]!.ord + 10);
+      expect(statuses(after)).toEqual({ '#q0': 'likely', '#q1': 'likely', '#q2': 'info' });
+      expect(after.heldAtLimit).toBe(1);
+      const held = after.candidates.find((candidate) => candidate.selector === '#q2')!;
+      expect(held).toMatchObject({ rule: GROUP_CANDIDATE_RULE, adjudicate: false });
+      expect(held.flags).toEqual(expect.arrayContaining(['axIncomplete', 'atReadLimit']));
+      expect(after.candidates.find((candidate) => candidate.selector === '#q0')!.flags).toEqual(['radios']);
+      // In the middle of the second set.
+      expect(statuses(limit(survey.controls[3]!.ord))).toEqual({ '#q0': 'likely', '#q1': 'info', '#q2': 'info' });
+      // In another document: nothing here is held back.
+      expect(statuses(limit(0, '#frame'))).toEqual({ '#q0': 'likely', '#q1': 'likely', '#q2': 'likely' });
+      // The id of a set does not depend on it.
+      expect(after.candidates.map((candidate) => candidate.findingId).sort()).toEqual(groupingReport(survey, config).candidates.map((candidate) => candidate.findingId).sort());
+    });
+  });
+
+  describe('rows', () => {
+    const captions = (names: string[]): Page =>
+      form((own) => {
+        own.control('field', 'Card number');
+        own.begin('row');
+        names.forEach((_, at) => own.text(['Day', 'Month', 'Year'][at]!, { box: { x: 32 + at * 68, y: 60, width: 40, height: 18 } }));
+        own.gap(24);
+        own.row(names);
+      });
+    it('takes a caption over a later part for the caption of that part, not for the label of the row', () => {
+      expect(summary(captions(['Day', 'Month', 'Year']))).toEqual([]);
+      expect(summary(captions(['', '', '']))).toEqual([]);
+      // Whatever the geometry says: a text that is the name of a later part and not of the first is its caption.
+      const wide = form((own) => {
+        own.text('Year');
+        own.row(['Day', 'Month', 'Year']);
+      });
+      expect(summary(wide)).toEqual([]);
+    });
+    it('still takes a text at the start of the row, or across it, for the label of the row', () => {
+      const short = form((own) => {
+        own.begin('row');
+        own.text('Expiry date', { box: { x: 32, y: 0, width: 50, height: 18 } });
+        own.gap(24);
+        own.row(['Expiry date', 'Year']);
+      });
+      expect(report(short).candidates[0]).toMatchObject({ status: 'likely', flags: ['fields', 'namedAsWhole'] });
+      const unnamed = form((own) => {
+        own.begin('row');
+        own.text('Card security', { box: { x: 32, y: 0, width: 50, height: 18 } });
+        own.gap(24);
+        own.row(['', '']);
+      });
+      expect(report(unnamed).candidates[0]).toMatchObject({ status: 'likely', label: 'Card security', flags: ['fields', 'unnamedPart'] });
+    });
+    it('is likely when the one label is on the first part, which has a hint of its own, and a later part has its placeholder only', () => {
+      const expiry = form((own) => {
+        own.begin('row');
+        own.gap(24);
+        own.row(['Expiry date', 'YY'], {}, [true]);
+        own.controls[0]!.placeholder = 'MM';
+        own.controls[1]!.placeholder = 'YY';
+      });
+      expect(report(expiry).candidates[0]).toMatchObject({ status: 'likely', rule: SPLIT_FIELD_RULE, selector: '#row', flags: ['fields', 'placeholderPart'], adjudicate: false });
+    });
+    it('is advisory when nothing says that the label of the first field is that of both, and nothing when the later part has a name', () => {
+      const phone = form((own) => {
+        own.begin('row');
+        own.gap(24);
+        own.row(['Phone', 'Ext.'], {}, [true]);
+        own.controls[1]!.placeholder = 'Ext.';
+      });
+      expect(report(phone).candidates[0]).toMatchObject({ status: 'advisory', rule: UNGROUPED_CONTROLS_RULE, flags: ['fields', 'placeholderPart'] });
+      const amount = form((own) => {
+        own.gap(24);
+        own.row(['Amount', 'Currency'], {}, [true]);
+        own.controls[1]!.placeholder = 'EUR';
+      });
+      expect(summary(amount)).toEqual([]);
+      // Every part named by its placeholder, and no label: as before, nothing without a text over the row.
+      const placeholders = form((own) => {
+        own.row(['DD', 'MM']);
+        own.controls[0]!.placeholder = 'DD';
+        own.controls[1]!.placeholder = 'MM';
+      });
+      expect(summary(placeholders)).toEqual([]);
+    });
+  });
+
+  describe('sections', () => {
+    const address = (page: Page, id: string, title: string, over: Partial<GroupingControl> = {}, heading = 2): void => {
+      page.text(title, heading > 0 ? { heading } : {});
+      page.begin(id);
+      for (const name of ['Street', 'City']) page.control('field', name, over);
+      page.end();
+      page.gap(24);
+    };
+    it('is likely under headings by default, as the brief says, advisory by option, and never a fail', () => {
+      const page = (): Page =>
+        form((own) => {
+          address(own, 'billing', 'Billing address');
+          address(own, 'delivery', 'Delivery address');
+        });
+      expect(report(page()).candidates[0]).toMatchObject({ status: 'likely', rule: DUPLICATE_NAMES_RULE, selector: '#delivery', flags: ['fields', 'headingLabel'] });
+      expect(report(page(), { duplicateUnderHeadingsStatus: 'advisory' }).candidates[0]).toMatchObject({ status: 'advisory', rule: DUPLICATE_NAMES_RULE });
+      expect(report(page(), { duplicateUnderHeadingsStatus: 'fail' as never }).candidates[0]!.status).toBe('likely');
+      expect(groupingReport(page().survey(), { ...config, duplicateUnderHeadingsStatus: 'fail' as never }).candidates[0]!.status).toBe('likely');
+      expect(resolveConfig({ grouping: { duplicateUnderHeadingsStatus: 'nonsense' as never } }).grouping.duplicateUnderHeadingsStatus).toBe('likely');
+      // The option for sets under a heading does not rule sections, and the other way round.
+      expect(report(page(), { headingLabelStatus: 'advisory' }).candidates[0]!.status).toBe('likely');
+      expect(defaultConfig.grouping).toMatchObject({ headingLabelStatus: 'advisory', duplicateUnderHeadingsStatus: 'likely' });
+    });
+    it('is info when the tokens of autocomplete tell every field from its twin', () => {
+      const page = form((own) => {
+        address(own, 'billing', 'Billing address', { autofillScope: 'billing' });
+        address(own, 'delivery', 'Delivery address', { autofillScope: 'shipping' });
+      });
+      const [candidate] = report(page).candidates;
+      expect(candidate).toMatchObject({ status: 'info', rule: GROUP_CANDIDATE_RULE, selector: '#delivery' });
+      expect(candidate!.flags).toContain('autocompleteSections');
+      // The same token on both sides tells nothing apart.
+      const same = form((own) => {
+        address(own, 'billing', 'Billing address', { autofillScope: 'section-a' });
+        address(own, 'delivery', 'Delivery address', { autofillScope: 'section-a' });
+      });
+      expect(report(same).candidates[0]).toMatchObject({ status: 'likely' });
+    });
+    it('does not compare the fields of two regions of one form', () => {
+      const page = form((own) => {
+        address(own, 'login', 'Log in', { region: 'header' }, 0);
+        address(own, 'signup', 'Create an account', { region: 'main' }, 0);
+      });
+      expect(summary(page)).toEqual([]);
+      const one = form((own) => {
+        address(own, 'billing', 'Billing address', { region: 'main' }, 0);
+        address(own, 'delivery', 'Delivery address', { region: 'main' }, 0);
+      });
+      expect(report(one).candidates[0]).toMatchObject({ status: 'likely', rule: DUPLICATE_NAMES_RULE });
+    });
   });
 });

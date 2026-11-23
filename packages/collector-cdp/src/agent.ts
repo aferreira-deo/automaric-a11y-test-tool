@@ -52,6 +52,10 @@ export interface AgentGroupingControl {
   fontSize: number;
   rtl: boolean;
   switch?: boolean;
+  required?: boolean;
+  linkedLabel?: boolean;
+  placeholder?: string;
+  autofillScope?: string;
 }
 
 export interface AgentGroupingGroup {
@@ -78,6 +82,7 @@ export interface AgentGroupingBlock {
   labels: number[];
   group: number;
   describes: boolean;
+  described?: number[];
   otherLabel: boolean;
   inControl: boolean;
   disclosure: boolean;
@@ -91,6 +96,8 @@ export interface AgentGroupingSurvey {
   groups: AgentGroupingGroup[];
   blocks: AgentGroupingBlock[];
   totalBlocks: number;
+  /** Where reading the accessibility tree stopped, for each document that has more controls or groups than were marked. */
+  unread: { frame: string; from: number }[];
 }
 
 /** Subset of HeadingsConfig the agent needs; documented there. */
@@ -441,8 +448,14 @@ export interface Agent {
   listSelectors(ords: number[]): (string | null)[];
   /** Scrolls what a finding of the lists check is about into view and says what to capture. */
   prepareList(kind: 'blocks' | 'elements', ids: number[]): Promise<AgentHeadingPrepared>;
-  /** Records what the accessibility tree says about a form control: its role, its name and its description. Called on the node itself. */
-  markControl(element: unknown, role: string, name: string, description: string): boolean;
+  /** Records what the accessibility tree says about a form control: its role, its name, its description, and whether it is required. Called on the node itself. */
+  markControl(element: unknown, role: string, name: string, description: string, required?: boolean): boolean;
+  /**
+   * Records the first control or group of a document that was not marked, because the document
+   * has more of them than are marked: from this element on, in document order, what the
+   * accessibility tree says is not known. Called on the node itself.
+   */
+  markUnread(element: unknown): boolean;
   /** Records that the accessibility tree exposes this element as a group or another container with a role, and its name. Called on the node itself. */
   markGroup(element: unknown, role: string, name: string): boolean;
   groupingSurvey(): AgentGroupingSurvey;
@@ -2029,16 +2042,24 @@ export function agentFactory(options: AgentOptions): Agent {
    * the collector before the grouping survey: role, name and description are those the browser
    * computed, and are never worked out from attributes here.
    */
-  const controlMarks = new Map<Element, { role: string; name: string; description: string }>();
+  const controlMarks = new Map<Element, { role: string; name: string; description: string; required: boolean }>();
+  /** The first control or group of each document that was not marked: where what is known of it ends. */
+  const unreadMarks = new Set<Element>();
   const groupMarks = new Map<Element, { role: string; name: string }>();
   /** The controls of the last grouping survey, by index. */
   let groupingControls: Element[] = [];
 
-  function markControl(element: unknown, role: string, name: string, description: string): boolean {
+  function markControl(element: unknown, role: string, name: string, description: string, required = false): boolean {
     if (!element || (element as Node).nodeType !== 1) return false;
     // The ARIA role listbox is a list of options, often the popup of a combobox: only a `select` shown as a list is a field.
     if (role === 'listbox' && (element as Element).localName !== 'select') return true;
-    controlMarks.set(element as Element, { role, name, description });
+    controlMarks.set(element as Element, { role, name, description, required });
+    return true;
+  }
+
+  function markUnread(element: unknown): boolean {
+    if (!element || (element as Node).nodeType !== 1) return false;
+    unreadMarks.add(element as Element);
     return true;
   }
 
@@ -2677,6 +2698,10 @@ export function agentFactory(options: AgentOptions): Agent {
           ords.set(element, { ord: ordElements.length, end: ordElements.length });
           ordElements.push(element);
           controlElements.push(element);
+        } else if (forGrouping && unreadMarks.has(element)) {
+          // Where reading stopped: numbered, so that what stands before it can be told from what stands after.
+          ords.set(element, { ord: ordElements.length, end: ordElements.length });
+          ordElements.push(element);
         }
         return;
       }
@@ -2828,10 +2853,12 @@ export function agentFactory(options: AgentOptions): Agent {
       labels: number[];
       group: number;
       describes: boolean;
+      /** Controls this element describes, by index: those that were read only. */
+      described: number[];
       inControl: boolean;
       disclosure: boolean;
     }
-    const NO_BINDING: Binding = { labels: [], group: -1, describes: false, inControl: false, disclosure: false };
+    const NO_BINDING: Binding = { labels: [], group: -1, describes: false, described: [], inControl: false, disclosure: false };
     const MAX_LABELLED = options.grouping.maxLabelTargets;
     const controlIndex = new Map<Element, number>();
     const groupIndex = new Map<Element, number>();
@@ -2871,7 +2898,7 @@ export function agentFactory(options: AgentOptions): Agent {
       const targetOf = (element: Element): Binding => {
         let binding = boundTargets.get(element);
         if (!binding) {
-          binding = { labels: [], group: -1, describes: false, inControl: false, disclosure: false };
+          binding = { labels: [], group: -1, describes: false, described: [], inControl: false, disclosure: false };
           boundTargets.set(element, binding);
         }
         return binding;
@@ -2895,7 +2922,11 @@ export function agentFactory(options: AgentOptions): Agent {
           const binding = targetOf(target);
           if (binding.labels.length < MAX_LABELLED && !binding.labels.includes(index)) binding.labels.push(index);
         }
-        for (const target of referenced(element, 'aria-describedby')) targetOf(target).describes = true;
+        for (const target of referenced(element, 'aria-describedby')) {
+          const binding = targetOf(target);
+          binding.describes = true;
+          if (index >= 0 && !binding.described.includes(index)) binding.described.push(index);
+        }
       }
       groupElements.forEach((element, index) => {
         for (const target of referenced(element, 'aria-labelledby')) {
@@ -2942,6 +2973,7 @@ export function agentFactory(options: AgentOptions): Agent {
             // The nearest container that the text names.
             group: group >= 0 ? group : binding.group,
             describes: binding.describes || target?.describes === true,
+            described: target && target.described.length > 0 ? [...new Set([...binding.described, ...target.described])] : binding.described,
             inControl: binding.inControl || inControl,
             disclosure: binding.disclosure || disclosure,
           };
@@ -3034,6 +3066,8 @@ export function agentFactory(options: AgentOptions): Agent {
           labels: labels.filter((index) => index >= 0).slice(0, MAX_LABELLED),
           group: tied.find((own) => own.group >= 0)?.group ?? -1,
           describes: tied.every((own) => own.describes),
+          // The controls every part of the text describes.
+          ...(tied.every((own) => own.described.length > 0) ? { described: tied[0]!.described.filter((index) => tied.every((own) => own.described.includes(index))) } : {}),
           otherLabel: labels.includes(-1),
           inControl: tied.every((own) => own.inControl),
           disclosure: tied.every((own) => own.disclosure),
@@ -3108,6 +3142,25 @@ export function agentFactory(options: AgentOptions): Agent {
           if (at) setKey = 'g:' + at.ord;
         }
         const cellElement = place.contexts.has('tableCell') || place.contexts.has('tableHeader') ? element.closest('td,th,[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]') : null;
+        // A link in what labels the control, or in the control itself: a line of consent.
+        const LINK = 'a[href]';
+        const labelling: Element[] = [element, ...[...((element as HTMLInputElement).labels ?? [])].slice(0, MAX_LABELLED)];
+        for (const id of (element.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean).slice(0, MAX_LABELLED)) {
+          const root = element.getRootNode() as Document | ShadowRoot;
+          const target = typeof root.getElementById === 'function' ? root.getElementById(id) : null;
+          if (target) labelling.push(target);
+        }
+        const linked = kind !== 'field' && labelling.some((own) => own.matches(LINK) || own.querySelector(LINK) !== null);
+        const placeholder = kind === 'field' ? (element.getAttribute('placeholder') ?? '').replace(/\s+/g, ' ').trim().slice(0, limit.maxNameChars) : '';
+        // The tokens of `autocomplete` that name a section or an address (HTML, autofill detail tokens).
+        const autofill =
+          kind === 'field'
+            ? (element.getAttribute('autocomplete') ?? '')
+                .toLowerCase()
+                .split(/\s+/)
+                .filter((token) => token.startsWith('section-') || token === 'shipping' || token === 'billing')
+                .join(' ')
+            : '';
         return {
           selector: selectorOf(element),
           frame: frameOf(element),
@@ -3128,6 +3181,11 @@ export function agentFactory(options: AgentOptions): Agent {
           fontSize: style ? parseFloat(style.fontSize) || 0 : 0,
           rtl: style?.direction === 'rtl',
           ...(mark.role === 'switch' ? { switch: true } : {}),
+          // Chrome gives the property for text fields; for a native checkbox the attribute says it.
+          ...(mark.required || (element as HTMLInputElement).required === true ? { required: true } : {}),
+          ...(linked ? { linkedLabel: true } : {}),
+          ...(placeholder !== '' ? { placeholder } : {}),
+          ...(autofill !== '' ? { autofillScope: autofill } : {}),
         };
       });
       const groups: AgentGroupingGroup[] = groupElements.map((element) => {
@@ -3137,10 +3195,13 @@ export function agentFactory(options: AgentOptions): Agent {
       });
       groupingControls = kept.map((entry) => entry.element);
       listOrdElements = ordElements;
+      // Where reading the accessibility tree stopped in each document. An element the walk did
+      // not come to (it is not rendered) stands for the whole of its document.
+      const unread = [...unreadMarks].filter((element) => element.isConnected).map((element) => ({ frame: frameOf(element), from: ords.get(element)?.ord ?? 0 }));
       return {
         survey: { blocks, total },
         lists: null,
-        grouping: { controls, totalControls: shownControls.length, groups, blocks: groupingBlocks, totalBlocks: total },
+        grouping: { controls, totalControls: shownControls.length, groups, blocks: groupingBlocks, totalBlocks: total, unread },
       };
     }
     if (!forLists) return { survey: { blocks, total }, lists: null };
@@ -3668,6 +3729,7 @@ export function agentFactory(options: AgentOptions): Agent {
     listSelectors,
     prepareList,
     markControl,
+    markUnread,
     markGroup,
     groupingSurvey,
     prepareGrouping,

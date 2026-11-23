@@ -1,0 +1,22 @@
+{
+  "description": "Sets that were reported wrongly when the check was reviewed. Nothing when the question is in the name of every option, set off by a colon, a comma, a dash or brackets; likely when the words of the text are only inside a longer word. Names in Japanese get the status of their English equivalents: advisory for names that stand on their own, info under a sentence of prose, likely under a question with short names. A question that is the description of every option is advisory (describedBy) under that text, not under the unrelated text before it; a hint in a sentence that describes the options is passed over. A note about required fields is no label; a label that ends with an asterisk is. Checkboxes that stand for themselves (a link in the label, required on its own, named by a sentence) are info; checkboxes of one name are a set. A label in two boxes on one line is taken as a whole; a fragment on the line of another control's label is not taken at all.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#r-name-inside-word", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#r-cjk-long", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "selfExplanatory"] },
+    { "selector": "#r-en-long", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "selfExplanatory"] },
+    { "selector": "#r-cjk-sentence", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["radios", "labelSentence"] },
+    { "selector": "#r-en-sentence", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["radios", "labelSentence"] },
+    { "selector": "#r-cjk-question", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#r-described", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["radios", "describedBy"] },
+    { "selector": "#r-described-hint", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#r-required-label", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#r-consent-link", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["checkboxes", "independentControls"] },
+    { "selector": "#r-consent-required", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["checkboxes", "independentControls"] },
+    { "selector": "#r-consent-sentence", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["checkboxes", "independentControls"] },
+    { "selector": "#r-named-checkboxes", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["checkboxes"] },
+    { "selector": "#r-line-label", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios", "labelLine"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

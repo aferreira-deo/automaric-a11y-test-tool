@@ -1,8 +1,9 @@
 {
-  "description": "Sets that are grouped or need no group: fieldset with legend, radiogroup with aria-labelledby, a group named with aria-label, the question in the name or in the description of every option, nested fieldsets, a legend that holds a heading with a hint tied to the fieldset, a hint inside a fieldset, a visually hidden legend, a single checkbox, two checkboxes after a field, radios in the cells of a table, radios of a toolbar, a dialog named by its title. Nothing is likely. A region named with the words of the visible title is recorded as info.",
+  "description": "Sets that are grouped or need no group: fieldset with legend, radiogroup with aria-labelledby, a group named with aria-label, the question in the name of every option, nested fieldsets, a legend that holds a heading with a hint tied to the fieldset, a hint inside a fieldset, a visually hidden legend, a single checkbox, two checkboxes after a field, radios in the cells of a table, radios of a toolbar, a dialog named by its title. Nothing is likely. A question that is the description of every option is tied to them, though not as the name of a group: advisory (describedBy). A region named with the words of the visible title is recorded as info.",
   "checks": ["grouping"],
   "exact": true,
   "expected": [
+    { "selector": "#g-described", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["radios", "describedBy"] },
     { "selector": "#g-region", "check": "grouping", "status": "info", "wcag": "1.3.1", "rule": "grouping/group-candidate", "flags": ["checkboxes", "labelNamesContainer"] },
     { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
   ]

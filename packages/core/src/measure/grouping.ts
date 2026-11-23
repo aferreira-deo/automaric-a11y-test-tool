@@ -1,4 +1,4 @@
-import { clampHeadingLabelStatus } from '../config.js';
+import { clampDuplicateUnderHeadingsStatus, clampHeadingLabelStatus } from '../config.js';
 import { fingerprint } from '../fingerprint.js';
 import type { Box, GroupingBlock, GroupingConfig, GroupingControl, GroupingSurvey, JsonValue, WcagRef } from '../types.js';
 
@@ -24,13 +24,13 @@ export const UNGROUPED_CONTROLS_RULE = 'grouping/ungrouped-controls';
 export const GROUP_CANDIDATE_RULE = 'grouping/group-candidate';
 /** Fields side by side whose names do not identify the parts, `likely`. */
 export const SPLIT_FIELD_RULE = 'grouping/split-field';
-/** Sections of one form whose fields have the same names, `likely`, or `advisory` under headings. */
+/** Sections of one form whose fields have the same names, `likely`; under headings, `duplicateUnderHeadingsStatus`. */
 export const DUPLICATE_NAMES_RULE = 'grouping/duplicate-names';
 /** What a set and a row are fingerprinted under, whichever rule reports them: the id survives a change of status. */
 export const SET_FINGERPRINT_RULE = 'grouping/set';
 export const ROW_FINGERPRINT_RULE = 'grouping/row';
 /** Version of the candidate generator, part of the key of cached verdicts. */
-export const GROUPING_GENERATOR_VERSION = '1';
+export const GROUPING_GENERATOR_VERSION = '2';
 
 /**
  * Why a set under a visible text is `info` and not above.
@@ -42,9 +42,12 @@ export const GROUPING_GENERATOR_VERSION = '1';
  * - `labelNearerPrevious`: the text is closer to the control before it than to the set: a hint under a field.
  * - `labelNamesContainer`: a region, a form, a dialog or a group that holds the set has the words
  *   of the text as its name, so the text is tied to what holds the set, if not to the set itself.
- * All but the last are matters of judgement, which a tester or a model can settle.
+ * - `independentControls`: checkboxes that are not tied to each other by a `name`, one of which
+ *   is required on its own, has a link in its label or is named by a full sentence: lines of
+ *   consent under the title of a step, each of which stands for itself.
+ * The first four are matters of judgement, which a tester or a model can settle.
  */
-export type GroupingReason = 'labelFar' | 'labelLong' | 'labelSentence' | 'labelNearerPrevious' | 'labelNamesContainer';
+export type GroupingReason = 'labelFar' | 'labelLong' | 'labelSentence' | 'labelNearerPrevious' | 'labelNamesContainer' | 'independentControls';
 
 const JUDGEMENT_REASONS: ReadonlySet<GroupingReason> = new Set(['labelFar', 'labelLong', 'labelSentence', 'labelNearerPrevious']);
 
@@ -99,6 +102,10 @@ export interface GroupingReport {
   setsAssociated: number;
   /** Sets with no visible text before them that could be their label. */
   setsWithoutLabel: number;
+  /** Runs of radios or checkboxes with more controls than `maxSetSize`, which were not looked at. */
+  setsOverMaxSize: number;
+  /** Sets, rows and sections held back as `info` because they reach the point where reading the accessibility tree stopped (`maxAxMarks`). */
+  heldAtLimit: number;
   /** Rows of fields side by side that were looked at. */
   rows: number;
   /** Controls left out of sets and rows: in the cells of a table, or inside a composite widget. */
@@ -136,36 +143,112 @@ export function normaliseName(text: string, config: Pick<GroupingConfig, 'nameTr
   return text.normalize('NFKC').replace(/\s+/g, ' ').replace(trim, '').trim().toLowerCase();
 }
 
-/** Whether `text` is in `name` as whole words: all of it, its start, its end, or a part between spaces. */
-export function containsWords(name: string, text: string): boolean {
-  if (text === '' || name === '') return false;
-  return name === text || name.startsWith(`${text} `) || name.endsWith(` ${text}`) || name.includes(` ${text} `);
+const patterns = new Map<string, RegExp | null>();
+/** A pattern of the configuration, compiled once; null when it does not compile. */
+function compiled(source: string | undefined, flags: string): RegExp | null {
+  if (source === undefined || source === '') return null;
+  const key = `${flags}\u0000${source}`;
+  let pattern = patterns.get(key);
+  if (pattern === undefined) {
+    try {
+      pattern = new RegExp(source, flags);
+    } catch {
+      pattern = null;
+    }
+    patterns.set(key, pattern);
+  }
+  return pattern;
+}
+
+type WordConfig = Pick<GroupingConfig, 'unspacedScriptPattern' | 'unspacedCharsPerWord'>;
+/** What `Intl.Segmenter` is here: something that cuts a text into parts and says which are words. */
+export interface WordCutter {
+  segment(text: string): Iterable<{ isWordLike?: boolean }>;
+}
+let ownCutter: WordCutter | null | undefined;
+/** The word segmenter of the runtime (ECMAScript `Intl`, not DOM and not Node), or null where there is none. */
+function runtimeCutter(): WordCutter | null {
+  if (ownCutter === undefined) {
+    try {
+      // The root locale: where words end in Chinese, Japanese or Thai is a matter of the script, not of a language setting.
+      ownCutter = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('und', { granularity: 'word' }) : null;
+    } catch {
+      ownCutter = null;
+    }
+  }
+  return ownCutter;
+}
+
+/**
+ * How many words a text has. Runs of text between white space count one each, as they always
+ * did, except those in a script that is written without spaces (`unspacedScriptPattern`), which
+ * are cut by `Intl.Segmenter` (`cutter`, the one of the runtime unless given); without one,
+ * every `unspacedCharsPerWord` characters of such a run count as a word. Words are counted, never
+ * looked up: no word of any language is involved.
+ */
+export function countWords(text: string, config: Partial<WordConfig> = {}, cutter: WordCutter | null = runtimeCutter()): number {
+  const runs = text.split(/\s+/).filter(Boolean);
+  const unspaced = compiled(config.unspacedScriptPattern, 'u');
+  if (!unspaced) return runs.length;
+  let words = 0;
+  for (const run of runs) {
+    if (!unspaced.test(run)) {
+      words++;
+      continue;
+    }
+    let own = 0;
+    if (cutter) {
+      for (const part of cutter.segment(run)) if (part.isWordLike) own++;
+    } else {
+      const letters = [...run].filter((character) => LETTER_OR_DIGIT.test(character)).length;
+      own = Math.ceil(letters / Math.max(1, config.unspacedCharsPerWord ?? 1));
+    }
+    words += Math.max(1, own);
+  }
+  return words;
+}
+
+const WORD = /[\p{L}\p{N}\p{M}]+/gu;
+
+/**
+ * Whether `text` is in `name` as whole words: its words, in order, are words of the name that
+ * follow each other. Words are runs of letters, digits and marks, so what stands between them
+ * does not matter: "size" is in "size: s", "marital status" in "marital status, single", "do you
+ * own a car?" in "do you own a car - yes"; "seat" is not in "seating". In a script that is
+ * written without spaces (`unspacedScriptPattern`) the text only has to be in the name.
+ */
+export function containsWords(name: string, text: string, config: Partial<Pick<GroupingConfig, 'unspacedScriptPattern'>> = {}): boolean {
+  const wanted = text.match(WORD) ?? [];
+  const have = name.match(WORD) ?? [];
+  if (wanted.length === 0 || have.length === 0) return false;
+  for (let start = 0; start + wanted.length <= have.length; start++) {
+    if (wanted.every((word, at) => have[start + at] === word)) return true;
+  }
+  return compiled(config.unspacedScriptPattern, 'u')?.test(text) === true && have.join('').includes(wanted.join(''));
 }
 
 /**
  * Whether a text reads as a sentence of prose: it ends as one does (`labelSentenceEndPattern`: a
  * full stop, an exclamation mark, an ellipsis, of any script) and has `labelSentenceMinWords`
- * words or more. Punctuation only: no word of any language is involved. A question mark and a
- * colon do not end a sentence here: they end questions and titles, which is what a label is.
+ * words or more (`countWords`). Punctuation only: no word of any language is involved. A question
+ * mark and a colon do not end a sentence here: they end questions and titles, which is what a label is.
  */
-export function isSentence(text: string, config: Pick<GroupingConfig, 'labelSentenceEndPattern' | 'labelSentenceMinWords'>): boolean {
+export function isSentence(text: string, config: Pick<GroupingConfig, 'labelSentenceEndPattern' | 'labelSentenceMinWords'> & Partial<WordConfig>): boolean {
   const trimmed = text.trim();
-  if (trimmed.split(/\s+/).filter(Boolean).length < config.labelSentenceMinWords) return false;
-  try {
-    return new RegExp(config.labelSentenceEndPattern, 'u').test(trimmed);
-  } catch {
-    return false;
-  }
+  if (countWords(trimmed, config) < config.labelSentenceMinWords) return false;
+  return compiled(config.labelSentenceEndPattern, 'u')?.test(trimmed) === true;
 }
 
-/** Whether a name is short: few words, few characters, or no name at all. */
-export function isShortName(name: string, config: Pick<GroupingConfig, 'shortNameMaxWords' | 'shortNameMaxChars'>): boolean {
-  const words = name.split(/\s+/).filter(Boolean);
-  return words.length <= config.shortNameMaxWords && name.length <= config.shortNameMaxChars;
+/** Whether a name is short: few words (`countWords`), few characters, or no name at all. */
+export function isShortName(name: string, config: Pick<GroupingConfig, 'shortNameMaxWords' | 'shortNameMaxChars'> & Partial<WordConfig>): boolean {
+  return countWords(name, config) <= config.shortNameMaxWords && name.length <= config.shortNameMaxChars;
 }
 
 /** Whether the names of a set say too little on their own: at least `ambiguousMinShare` of them are short or empty. */
-export function namesAreAmbiguous(names: string[], config: Pick<GroupingConfig, 'shortNameMaxWords' | 'shortNameMaxChars' | 'ambiguousMinShare'>): boolean {
+export function namesAreAmbiguous(
+  names: string[],
+  config: Pick<GroupingConfig, 'shortNameMaxWords' | 'shortNameMaxChars' | 'ambiguousMinShare'> & Partial<WordConfig>,
+): boolean {
   if (names.length === 0) return false;
   return names.filter((name) => isShortName(name, config)).length / names.length >= config.ambiguousMinShare;
 }
@@ -203,12 +286,14 @@ function freeTextOf(block: GroupingBlock): string {
   return block.freeText ?? block.text;
 }
 
-type LabelKind = 'text' | 'heading' | 'disclosure' | 'group';
+type LabelKind = 'text' | 'heading' | 'disclosure' | 'group' | 'description';
 
 interface LabelHit {
   kind: LabelKind;
   /** Index of the block. */
   block: number;
+  /** Free texts on the same visual line right before the block, in document order: with it they are one label. */
+  line: number[];
   /** For `group`: the container the block names. */
   group: number;
   /** The control before the text, when there is one in the same frame. */
@@ -226,9 +311,8 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
   const names = controls.map((control) => norm(control.name));
   const tolerance = config.toleranceCssPx;
   const headingStatus = clampHeadingLabelStatus(config.headingLabelStatus);
-  const axFlags = survey.axComplete ? [] : ['axIncomplete'];
-  /** Without the accessibility tree in full, names and groups are not known: nothing is above `info`. */
-  const top = <T extends 'likely' | 'advisory' | 'info'>(status: T): T | 'info' => (survey.axComplete ? status : 'info');
+  const sectionsUnderHeadingsStatus = clampDuplicateUnderHeadingsStatus(config.duplicateUnderHeadingsStatus);
+  const notePattern = compiled(config.labelNotePattern, 'u');
 
   // Controls and texts in one sequence, in document order. A text comes before every control
   // whose position is at least its `at`.
@@ -288,6 +372,34 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     to: Math.max(...members.map((index) => controls[index]!.ord)),
   });
 
+  /**
+   * Whether controls reach a point where reading the accessibility tree stopped (`survey.unread`):
+   * one of them stands at or after it, or nothing that was read stands between them and it, so
+   * that the set may go on with controls that are not known. What stands clear of such a point
+   * is known in full and keeps its status.
+   */
+  const unread = survey.unread ?? [];
+  const reachesUnread = (members: number[]): boolean => {
+    if (unread.length === 0) return false;
+    const frame = controls[members[0]!]!.frame;
+    const { to } = spanOf(members);
+    return unread.some((limit) => limit.frame === frame && (to >= limit.from || controlsWithin(to + 1, limit.from - 1) === 0));
+  };
+  let heldAtLimit = 0;
+  /**
+   * The status something is reported at, and the flags that say why it is lower than it would be.
+   * Without the accessibility tree, names and groups are not known: nothing is above `info`. The
+   * same holds for what reaches the point where reading it stopped.
+   */
+  const settle = <T extends 'likely' | 'advisory' | 'info'>(status: T, members: number[]): { status: T | 'info'; axFlags: string[] } => {
+    if (!survey.axComplete) return { status: 'info', axFlags: ['axIncomplete'] };
+    if (reachesUnread(members)) {
+      heldAtLimit++;
+      return { status: 'info', axFlags: ['axIncomplete', 'atReadLimit'] };
+    }
+    return { status, axFlags: [] };
+  };
+
   /** A text that can be the label of something: some of it is tied to nothing, it is exposed, and it has a letter or a digit. */
   const labelish = (block: GroupingBlock): boolean =>
     block.free &&
@@ -298,6 +410,16 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     !block.contexts.includes('code') &&
     (block.disclosure || !(block.contexts.includes('button') || block.contexts.includes('link')));
 
+  /** Whether a text is as long as a paragraph, or reads as a sentence of prose: what a hint is, and a label seldom. */
+  const proseLike = (text: string, lines: number): boolean => text.length > config.labelMaxChars || lines > config.labelMaxLines || isSentence(text, config);
+  /** Whether two texts stand on one visual line, no further apart than the parts of one label are. */
+  const onOneLine = (a: GroupingBlock, b: GroupingBlock): boolean => {
+    const overlap = Math.min(bottom(a.box), bottom(b.box)) - Math.max(a.box.y, b.box.y);
+    if (overlap < config.sameRowMinOverlap * Math.min(a.box.height, b.box.height)) return false;
+    const gap = Math.max(b.box.x - right(a.box), a.box.x - right(b.box));
+    return gap >= -tolerance && gap <= config.labelLineMaxGapEm * (b.style.size || a.style.size);
+  };
+
   /**
    * Section 5.5, step 3: the nearest visible text before a set that is not bound to a control.
    * Going back from the first control of the set: its own labels are passed over; a hint, the
@@ -305,7 +427,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
    * `labelMaxSkipped` at most; another control, or the label of one, ends the search with nothing.
    * A legend or the text a container is named by is the answer when that container holds the set.
    */
-  const findLabel = (members: number[]): LabelHit | null => {
+  const findLabel = (members: number[], descriptions = false): LabelHit | null => {
     const set = new Set(members);
     const first = controls[members[0]!]!;
     const { from, to } = spanOf(members);
@@ -326,10 +448,17 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
         if (own) continue;
         if (block.group >= 0) {
           const group = groups[block.group];
-          return group && group.ord <= from && to <= group.end ? { kind: 'group', block: item.index, group: block.group, previous } : null;
+          return group && group.ord <= from && to <= group.end ? { kind: 'group', block: item.index, group: block.group, line: [], previous } : null;
         }
         if (block.labels.length > 0 || block.otherLabel) return null;
-        // A description, or text inside a control.
+        // The description of every control of the set that reads as a label does (a question, a
+        // title): the search ends here, and the text before it is not taken for the label. A
+        // description that reads as prose is a hint, and is passed over like any other.
+        const described = block.described ?? [];
+        if (descriptions && described.length > 0 && members.every((index) => described.includes(index)) && !proseLike(block.text, block.lines)) {
+          return { kind: 'description', block: item.index, group: -1, line: [], previous };
+        }
+        // A hint, or text inside a control.
         if (++skipped > config.labelMaxSkipped) return null;
         continue;
       }
@@ -339,10 +468,46 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       }
       // Text that runs on into the label of a control outside the set belongs there.
       if (block.otherLabel || block.labels.some((index) => !set.has(index))) return null;
-      return { kind: block.heading > 0 ? 'heading' : block.disclosure ? 'disclosure' : 'text', block: item.index, group: -1, previous };
+      // A note about the marks of the form ("* Required") is the label of nothing, and what stands before it is not looked at.
+      if (notePattern?.test(freeTextOf(block).trim())) return null;
+      // The rest of its visual line: free text before it is part of the label; the label of a
+      // control there makes this text a part of that label, which is the label of no set.
+      const line: number[] = [];
+      let leftmost = block;
+      for (let back = at - 1; back >= 0 && line.length <= config.labelMaxSkipped; back--) {
+        const before = items[back]!;
+        if (before.control) break;
+        const other = blocks[before.index]!;
+        if (other.frame !== block.frame || !onOneLine(other, leftmost)) break;
+        if (!LETTER_OR_DIGIT.test(other.text)) continue;
+        if (!other.free) {
+          const labelled = other.labels.map((index) => controls[index]!);
+          // The label of a control that stands before it (a radio and its label) ends there: this text starts something new.
+          if (labelled.length > 0 && !other.otherLabel && labelled.every((control) => control.ord < other.at)) break;
+          if (other.group >= 0) {
+            const group = groups[other.group];
+            return group && group.ord <= from && to <= group.end ? { kind: 'group', block: before.index, group: other.group, line: [], previous } : null;
+          }
+          if (other.labels.length > 0 || other.otherLabel) return null;
+          break;
+        }
+        if (!labelish(other) || other.otherLabel || other.labels.length > 0 || other.heading !== block.heading || other.disclosure !== block.disclosure) break;
+        line.unshift(before.index);
+        leftmost = other;
+      }
+      return { kind: block.heading > 0 ? 'heading' : block.disclosure ? 'disclosure' : 'text', block: item.index, group: -1, line, previous };
     }
     return null;
   };
+
+  /** The text of a label: the block, with the free texts before it on its line. */
+  const labelText = (hit: LabelHit): string =>
+    [...hit.line, hit.block]
+      .map((index) => freeTextOf(blocks[index]!))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const labelBox = (hit: LabelHit): Box => hit.line.reduce((box, index) => unionBox(box, blocks[index]!.box), blocks[hit.block]!.box);
 
   /** The box of controls with their labels. */
   const boxOf = (members: number[]): Box => {
@@ -363,7 +528,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
    * text; failing that, the first control.
    */
   const usedContainers = new Set<string>();
-  const place = (members: number[], label: number | null, rule: string): { selector: string; container: number | null } => {
+  const place = (members: number[], label: number[] | null, rule: string): { selector: string; container: number | null } => {
     const first = controls[members[0]!]!;
     const { from, to } = spanOf(members);
     const own = members.flatMap((index) => labelBlocks[index]!).filter((index) => blocks[index]!.frame === first.frame);
@@ -377,7 +542,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       }
       return null;
     };
-    const position = (label !== null ? lowest([...own, label]) : null) ?? lowest(own) ?? lowest([]);
+    const position = (label !== null ? lowest([...own, ...label]) : null) ?? lowest(own) ?? lowest([]);
     // One finding per kind and element: a second set that would be named after the same element is named after its first control.
     if (position === null || usedContainers.has(`${rule}:${position}`)) return { selector: first.selector, container: null };
     usedContainers.add(`${rule}:${position}`);
@@ -397,11 +562,11 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
    * and named all the same, or the text is tied to it in another way.
    */
   const association = (members: number[], hit: LabelHit): { associated: boolean; flags: string[]; reasons: GroupingReason[] } => {
-    const label = blocks[hit.block]!;
-    const text = norm(freeTextOf(label));
+    const label = blocks[hit.line[0] ?? hit.block]!;
+    const text = norm(labelText(hit));
     const { from, to } = spanOf(members);
-    // The question is part of the name of every control.
-    if (members.every((index) => containsWords(names[index]!, text))) return { associated: true, flags: [], reasons: [] };
+    // The question is part of the name of every control, whatever sets it off from the rest of the name.
+    if (members.every((index) => containsWords(names[index]!, text, config))) return { associated: true, flags: [], reasons: [] };
     const around = holding(from, to);
     const flags: string[] = [];
     const named = around.find((index) => GROUP_ROLES.has(groups[index]!.role) && groups[index]!.name !== '');
@@ -417,7 +582,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     const reasons: GroupingReason[] = [];
     const sameWords = around.some((index) => {
       const name = norm(groups[index]!.name);
-      return containsWords(name, text) || containsWords(text, name);
+      return containsWords(name, text, config) || containsWords(text, name, config);
     });
     if (sameWords) reasons.push('labelNamesContainer');
     return { associated: false, flags, reasons };
@@ -426,25 +591,35 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
   /** Why a text before a set may not be its label, from where it is and how long it is. */
   const doubts = (members: number[], hit: LabelHit): { reasons: GroupingReason[]; placement: 'above' | 'beside' | 'far' } => {
     const label = blocks[hit.block]!;
+    const text = labelText(hit);
+    const box = labelBox(hit);
     const set = boxOf(members);
     const firstRow = boxOf([members[0]!]);
     const size = label.style.size || controls[members[0]!]!.fontSize;
-    const placement = labelPlacement(label.box, set, firstRow, size, config);
+    const placement = labelPlacement(box, set, firstRow, size, config);
     const reasons: GroupingReason[] = [];
     if (placement === 'far') reasons.push('labelFar');
-    if (freeTextOf(label).length > config.labelMaxChars || label.lines > config.labelMaxLines) reasons.push('labelLong');
-    else if (isSentence(freeTextOf(label), config)) reasons.push('labelSentence');
+    if (text.length > config.labelMaxChars || label.lines > config.labelMaxLines) reasons.push('labelLong');
+    else if (isSentence(text, config)) reasons.push('labelSentence');
     if (placement === 'above' && hit.previous !== null) {
       const before = controls[hit.previous]!.box;
-      const fromPrevious = label.box.y - bottom(before);
-      const toSet = set.y - bottom(label.box);
+      const fromPrevious = box.y - bottom(before);
+      const toSet = set.y - bottom(box);
       if (fromPrevious >= -tolerance && fromPrevious < config.hintNearerShare * toSet) reasons.push('labelNearerPrevious');
     }
     return { reasons, placement };
   };
 
   const found: GroupingCandidate[] = [];
-  const report: Omit<GroupingReport, 'candidates' | 'omitted' | 'merged'> = { sets: 0, setsAssociated: 0, setsWithoutLabel: 0, rows: 0, controlsInTables: 0, controlsInWidgets: 0 };
+  const report: Omit<GroupingReport, 'candidates' | 'omitted' | 'merged' | 'heldAtLimit'> = {
+    sets: 0,
+    setsAssociated: 0,
+    setsWithoutLabel: 0,
+    setsOverMaxSize: 0,
+    rows: 0,
+    controlsInTables: 0,
+    controlsInWidgets: 0,
+  };
   for (const control of controls) {
     if (control.inWidget) report.controlsInWidgets++;
     else if (control.cell >= 0) report.controlsInTables++;
@@ -499,10 +674,14 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
   }
 
   for (const members of sets) {
-    if (members.length < config.minSetSize || members.length > config.maxSetSize) continue;
+    if (members.length < config.minSetSize) continue;
+    if (members.length > config.maxSetSize) {
+      report.setsOverMaxSize++;
+      continue;
+    }
     report.sets++;
     const first = controls[members[0]!]!;
-    const hit = findLabel(members);
+    const hit = findLabel(members, true);
     if (!hit) {
       report.setsWithoutLabel++;
       continue;
@@ -516,15 +695,24 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       report.setsAssociated++;
       continue;
     }
-    const label = blocks[hit.block]!;
+    const text = labelText(hit);
     const doubt = doubts(members, hit);
     const reasons = [...doubt.reasons, ...tie.reasons];
     const memberNames = members.map((index) => names[index]!);
     const ambiguous = namesAreAmbiguous(memberNames, config);
     const switches = members.every((index) => controls[index]!.switch === true);
+    // Checkboxes that markup does not tie to each other, one of which stands for itself: lines of consent.
+    const oneName = first.setKey !== '' && members.every((index) => controls[index]!.setKey === first.setKey);
+    const standsAlone = (control: GroupingControl): boolean => control.required === true || control.linkedLabel === true || isSentence(control.name, config);
+    if (first.kind === 'checkbox' && !switches && !oneName && members.some((index) => standsAlone(controls[index]!))) reasons.push('independentControls');
     const flags = [first.kind === 'radio' ? 'radios' : 'checkboxes', ...tie.flags];
+    if (hit.line.length > 0) flags.push('labelLine');
     let base: 'likely' | 'advisory' = 'likely';
-    if (hit.kind === 'heading' || hit.kind === 'disclosure') {
+    if (hit.kind === 'description') {
+      // Tied to each control as its description, which is read with it, but not as the name of a group.
+      flags.push('describedBy');
+      base = 'advisory';
+    } else if (hit.kind === 'heading' || hit.kind === 'disclosure') {
       flags.push(hit.kind === 'heading' ? 'headingLabel' : 'disclosureLabel');
       base = headingStatus;
     } else if (switches) {
@@ -536,10 +724,10 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     }
     if (first.proxied) flags.push('styledLabels');
     if (doubt.placement === 'beside') flags.push('labelBeside');
-    const status = top(reasons.length > 0 ? 'info' : base);
+    const { status, axFlags } = settle(reasons.length > 0 ? 'info' : base, members);
     const plain = hit.kind === 'text' && !switches && ambiguous;
-    const adjudicate = survey.axComplete && plain && reasons.every((reason) => JUDGEMENT_REASONS.has(reason));
-    const named = place(members, hit.block, SET_FINGERPRINT_RULE);
+    const adjudicate = axFlags.length === 0 && plain && reasons.every((reason) => JUDGEMENT_REASONS.has(reason));
+    const named = place(members, [...hit.line, hit.block], SET_FINGERPRINT_RULE);
     const key = `set:${members[0]!}`;
     const shown = shownNames(members);
     found.push({
@@ -551,18 +739,18 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       status,
       selector: named.selector,
       frame: first.frame,
-      box: unionBox(boxOf(members), label.box),
+      box: unionBox(boxOf(members), labelBox(hit)),
       container: named.container,
-      capture: { blocks: [hit.block], controls: members, target: hit.block },
-      order: Math.min(first.ord, label.at),
+      capture: { blocks: [...hit.line, hit.block], controls: members, target: hit.line.length > 0 ? -1 : hit.block },
+      order: Math.min(first.ord, blocks[hit.line[0] ?? hit.block]!.at),
       controls: members.length,
-      label: cut(freeTextOf(label), config.itemTextMaxChars * 2),
+      label: cut(text, config.itemTextMaxChars * 2),
       names: shown,
       flags: [...flags, ...reasons, ...axFlags],
       reasons,
       values: {
         controls: members.length,
-        label: cut(freeTextOf(label), config.itemTextMaxChars * 2),
+        label: cut(text, config.itemTextMaxChars * 2),
         names: shown.join(' | '),
         shortNames: memberNames.filter((name) => isShortName(name, config)).length,
         labelPlacement: doubt.placement,
@@ -572,7 +760,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       context: {
         controls: first.kind === 'radio' ? 'radio buttons' : switches ? 'switches' : 'checkboxes',
         count: members.length,
-        visibleText: cut(freeTextOf(label), config.labelMaxChars),
+        visibleText: cut(text, config.labelMaxChars),
         textIs: hit.kind,
         textPlacement: doubt.placement,
         controlNames: members.slice(0, config.contextMaxItems).map((index) => cut(controls[index]!.name, config.itemTextMaxChars)),
@@ -624,23 +812,46 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     const tightGroup =
       hit !== null && hit.kind === 'group' && GROUP_ROLES.has(groups[hit.group]!.role) && groupSize[hit.group]! - members.length <= config.groupExtraControlsMax;
     const doubt = hit !== null && hit.kind !== 'group' ? doubts(members, hit) : null;
-    const near = doubt !== null && doubt.reasons.length === 0;
+    // A text is the label of the row when it is near and spans the row or stands at its start: a
+    // text that is over one of the later parts only, or that is the name of a later part and not
+    // of the first, is the caption of that part ("Day", "Month", "Year" over three fields).
+    const captionOfPart = (own: LabelHit): boolean => {
+      const text = norm(labelText(own));
+      if (text !== '' && partNames[0] !== text && partNames.includes(text)) return true;
+      const box = labelBox(own);
+      if (bottom(box) > Math.min(...members.map((index) => controls[index]!.box.y)) + tolerance) return false;
+      const under = members.filter((index) => Math.min(right(box), right(controls[index]!.box)) - Math.max(box.x, controls[index]!.box.x) > tolerance);
+      return under.length === 1 && under[0] !== members[0];
+    };
+    const near = doubt !== null && doubt.reasons.length === 0 && hit !== null && !captionOfPart(hit);
     const shared = hit !== null && (near || tightGroup);
-    const sharedText = hit === null || !shared ? '' : hit.kind === 'group' ? norm(groups[hit.group]!.name) : norm(freeTextOf(blocks[hit.block]!));
+    const sharedText = hit === null || !shared ? '' : hit.kind === 'group' ? norm(groups[hit.group]!.name) : norm(labelText(hit));
     // A visible label is tied to one part, by `label` or `aria-labelledby`.
-    const labelled = members.some((index) => labelBlocks[index]!.length > 0);
+    const visiblyLabelled = (index: number): boolean => labelBlocks[index]!.length > 0;
+    const labelled = members.some(visiblyLabelled);
     // Two parts with one name. Not when every field has a visible label of its own: those are
     // fields of their own whose labels have the same words, which is no matter of grouping.
-    const duplicate = partNames.some((name, at) => name !== '' && partNames.indexOf(name) !== at) && !members.every((index) => labelBlocks[index]!.length > 0);
+    const duplicate = partNames.some((name, at) => name !== '' && partNames.indexOf(name) !== at) && !members.every(visiblyLabelled);
     const unnamed = partNames.some((name) => name === '');
     const asWhole = sharedText !== '' && partNames.some((name) => name === sharedText);
+    // The only visible label is tied to the first part, and a later part has no name but its
+    // placeholder ("MM" under the label "Expiry date", then "YY"). When the first part shows a
+    // placeholder of its own that is not its name, that label is not the name of its part: it
+    // stands for the row. Without that, the label may be that of the first field alone.
+    const placeholderOf = (index: number): string => norm(controls[index]!.placeholder ?? '');
+    const byPlaceholder = (index: number): boolean => !visiblyLabelled(index) && placeholderOf(index) !== '' && names[index] === placeholderOf(index);
+    const oneLabel = visiblyLabelled(members[0]!) && members.slice(1).every((index) => !visiblyLabelled(index));
+    const placeholderPart = oneLabel && !unnamed && members.slice(1).some(byPlaceholder);
+    const firstHinted = placeholderOf(members[0]!) !== '' && placeholderOf(members[0]!) !== names[members[0]!];
     const flags = ['fields'];
     if (duplicate) flags.push('duplicateNames');
     if (unnamed && (shared || labelled)) flags.push('unnamedPart');
     if (asWhole) flags.push('namedAsWhole');
-    const likely = flags.length > 1;
+    const likely = flags.length > 1 || (placeholderPart && firstHinted);
+    if (placeholderPart) flags.push('placeholderPart');
     let status: 'likely' | 'advisory';
     if (likely) status = 'likely';
+    else if (placeholderPart) status = 'advisory';
     else {
       // Named part by part. Advisory when a plain text stands over the row and nothing ties it to the fields.
       if (hit === null || hit.kind !== 'text' || !near) continue;
@@ -649,14 +860,14 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       flags.push(...tie.flags);
       status = 'advisory';
     }
-    const labelBlock = hit !== null && hit.kind !== 'group' && near ? hit.block : null;
-    const labelText = hit === null || !shared ? '' : hit.kind === 'group' ? groups[hit.group]!.name : freeTextOf(blocks[hit.block]!);
-    const named = place(members, labelBlock, ROW_FINGERPRINT_RULE);
+    const labelBlocksOfRow = hit !== null && hit.kind !== 'group' && near ? [...hit.line, hit.block] : null;
+    const rowLabel = hit === null || !shared ? '' : hit.kind === 'group' ? groups[hit.group]!.name : labelText(hit);
+    const named = place(members, labelBlocksOfRow, ROW_FINGERPRINT_RULE);
     const key = `row:${members[0]!}`;
     const shown = shownNames(members);
     const own = [...new Set(members.flatMap((index) => labelBlocks[index]!))].filter((index) => blocks[index]!.frame === first.frame);
-    const box = labelBlock !== null ? unionBox(boxOf(members), blocks[labelBlock]!.box) : boxOf(members);
-    const reported = top(status);
+    const box = (labelBlocksOfRow ?? []).reduce((all, index) => unionBox(all, blocks[index]!.box), boxOf(members));
+    const { status: reported, axFlags } = settle(status, members);
     rowDrafts.push({
       members,
       candidate: {
@@ -670,16 +881,16 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
         frame: first.frame,
         box,
         container: named.container,
-        capture: { blocks: [...(labelBlock !== null ? [labelBlock] : []), ...own], controls: members, target: -1 },
+        capture: { blocks: [...(labelBlocksOfRow ?? []), ...own], controls: members, target: -1 },
         order: from,
         controls: members.length,
-        label: cut(labelText, config.itemTextMaxChars * 2),
+        label: cut(rowLabel, config.itemTextMaxChars * 2),
         names: shown,
         flags: [...flags, ...axFlags],
         reasons: [],
         values: {
           controls: members.length,
-          label: cut(labelText, config.itemTextMaxChars * 2),
+          label: cut(rowLabel, config.itemTextMaxChars * 2),
           names: shown.join(' | '),
           unnamedParts: partNames.filter((name) => name === '').length,
           lastPosition: to,
@@ -702,7 +913,8 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
   const namedAround = controls.map((control) => holding(control.ord, control.ord).find((index) => groups[index]!.name !== '') ?? -1);
   controls.forEach((control, index) => {
     if (control.kind !== 'field' || !usable(control)) return;
-    const scope = `${control.frame}\u0000${control.form}\u0000${control.form < 0 ? control.region : ''}`;
+    // One form, and inside it one region: log in at the top of a page and sign up in its main part are not two sections of one thing.
+    const scope = `${control.frame}\u0000${control.form}\u0000${control.region}`;
     const sections = scopes.get(scope) ?? [];
     if (!scopes.has(scope)) scopes.set(scope, sections);
     const name = names[index]!;
@@ -724,6 +936,9 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       return at;
     };
     const sharedBy = new Map<number, Set<string>>();
+    /** Pairs of sections with the same names, and whether the tokens of `autocomplete` tell every such field from its twin. */
+    const pairs: { a: number; toldApart: boolean }[] = [];
+    const scopeOf = (index: number): string => controls[index]!.autofillScope ?? '';
     for (let a = 0; a < sections.length; a++) {
       for (let b = a + 1; b < sections.length; b++) {
         const one = sections[a]!;
@@ -737,6 +952,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
           if (norm(controls[index]!.description) === norm(controls[twin]!.description)) same.push(name);
         }
         if (same.length < config.duplicateMinShared) continue;
+        pairs.push({ a, toldApart: same.every((name) => scopeOf(one.byName.get(name)!) !== scopeOf(other.byName.get(name)!)) });
         parent[root(b)] = root(a);
         for (const at of [a, b]) {
           const known = sharedBy.get(at) ?? new Set<string>();
@@ -769,12 +985,15 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
       // Without a form around them, that the sections belong to one form is not known: two
       // examples on a page of documentation have the same field names as well.
       const noForm = first.form < 0;
-      const flags = ['fields', ...(underHeadings ? ['headingLabel'] : []), ...(noForm ? ['noForm'] : [])];
-      const status = top(noForm ? 'info' : underHeadings ? headingStatus : 'likely');
+      // `section-*`, `shipping` and `billing` in `autocomplete` say which section a field is in, to the browser if not to a screen reader.
+      const own = pairs.filter((pair) => root(pair.a) === root(component[0]!));
+      const byAutocomplete = own.length > 0 && own.every((pair) => pair.toldApart);
+      const flags = ['fields', ...(underHeadings ? ['headingLabel'] : []), ...(noForm ? ['noForm'] : []), ...(byAutocomplete ? ['autocompleteSections'] : [])];
+      const { status, axFlags } = settle(noForm || byAutocomplete ? 'info' : underHeadings ? sectionsUnderHeadingsStatus : 'likely', spans.flat());
       const named = place(anchor, null, DUPLICATE_NAMES_RULE);
       const key = `sections:${sectionKey++}:${anchor[0]!}`;
       const labelBlock = anchorLabel !== null && anchorLabel.kind !== 'group' && doubts(anchor, anchorLabel).reasons.length === 0 ? anchorLabel.block : null;
-      const own = [...new Set(anchor.flatMap((index) => labelBlocks[index]!))].filter((index) => blocks[index]!.frame === first.frame);
+      const ownLabels = [...new Set(anchor.flatMap((index) => labelBlocks[index]!))].filter((index) => blocks[index]!.frame === first.frame);
       // As the page writes them, not as they are compared.
       const anchorSection = sections[component[1]!]!;
       const shownShared = sharedNames.slice(0, config.messageItems).map((name) => cut(controls[anchorSection.byName.get(name)!]?.name ?? name, config.itemTextMaxChars));
@@ -790,7 +1009,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
         frame: first.frame,
         box: labelBlock !== null ? unionBox(boxOf(anchor), blocks[labelBlock]!.box) : boxOf(anchor),
         container: named.container,
-        capture: { blocks: [...(labelBlock !== null ? [labelBlock] : []), ...own], controls: anchor, target: -1 },
+        capture: { blocks: [...(labelBlock !== null ? [labelBlock] : []), ...ownLabels], controls: anchor, target: -1 },
         order: first.ord,
         controls: anchor.length,
         label: labelBlock !== null ? cut(freeTextOf(blocks[labelBlock]!), config.itemTextMaxChars * 2) : '',
@@ -831,6 +1050,7 @@ export function groupingReport(survey: GroupingSurvey, config: GroupingConfig): 
     candidates: ordered.slice(0, config.maxCandidates),
     omitted: Math.max(0, ordered.length - config.maxCandidates),
     merged: sorted.length - ordered.length,
+    heldAtLimit,
     ...report,
   };
 }

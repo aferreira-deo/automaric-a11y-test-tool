@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: review-sets</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      .opt { margin: 4px 0; }
+      label.o { display: block; margin: 4px 0; }
+      input[type="text"] { font: inherit; padding: 4px 8px; border: 1px solid #595959; }
+      /* A label laid out as a flex line, as component libraries do: each run of text is a box of its own. */
+      .flexlabel { display: inline-flex; gap: 4px; margin: 0 0 8px; }
+      .flexlabel span { color: #595959; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sets found in review</h1>
+      <p>Sets of radios and checkboxes that were reported wrongly, or at the wrong status, when the check was reviewed. Each comment says what is expected.</p>
+
+      <!-- The question is in the name of every option, set off by punctuation: nothing. -->
+      <div class="case" id="r-name-colon">
+        <p class="q">Size</p>
+        <div class="opt"><input type="radio" name="r1" aria-label="Size: S" /><span aria-hidden="true"> S</span></div>
+        <div class="opt"><input type="radio" name="r1" aria-label="Size: M" /><span aria-hidden="true"> M</span></div>
+      </div>
+      <div class="case" id="r-name-comma">
+        <p class="q">Marital status</p>
+        <label class="o"><input type="radio" name="r2" aria-label="Marital status, single" /> Single</label>
+        <label class="o"><input type="radio" name="r2" aria-label="Marital status, married" /> Married</label>
+      </div>
+      <div class="case" id="r-name-dash">
+        <p class="q">Newsletter frequency:</p>
+        <div class="opt"><input type="radio" name="r3" aria-label="Newsletter frequency – daily" /><span aria-hidden="true"> Daily</span></div>
+        <div class="opt"><input type="radio" name="r3" aria-label="(Newsletter frequency) weekly" /><span aria-hidden="true"> Weekly</span></div>
+      </div>
+      <!-- The words of the text inside a longer word of the names are not the question: likely. -->
+      <div class="case" id="r-name-inside-word">
+        <p class="q">Art</p>
+        <label class="o"><input type="radio" name="r4" /> Party</label>
+        <label class="o"><input type="radio" name="r4" /> Cart</label>
+      </div>
+
+      <!-- Names that stand on their own, in Japanese and in English: advisory for both. -->
+      <div class="case" id="r-cjk-long">
+        <p class="q">お知らせの設定</p>
+        <label class="o"><input type="checkbox" /> 毎月のニュースレターをメールで受け取る</label>
+        <label class="o"><input type="checkbox" /> 新製品に関するお知らせを受け取る</label>
+      </div>
+      <div class="case" id="r-en-long">
+        <p class="q">Notification settings</p>
+        <label class="o"><input type="checkbox" /> Receive the monthly newsletter by email</label>
+        <label class="o"><input type="checkbox" /> Receive announcements about new products</label>
+      </div>
+
+      <!-- A sentence of prose before the set, in Japanese and in English: info for both. -->
+      <div class="case" id="r-cjk-sentence">
+        <p class="q">以下の項目は任意です。必要に応じて選択してください。</p>
+        <label class="o"><input type="radio" name="r5" /> はい</label>
+        <label class="o"><input type="radio" name="r5" /> いいえ</label>
+      </div>
+      <div class="case" id="r-en-sentence">
+        <p class="q">The following items are optional and can be skipped.</p>
+        <label class="o"><input type="radio" name="r6" /> Yes</label>
+        <label class="o"><input type="radio" name="r6" /> No</label>
+      </div>
+      <!-- A question and short names in Japanese: likely, as in English. -->
+      <div class="case" id="r-cjk-question">
+        <p class="q">車をお持ちですか？</p>
+        <label class="o"><input type="radio" name="r7" /> はい</label>
+        <label class="o"><input type="radio" name="r7" /> いいえ</label>
+      </div>
+
+      <!-- The question is the description of every option: advisory, with that text, not the one before it. -->
+      <div class="case" id="r-described">
+        <p class="q">Vehicle details</p>
+        <p class="q" id="r8q">Do you own a boat?</p>
+        <div class="opt"><input type="radio" name="r8" id="r8y" aria-describedby="r8q" /><label for="r8y"> Yes</label></div>
+        <div class="opt"><input type="radio" name="r8" id="r8n" aria-describedby="r8q" /><label for="r8n"> No</label></div>
+      </div>
+      <!-- A hint in a sentence that describes every option, under the question: the question is the label, likely. -->
+      <div class="case" id="r-described-hint">
+        <p class="q">Do you own a bike?</p>
+        <p class="q" id="r9h" style="margin: 0 0 4px">You can change this answer later in your account.</p>
+        <div class="opt"><input type="radio" name="r9" id="r9y" aria-describedby="r9h" /><label for="r9y"> Yes</label></div>
+        <div class="opt"><input type="radio" name="r9" id="r9n" aria-describedby="r9h" /><label for="r9n"> No</label></div>
+      </div>
+
+      <!-- A note about required fields is the label of nothing. -->
+      <form action="#" class="case" id="r-required-note">
+        <p class="q">* Required</p>
+        <label class="o"><input type="radio" name="r10" required /> Mr</label>
+        <label class="o"><input type="radio" name="r10" /> Mrs</label>
+      </form>
+      <form action="#" class="case" id="r-required-note-brackets">
+        <p class="q">(*) Pflichtfeld</p>
+        <label class="o"><input type="radio" name="r11" /> Ja</label>
+        <label class="o"><input type="radio" name="r11" /> Nein</label>
+      </form>
+      <!-- A label that ends with the asterisk of a required set is still a label: likely. -->
+      <form action="#" class="case" id="r-required-label">
+        <p class="q">Title *</p>
+        <label class="o"><input type="radio" name="r12" /> Mr</label>
+        <label class="o"><input type="radio" name="r12" /> Mrs</label>
+      </form>
+
+      <!-- Consent lines under the title of a step: checkboxes that stand for themselves, info. -->
+      <form action="#" class="case" id="r-consent-link">
+        <p class="q b">Almost done</p>
+        <div class="opt"><input type="checkbox" id="r13a" /><label for="r13a"> I agree to the <a href="#terms">terms</a></label></div>
+        <div class="opt"><input type="checkbox" id="r13b" /><label for="r13b"> Newsletter</label></div>
+      </form>
+      <form action="#" class="case" id="r-consent-required">
+        <p class="q b">Last step</p>
+        <div class="opt"><input type="checkbox" id="r14a" required /><label for="r14a"> I agree</label></div>
+        <div class="opt"><input type="checkbox" id="r14b" /><label for="r14b"> Newsletter</label></div>
+      </form>
+      <form action="#" class="case" id="r-consent-sentence">
+        <p class="q b">Before you send</p>
+        <div class="opt"><input type="checkbox" id="r15a" /><label for="r15a"> I have read the privacy notice.</label></div>
+        <div class="opt"><input type="checkbox" id="r15b" /><label for="r15b"> Send me the newsletter.</label></div>
+      </form>
+      <!-- Checkboxes of one `name` are one answer, link or not: likely. -->
+      <form action="#" class="case" id="r-named-checkboxes">
+        <p class="q b">Interests</p>
+        <div class="opt"><input type="checkbox" name="interest" id="r16a" /><label for="r16a"> <a href="#art">Art</a></label></div>
+        <div class="opt"><input type="checkbox" name="interest" id="r16b" /><label for="r16b"> Music</label></div>
+      </form>
+
+      <!-- A label in two boxes on one line, tied to no control (its `for` names the group, not a control): the whole line is the label. -->
+      <div class="case" id="r-line-label">
+        <div><label class="flexlabel" for="r17g">Required mark<span>(optional)</span></label></div>
+        <div id="r17g">
+          <label><input type="radio" name="r17" /> Default</label>
+          <label><input type="radio" name="r17" /> Hidden</label>
+        </div>
+      </div>
+      <!-- A fragment on the line of the label of another control belongs to that label: nothing. -->
+      <div class="case" id="r-line-bound">
+        <div><label class="flexlabel" for="r18t">Nickname</label> <span>(optional)</span></div>
+        <div>
+          <label><input type="radio" name="r18" /> Show</label>
+          <label><input type="radio" name="r18" /> Hide</label>
+        </div>
+        <select id="r18t" style="display: none"><option>a</option></select>
+      </div>
+    </main>
+  </body>
+</html>

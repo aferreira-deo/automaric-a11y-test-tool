@@ -7,8 +7,9 @@ import type { StablePage } from './page.js';
  * Reads what the grouping check works from and captures what it reports.
  *
  * The form controls, their roles, names and descriptions, and the groups around them are those
- * the accessibility tree exposes: `markAccessibility` marked them before this runs, and
- * `axComplete` says whether that could be done in full. The text of the page is read as for the
+ * the accessibility tree exposes: `markAccessibility` marked them before this runs,
+ * `axComplete` says whether the tree could be read, and `unmarkedControls` how many controls
+ * stand after the last one that was marked (the survey says where: `unread`). The text of the page is read as for the
  * headings check (the same walk, with the settings of `headings`), with what the grouping check
  * needs on top: where each text stands among the controls, and what it is tied to (a control
  * through `label` or `aria-labelledby`, a group through `legend` or `aria-labelledby`, anything
@@ -22,10 +23,10 @@ import type { StablePage } from './page.js';
  * positions are put back by `withStablePage`. Nothing else on the page is touched: no control
  * is focused, changed or submitted.
  */
-export async function collectGrouping(page: StablePage, config: Config, axComplete: boolean): Promise<GroupingSurvey> {
+export async function collectGrouping(page: StablePage, config: Config, axComplete: boolean, unmarkedControls = 0): Promise<GroupingSurvey> {
   const { agent } = page;
   const read = await agent<AgentGroupingSurvey>('groupingSurvey()');
-  const survey: GroupingSurvey = { ...read, axComplete, containers: {}, captures: {} };
+  const survey: GroupingSurvey = { ...read, axComplete, unmarkedControls, containers: {}, captures: {} };
 
   // The elements that hold the controls: named now that core has said which ones it reports.
   const wanted = [...new Set(groupingReport(survey, config.grouping).candidates.flatMap((candidate) => (candidate.container === null ? [] : [candidate.container])))];

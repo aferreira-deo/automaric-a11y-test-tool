@@ -143,7 +143,7 @@ async function collectOnce(cdp: CdpSession, config: Config): Promise<Snapshot> {
         });
         if (headings) snapshot.headings = await collectHeadings(page, config.headings, exposed.headings);
         if (lists) snapshot.lists = await collectLists(page, config, exposed.headings && exposed.lists);
-        if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping);
+        if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
     });
     // The captures were taken at this scale, whatever the page had before.

@@ -604,6 +604,14 @@ export interface GroupingControl {
   rtl: boolean;
   /** The role is switch: an on/off setting, which stands for itself more often than an option of a set does. */
   switch?: boolean;
+  /** The accessibility tree says the control is required on its own (the property `required`). */
+  required?: boolean;
+  /** A link stands in the label of the control, or in the control itself: a line of consent ("I agree to the terms"). */
+  linkedLabel?: boolean;
+  /** The placeholder of a field, cut like a name, when it has one. Compared with the name: a name that is the placeholder comes from nothing else that shows. */
+  placeholder?: string;
+  /** The tokens of `autocomplete` that say which section or which address a field belongs to (`section-*`, `shipping`, `billing`), in lower case. */
+  autofillScope?: string;
 }
 
 /** An element the accessibility tree exposes as a container that can name what it holds. */
@@ -641,6 +649,8 @@ export interface GroupingBlock {
   group: number;
   /** A target of `aria-describedby` of a control or a group. */
   describes: boolean;
+  /** The controls (indexes into `controls`) all of this text is the description of, through `aria-describedby`. */
+  described?: number[];
   /** Inside a `label` that belongs to a control which is not among `controls` (not exposed, or beyond the limit). */
   otherLabel: boolean;
   /** Inside a control: the text of a custom radio, the value of an editable box. */
@@ -672,11 +682,19 @@ export interface GroupingSurvey {
   /** Blocks found, including those beyond `headings.maxBlocks`. */
   totalBlocks: number;
   /**
-   * False when the accessibility tree of a document the survey looked into could not be read, or
-   * held more controls or groups than can be marked: names and groups are then not known in full,
-   * and nothing is reported above `info`.
+   * False when the accessibility tree of a document the survey looked into could not be read:
+   * names and groups are then not known, and nothing is reported above `info`.
    */
   axComplete: boolean;
+  /**
+   * Where reading stopped in a document that has more controls or more groups than are marked
+   * (`maxAxMarks`): from the position `from` on, in document order, the controls and groups of
+   * the document `frame` are not known. What stands before is known in full; only what reaches
+   * such a position is held back as `info`.
+   */
+  unread?: { frame: string; from: number }[];
+  /** Controls the accessibility tree exposes that were not marked, in all documents: beyond `maxAxMarks`. */
+  unmarkedControls?: number;
   /** Selectors of the elements that hold what is reported, by their position. Filled by the collector for the elements core names. */
   containers: Record<string, string>;
   /** Captures, by `GroupingCandidate.key`. */
@@ -1478,7 +1496,11 @@ export interface AdjudicationConfig {
 export interface GroupingConfig {
   /** At most this many form controls are read from the page, in document order. The survey says when there were more. */
   maxControls: number;
-  /** At most this many controls, and this many named containers, are marked from the accessibility tree of one document. Beyond it nothing is above `info`. */
+  /**
+   * At most this many controls, and this many named containers, are marked from the accessibility
+   * tree of one document, in document order. What stands after the last one is not read; a set
+   * that reaches that point is `info`, the sets before it keep their status.
+   */
   maxAxMarks: number;
   /** Accessible names and descriptions are cut to this many characters. */
   maxNameChars: number;
@@ -1499,7 +1521,7 @@ export interface GroupingConfig {
   minControlSizeCssPx: number;
   /** Radios or checkboxes that make a set. */
   minSetSize: number;
-  /** A set with more controls than this is not looked at as one question (a long form of independent checkboxes). */
+  /** A set with more controls than this is not looked at as one question (a long form of independent checkboxes). The survey counts them. */
   maxSetSize: number;
   /** A text above a set is its possible label when no further above it than this, in font sizes of the text. */
   labelMaxGapEm: number;
@@ -1521,6 +1543,28 @@ export interface GroupingConfig {
    */
   labelSentenceEndPattern: string;
   labelSentenceMinWords: number;
+  /**
+   * Characters of scripts that are written without spaces between words (Chinese, Japanese,
+   * Thai, Lao, Khmer, Burmese). A run of text that holds one is cut into words by
+   * `Intl.Segmenter`, which is part of ECMAScript and neither of the DOM nor of Node; where it is
+   * missing, every `unspacedCharsPerWord` characters count as one word. Words are only counted,
+   * for `shortNameMaxWords` and `labelSentenceMinWords`: a name or a sentence in Japanese then
+   * gets the status of its English equivalent.
+   */
+  unspacedScriptPattern: string;
+  unspacedCharsPerWord: number;
+  /**
+   * A text that opens this way is a note about the marks of a form ("* Required", "(*) Pflichtfeld")
+   * and the label of nothing: an asterisk or a dagger, in brackets or not, before the first letter.
+   * The mark only: no word of any language. A label that ends with the asterisk ("Title *") is a label.
+   */
+  labelNotePattern: string;
+  /**
+   * Two texts on one visual line, no further apart than this, in font sizes, are one label when
+   * neither is tied to anything ("Required mark" and "(optional)" in two boxes of a flex line).
+   * When the one before is the label of a control, the one after belongs to that label and is taken for nothing.
+   */
+  labelLineMaxGapEm: number;
   /** Hints and other text that is no label (a description, a link, a button), passed over between a set and the text before it, at most. */
   labelMaxSkipped: number;
   /**
@@ -1564,6 +1608,12 @@ export interface GroupingConfig {
    * controls. `advisory` by default; `likely` reports such sets like the others.
    */
   headingLabelStatus: 'advisory' | 'likely';
+  /**
+   * Status of sections with the same field names when each stands under a heading. `likely` by
+   * default, which is what section 3E of the brief says: a heading is exposed as structure, but
+   * it does not tell the names apart programmatically. `advisory` lowers it. Never `fail`.
+   */
+  duplicateUnderHeadingsStatus: 'advisory' | 'likely';
   /** Names shown in a message, at most. */
   messageItems: number;
   /** Each cut to this many characters. */

@@ -7,6 +7,9 @@ interface FrameTree {
 }
 
 interface AxNode {
+  nodeId?: string;
+  parentId?: string;
+  childIds?: string[];
   ignored?: boolean;
   role?: { value?: unknown };
   name?: { value?: unknown };
@@ -52,13 +55,50 @@ const NAMED_CONTAINER_ROLES = ['region', 'form', 'dialog', 'alertdialog', 'tabpa
 /** Elements marked in the page at once. */
 const BATCH = 24;
 
+/**
+ * The nodes of an accessibility tree in document order. `Accessibility.getFullAXTree` gives them
+ * level by level (verified against Chrome: the children of the root, then their children, and
+ * so on), so that the first nodes of its answer are not the first of the page: read from parent
+ * to child here, each node before what it holds. A node that cannot be reached that way keeps
+ * its place at the end.
+ */
+export function inDocumentOrder<T extends { nodeId?: string; parentId?: string; childIds?: string[] }>(nodes: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const node of nodes) if (node.nodeId !== undefined) byId.set(node.nodeId, node);
+  const seen = new Set<T>();
+  const ordered: T[] = [];
+  const walk = (start: T): void => {
+    const stack: T[] = [start];
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      ordered.push(node);
+      const children = node.childIds ?? [];
+      for (let index = children.length - 1; index >= 0; index--) {
+        const child = byId.get(children[index]!);
+        if (child && !seen.has(child)) stack.push(child);
+      }
+    }
+  };
+  for (const node of nodes) if (node.parentId === undefined || !byId.has(node.parentId)) walk(node);
+  for (const node of nodes) if (!seen.has(node)) walk(node);
+  return ordered;
+}
+
 export interface AccessibilityMarks {
   /** False when a document could not be read or a heading could not be matched to its element. */
   headings: boolean;
   /** False when a document could not be read, a list could not be matched, or a document has more lists than `maxLists`. */
   lists: boolean;
-  /** False when a document could not be read, a control or a group could not be matched, or a document has more of either than `grouping.maxMarks`. */
+  /** False when a document could not be read, or a control or a group could not be matched. */
   grouping: boolean;
+  /**
+   * Controls the accessibility tree exposes that were not marked, in all documents: those after
+   * the first `grouping.maxMarks` of a document, in document order. The page knows where reading
+   * stopped in each such document (`markUnread`).
+   */
+  groupingUnmarked: number;
 }
 
 /**
@@ -78,7 +118,7 @@ export async function markAccessibility(
   want: { lists: boolean; maxLists: number; grouping?: { maxMarks: number; maxNameChars: number } | null },
 ): Promise<AccessibilityMarks> {
   const { cdp } = page;
-  const complete: AccessibilityMarks = { headings: true, lists: true, grouping: true };
+  const complete: AccessibilityMarks = { headings: true, lists: true, grouping: true, groupingUnmarked: 0 };
   /** A name or a description as the tree gives it, white space collapsed, cut to the limit. */
   const textOf = (value: unknown, max: number): string => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '');
 
@@ -107,7 +147,9 @@ export async function markAccessibility(
       if (!readable) return;
     }
     try {
-      const { nodes } = (await cdp.send('Accessibility.getFullAXTree', { frameId: tree.frame.id })) as { nodes: AxNode[] };
+      const read = (await cdp.send('Accessibility.getFullAXTree', { frameId: tree.frame.id })) as { nodes: AxNode[] };
+      // In document order: what is marked first, when there is more than is marked, is what comes first in the page.
+      const nodes = want.grouping ? inDocumentOrder(read.nodes) : read.nodes;
       const lists: number[] = [];
       const controls: { id: number; call: string }[] = [];
       const groups: { id: number; call: string }[] = [];
@@ -127,22 +169,30 @@ export async function markAccessibility(
           const max = want.grouping.maxNameChars;
           const name = textOf(node.name?.value, max);
           if (CONTROL_ROLES.includes(role)) {
+            const required = node.properties?.find((property) => property.name === 'required')?.value?.value === true;
             controls.push({
               id: node.backendDOMNodeId,
-              call: `markControl(this, ${JSON.stringify(role)}, ${JSON.stringify(name)}, ${JSON.stringify(textOf(node.description?.value, max))})`,
+              call: `markControl(this, ${JSON.stringify(role)}, ${JSON.stringify(name)}, ${JSON.stringify(textOf(node.description?.value, max))}, ${required})`,
             });
           } else if (GROUP_ROLES.includes(role) || (NAMED_CONTAINER_ROLES.includes(role) && name !== '')) {
             groups.push({ id: node.backendDOMNodeId, call: `markGroup(this, ${JSON.stringify(role)}, ${JSON.stringify(name)})` });
           }
         }
       }
-      // Bounded, as for lists: beyond the limit, names and groups are not known in full for this document.
+      // Bounded: the first of each, in document order. Beyond them names and groups are not
+      // known for this document, and the page is told where that starts: what stands before
+      // that element was read in full.
       for (const marks of want.grouping ? [controls, groups] : []) {
-        if (marks.length > want.grouping!.maxMarks) complete.grouping = false;
         const bounded = marks.slice(0, want.grouping!.maxMarks);
         for (let start = 0; start < bounded.length; start += BATCH) {
           const marked = await Promise.all(bounded.slice(start, start + BATCH).map((mark) => onNode(mark.id, mark.call).catch(() => false)));
           if (marked.some((value) => value !== true)) complete.grouping = false;
+        }
+        const next = marks[bounded.length];
+        if (next) {
+          if (marks === controls) complete.groupingUnmarked += marks.length - bounded.length;
+          const told = await onNode(next.id, 'markUnread(this)').catch(() => false);
+          if (told !== true) complete.grouping = false;
         }
       }
       // Bounded: beyond the limit, which elements are lists is not known for this document.

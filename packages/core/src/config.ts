@@ -222,8 +222,12 @@ export const defaultConfig: Config = {
     labelInlineMaxGapEm: 20,
     labelMaxChars: 160,
     labelMaxLines: 3,
-    labelSentenceEndPattern: '[.\\u3002\\uff0e\\u06d4\\u0964!\\uff01\\u2026][\\p{Pe}\\p{Pf}"\']*$',
+    labelSentenceEndPattern: '[.\\u3002\\uff0e\\uff61\\u06d4\\u0964\\u0589\\u1362\\u104b\\u17d4!\\uff01\\u2026][\\p{Pe}\\p{Pf}"\']*$',
     labelSentenceMinWords: 3,
+    unspacedScriptPattern: '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}\\p{Script=Lao}\\p{Script=Khmer}\\p{Script=Myanmar}]',
+    unspacedCharsPerWord: 3,
+    labelNotePattern: '^[(\\[]?[*\\uff0a\\u2020\\u2021][)\\]]?\\s*[=:\\u2013\\u2014-]?\\s*[\\p{L}\\p{N}]',
+    labelLineMaxGapEm: 1.5,
     labelMaxSkipped: 2,
     hintNearerShare: 0.5,
     sameRowMinOverlap: 0.5,
@@ -237,6 +241,7 @@ export const defaultConfig: Config = {
     splitMaxParts: 6,
     duplicateMinShared: 2,
     headingLabelStatus: 'advisory',
+    duplicateUnderHeadingsStatus: 'likely',
     messageItems: 4,
     itemTextMaxChars: 60,
     contextMaxItems: 12,
@@ -318,6 +323,15 @@ export function clampHeadingLabelStatus(value: unknown): 'advisory' | 'likely' {
   return clampInversionStatus(value, 'advisory');
 }
 
+/**
+ * The status of sections with the same field names under headings, whatever was configured:
+ * `likely` (section 3E of the brief) or `advisory`, and never `fail`. A configured `fail` and
+ * anything else that is not one of the two become `likely`.
+ */
+export function clampDuplicateUnderHeadingsStatus(value: unknown): 'advisory' | 'likely' {
+  return clampInversionStatus(value, 'likely');
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
@@ -389,6 +403,7 @@ export function resolveConfig(input: ConfigInput = {}): Config {
   lists.cardListStatus = clampCardListStatus(lists.cardListStatus);
   const grouping = { ...defaultConfig.grouping, ...input.grouping };
   grouping.headingLabelStatus = clampHeadingLabelStatus(grouping.headingLabelStatus);
+  grouping.duplicateUnderHeadingsStatus = clampDuplicateUnderHeadingsStatus(grouping.duplicateUnderHeadingsStatus);
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
