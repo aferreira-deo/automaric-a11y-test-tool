@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: modal</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .q { margin: 0 0 8px; }
+      label { display: block; margin: 4px 0; }
+      section { margin: 0 0 24px; }
+      dialog { width: 560px; max-height: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>A modal dialog is open over this page. What is outside it is inert and left out of the accessibility tree; what is inside it is not, including what a component of the dialog renders in its shadow tree.</p>
+      <section id="outside">
+        <p class="q">Outside question?</p>
+        <label><input type="radio" name="o" /> Yes</label>
+        <label><input type="radio" name="o" /> No</label>
+      </section>
+    </main>
+    <dialog id="dialog" aria-label="Survey">
+      <section id="inside">
+        <p class="q">Inside question?</p>
+        <label><input type="radio" name="i" /> Yes</label>
+        <label><input type="radio" name="i" /> No</label>
+      </section>
+      <x-panel id="panel"></x-panel>
+      <button type="button">Close</button>
+    </dialog>
+    <script>
+      customElements.define(
+        'x-panel',
+        class extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: 'open' }).innerHTML =
+              '<style>label { display: block; margin: 4px 0; } .q { margin: 0 0 8px; }</style>' +
+              '<section id="shadow"><p class="q">Shadow question?</p><label><input type="checkbox" name="a"> Red</label><label><input type="checkbox" name="b"> Blue</label></section>';
+          }
+        },
+      );
+      document.getElementById('dialog').showModal();
+    </script>
+  </body>
+</html>

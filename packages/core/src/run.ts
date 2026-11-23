@@ -1,4 +1,5 @@
 import { focusIndicatorCheck } from './checks/focus-indicator.js';
+import { groupingCheck } from './checks/grouping.js';
 import { headingsCheck } from './checks/headings.js';
 import { iconContrastCheck } from './checks/icon-contrast.js';
 import { listsCheck } from './checks/lists.js';
@@ -13,6 +14,7 @@ const registry = new Map<CheckId, Check>([
   [iconContrastCheck.id, iconContrastCheck],
   [headingsCheck.id, headingsCheck],
   [listsCheck.id, listsCheck],
+  [groupingCheck.id, groupingCheck],
 ]);
 
 export function registeredChecks(): CheckId[] {

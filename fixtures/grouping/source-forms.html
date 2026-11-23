@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: source-forms</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      h2 { font-size: 22px; margin: 32px 0 12px; }
+      /* Set by class, so that the look survives when the elements are replaced. */
+      .set { margin: 0 0 24px; padding: 0; border: 0; min-width: 0; }
+      .title { display: block; padding: 0; margin: 0 0 8px; font-weight: 700; }
+      label { display: block; margin: 4px 0; }
+      label.field { margin: 8px 0 2px; }
+      input:not([type="checkbox"]):not([type="radio"]), select { font: inherit; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      .parts { display: flex; gap: 12px; }
+      .parts > div { display: flex; flex-direction: column; }
+      .n2 { width: 40px; }
+      .n4 { width: 64px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>A registration form, marked up as it should be</h1>
+      <p>Every set of related controls on this page is a fieldset with a legend, or has a group role and a name. The mutation test takes those away, keeps the look, and expects the check to find each set again.</p>
+      <form action="#">
+        <h2>About you</h2>
+        <fieldset class="set" id="m-title" data-expect="likely">
+          <legend class="title">Title</legend>
+          <label><input type="radio" name="title" /> Ms</label>
+          <label><input type="radio" name="title" /> Mr</label>
+          <label><input type="radio" name="title" /> Mx</label>
+        </fieldset>
+
+        <fieldset class="set" id="m-birth" data-expect="advisory">
+          <legend class="title">Date of birth</legend>
+          <div class="parts">
+            <div><label for="b-d">Day</label><input class="n2" id="b-d" inputmode="numeric" /></div>
+            <div><label for="b-m">Month</label><input class="n2" id="b-m" inputmode="numeric" /></div>
+            <div><label for="b-y">Year</label><input class="n4" id="b-y" inputmode="numeric" /></div>
+          </div>
+        </fieldset>
+
+        <div class="set" id="m-licence" role="radiogroup" aria-labelledby="m-licence-title" data-expect="likely">
+          <span class="title" id="m-licence-title">Do you hold a driving licence?</span>
+          <label><input type="radio" name="licence" /> Yes</label>
+          <label><input type="radio" name="licence" /> No</label>
+        </div>
+
+        <h2>Your stay</h2>
+        <div class="set" id="m-extras" role="group" aria-labelledby="m-extras-title" data-expect="likely">
+          <span class="title" id="m-extras-title">Extras</span>
+          <label><input type="checkbox" name="x1" /> Breakfast</label>
+          <label><input type="checkbox" name="x2" /> Parking</label>
+          <label><input type="checkbox" name="x3" /> Late checkout</label>
+        </div>
+
+        <fieldset class="set" id="m-bed" data-expect="likely">
+          <legend class="title">Bed</legend>
+          <label><input type="radio" name="bed" /> Double</label>
+          <label><input type="radio" name="bed" /> Twin</label>
+        </fieldset>
+
+        <div class="set" id="m-contact" role="group" aria-label="Contact by" data-expect="likely">
+          <span class="title">Contact by</span>
+          <label><input type="checkbox" name="c1" /> Email</label>
+          <label><input type="checkbox" name="c2" /> Phone</label>
+        </div>
+
+        <h2>Addresses</h2>
+        <fieldset class="set" id="m-home" data-expect="none">
+          <legend class="title">Home address</legend>
+          <label class="field" for="h-street">Street</label><input id="h-street" />
+          <label class="field" for="h-city">City</label><input id="h-city" />
+          <label class="field" for="h-post">Postcode</label><input id="h-post" class="n4" />
+        </fieldset>
+        <fieldset class="set" id="m-invoice" data-expect="likely">
+          <legend class="title">Invoice address</legend>
+          <label class="field" for="i-street">Street</label><input id="i-street" />
+          <label class="field" for="i-city">City</label><input id="i-city" />
+          <label class="field" for="i-post">Postcode</label><input id="i-post" class="n4" />
+        </fieldset>
+
+        <fieldset class="set" id="m-newsletter" data-expect="likely">
+          <legend class="title">Newsletter</legend>
+          <label><input type="radio" name="nl" /> Weekly</label>
+          <label><input type="radio" name="nl" /> Monthly</label>
+          <label><input type="radio" name="nl" /> Never</label>
+        </fieldset>
+      </form>
+    </main>
+  </body>
+</html>

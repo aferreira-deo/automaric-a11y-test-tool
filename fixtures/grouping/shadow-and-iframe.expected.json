@@ -1,0 +1,10 @@
+{
+  "description": "A set of radios under a question tied to nothing, inside an open shadow root and inside a same-origin iframe with a border and padding: both likely, with captures. The grouped sets next to them (a radiogroup named through aria-labelledby inside the shadow tree, a fieldset with a legend in the frame) are not reported. The same document in an iframe that is rotated and scaled is not looked into.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#host >>> #set", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "frame": "" },
+    { "selector": "#set", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "frame": "#frame" },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Patterns met on real pages while the check was built. A sentence of prose before an example is no label (info, labelSentence), and neither is the source code shown before the next example. Two examples with the same field names in no form are info (noForm). A colon outside a label, and two fields side by side that each have a visible label with the same words, are not reported. A label a column away from its radios, and text that runs on around radios without labels, are likely.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#r-prose", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["radios", "labelSentence"] },
+    { "selector": "#r-grid-2 > div", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["fields", "noForm"] },
+    { "selector": "#r-two-columns", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label", "flags": ["radios", "labelBeside"] },
+    { "selector": "#r-wrapping", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label", "flags": ["radios", "labelBeside"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

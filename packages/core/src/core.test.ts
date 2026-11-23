@@ -67,7 +67,7 @@ describe('runChecks', () => {
     expect(runChecks(snapshot, resolveConfig({ checks: ['noop', 'noop'] }))).toHaveLength(1);
   });
   it('rejects a check that is not registered', () => {
-    expect(() => runChecks(snapshot, resolveConfig({ checks: ['grouping'] }))).toThrow(/Unknown check "grouping"/);
+    expect(() => runChecks(snapshot, resolveConfig({ checks: ['sorting' as never] }))).toThrow(/Unknown check "sorting"/);
   });
   it('gives identical findings on two runs', () => {
     const config = resolveConfig({ checks: ['noop'] });

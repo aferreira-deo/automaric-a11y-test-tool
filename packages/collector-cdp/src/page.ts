@@ -137,6 +137,14 @@ export function agentOptions(config: Config): AgentOptions {
       clipMarkerRoomCssPx: config.lists.clipMarkerRoomCssPx,
       sameRowMinOverlap: config.lists.sameRowMinOverlap,
     },
+    grouping: {
+      maxControls: config.grouping.maxControls,
+      maxNameChars: config.grouping.maxNameChars,
+      maxAncestorLevels: config.grouping.maxAncestorLevels,
+      minControlSizeCssPx: config.grouping.minControlSizeCssPx,
+      clipMarginCssPx: config.grouping.clipMarginCssPx,
+      maxLabelTargets: config.grouping.maxLabelTargets,
+    },
   };
 }
 

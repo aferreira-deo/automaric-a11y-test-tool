@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: formulaire-fr</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .bloc { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .t { font-weight: 700; font-size: 18px; margin: 16px 0 8px; }
+      label { display: block; margin: 4px 0; }
+      label.champ { margin: 8px 0 2px; }
+      .ligne label { display: inline-block; margin-right: 16px; }
+      input:not([type="radio"]):not([type="checkbox"]), select { font: inherit; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      fieldset { margin: 0 0 32px; padding: 12px 16px; border: 1px solid #595959; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Créer votre espace personnel</h1>
+      <p>Les champs marqués d'un astérisque sont obligatoires.</p>
+      <form action="#">
+        <div class="bloc ligne" id="civilite">
+          <p class="q">Civilité *</p>
+          <label><input type="radio" name="civ" /> Madame</label>
+          <label><input type="radio" name="civ" /> Monsieur</label>
+        </div>
+
+        <div class="bloc" id="compte">
+          <p class="q">Avez-vous déjà un compte en ligne ?</p>
+          <label><input type="radio" name="compte" /> Oui</label>
+          <label><input type="radio" name="compte" /> Non</label>
+        </div>
+
+        <div class="bloc" id="naissance">
+          <label class="champ" for="jour">Date de naissance *</label>
+          <select id="jour" name="jour"><option>Jour</option><option>1</option></select>
+          <select name="mois"><option>Mois</option><option>janvier</option></select>
+          <select name="annee"><option>Année</option><option>1980</option></select>
+        </div>
+
+        <fieldset id="mode">
+          <legend>Mode de livraison</legend>
+          <label><input type="radio" name="mode" /> À domicile</label>
+          <label><input type="radio" name="mode" /> En point relais</label>
+        </fieldset>
+
+        <div class="t">Adresse de facturation</div>
+        <div id="facturation">
+          <label class="champ" for="f-voie">Numéro et voie</label><input id="f-voie" />
+          <label class="champ" for="f-cp">Code postal</label><input id="f-cp" />
+          <label class="champ" for="f-ville">Ville</label><input id="f-ville" />
+        </div>
+        <div class="t">Adresse de livraison</div>
+        <div id="livraison">
+          <label class="champ" for="l-voie">Numéro et voie</label><input id="l-voie" />
+          <label class="champ" for="l-cp">Code postal</label><input id="l-cp" />
+          <label class="champ" for="l-ville">Ville</label><input id="l-ville" />
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

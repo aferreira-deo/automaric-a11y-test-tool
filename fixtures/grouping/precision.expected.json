@@ -1,0 +1,10 @@
+{
+  "description": "Precision control: a search bar, a login form, a signup form, a checkout with fieldsets for two addresses, payment and a split expiry date, a filter sidebar with a fieldset and a group named by a heading, a star rating in a fieldset, pressed buttons, a toolbar, tabs, a dashboard with labelled filters, a settings page under headings, a table of inputs, a cookie banner with choices in a fieldset, a newsletter field. Nothing is likely. Checkboxes under a heading are advisory, and checkboxes after a hint that belongs to the field above them are info.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#set-1", "check": "grouping", "status": "advisory", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "headingLabel"] },
+    { "selector": "#p-hint-set", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["checkboxes", "labelNearerPrevious"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: real-pages</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 760px; }
+      p { margin: 0 0 16px; }
+      h2 { font-size: 22px; margin: 32px 0 12px; }
+      .example { border: 1px solid #595959; padding: 16px; margin: 0 0 8px; }
+      pre { background: #f2f2f2; padding: 12px 16px; margin: 0 0 24px; font: 14px/1.4 Consolas, monospace; overflow: auto; }
+      label { display: block; margin: 4px 0; }
+      input:not([type="checkbox"]):not([type="radio"]), select { font: inherit; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      .grid { display: flex; gap: 24px; }
+      .grid > div { flex: 1; }
+      .grid input { width: 100%; box-sizing: border-box; }
+      .line label { display: inline; margin: 0; }
+      .horizontal { display: flex; align-items: center; margin: 0 0 12px; }
+      .horizontal > .name { width: 180px; }
+      .horizontal label { display: inline-block; margin: 0 16px 0 0; }
+      .wrapping { margin: 0 0 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Patterns met on real pages</h1>
+      <p>Each case below was reported wrongly, or missed, on a real page while the check was built. The comments say where.</p>
+
+      <!-- A page of documentation: a sentence of prose, an example, its source. The sentence is no label
+           (seen on the Bootstrap documentation of checks and radios: four sets were likely). -->
+      <h2>Disabled</h2>
+      <p>Add the disabled attribute and the labels are styled to match.</p>
+      <div class="example" id="r-prose">
+        <label><input type="radio" name="d" disabled /> Disabled radio</label>
+        <label><input type="radio" name="d" disabled checked /> Checked radio</label>
+      </div>
+      <pre><code>&lt;input type="radio" name="d" disabled&gt; &lt;label&gt;Disabled radio&lt;/label&gt;</code></pre>
+      <!-- An example right after the source of the one before: code is no label either. -->
+      <div class="example" id="r-code">
+        <label><input type="checkbox" name="c1" /> One</label>
+        <label><input type="checkbox" name="c2" /> Two</label>
+      </div>
+
+      <!-- Two examples with the same field names, in no form (seen on the Bootstrap documentation of
+           form layout: reported as two sections of one form). Held back as info. -->
+      <h2>Form grid</h2>
+      <div class="example" id="r-grid-1">
+        <div class="grid">
+          <div><input type="text" placeholder="First name" aria-label="First name" /></div>
+          <div><input type="text" placeholder="Last name" aria-label="Last name" /></div>
+        </div>
+      </div>
+      <h2>Gutters</h2>
+      <div class="example" id="r-grid-2">
+        <div class="grid">
+          <div><input type="text" placeholder="First name" aria-label="First name" /></div>
+          <div><input type="text" placeholder="Last name" aria-label="Last name" /></div>
+        </div>
+      </div>
+
+      <form action="#">
+        <!-- A colon outside the label does not make the label free text (seen on the advanced search
+             of Bugzilla: the field was reported as named like the whole row). -->
+        <h2>Search</h2>
+        <div class="line" id="r-colon">
+          <label for="summary"><a href="#help">Summary</a></label>:
+          <select aria-label="Search type"><option>contains all of the strings</option></select>
+          <input id="summary" name="summary" />
+        </div>
+
+        <!-- Two fields side by side that each have a visible label, with the same words (seen on the
+             Foundation documentation of forms). Not the parts of one field. -->
+        <h2>Grid</h2>
+        <div class="grid" id="r-same-labels" style="gap: 12px">
+          <div><label for="a1">Input Label</label><input id="a1" /></div>
+          <div><label for="a2">Input Label</label><input id="a2" /></div>
+        </div>
+
+        <!-- A form in two columns: the label is a column away from its radios (seen on a practice form:
+             the set was held back as too far from its label). Likely. -->
+        <h2>Practice form</h2>
+        <div class="horizontal" id="r-two-columns">
+          <div class="name">Gender</div>
+          <div>
+            <label><input type="radio" name="gender" /> Male</label>
+            <label><input type="radio" name="gender" /> Female</label>
+            <label><input type="radio" name="gender" /> Other</label>
+          </div>
+        </div>
+
+        <!-- Text that runs on around radios without labels (seen on another practice form). Likely. -->
+        <div class="wrapping" id="r-wrapping"><strong>Experience:</strong> <input type="radio" name="xp" value="1" /> 1 <input type="radio" name="xp" value="2" /> 2 <input type="radio" name="xp" value="3" /> 3</div>
+      </form>
+    </main>
+  </body>
+</html>

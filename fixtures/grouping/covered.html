@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: covered</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      /* Taller than any window the tests use, so that the footer is the end of a page that scrolls. */
+      main { max-width: 640px; padding: 32px; min-height: 1200px; }
+      p { margin: 0 0 16px; }
+      .q { margin: 0 0 8px; }
+      label { display: block; margin: 4px 0; }
+      footer { background: #f2f2f2; padding: 24px 32px; }
+      /* A cookie banner fixed to the bottom of the window: the end of the page cannot be scrolled out from under it. */
+      .banner { position: fixed; left: 0; right: 0; bottom: 0; height: 220px; background: #fff; border-top: 2px solid #1a1a1a; padding: 12px 32px; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Two sets of radios under a question that is tied to nothing. The first can be scrolled into view and is captured. The second is at the very end of the page, under a banner fixed to the bottom of the window, and cannot be shown.</p>
+      <div id="visible">
+        <p class="q">Do you want a receipt?</p>
+        <label><input type="radio" name="r" /> Yes</label>
+        <label><input type="radio" name="r" /> No</label>
+      </div>
+    </main>
+    <footer>
+      <div id="under-banner">
+        <p class="q">Was this page useful?</p>
+        <label><input type="radio" name="u" /> Yes</label>
+        <label><input type="radio" name="u" /> No</label>
+      </div>
+    </footer>
+    <div class="banner"><p>We use cookies to measure how many people visit this site and which pages they read.</p><button type="button">Refuse</button> <button type="button">Accept</button></div>
+  </body>
+</html>

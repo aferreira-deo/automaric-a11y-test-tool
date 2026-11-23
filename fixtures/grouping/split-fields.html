@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: split-fields</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      label { display: block; margin: 0 0 4px; }
+      input, select, button { font: inherit; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      .n2 { width: 40px; }
+      .n4 { width: 64px; }
+      .parts { display: flex; gap: 12px; }
+      .parts > div { display: flex; flex-direction: column; }
+      .cols { display: flex; gap: 24px; }
+      .cols > div { flex: 1; display: flex; flex-direction: column; }
+      fieldset { margin: 0 0 32px; padding: 12px 16px; border: 1px solid #595959; }
+      table { border-collapse: collapse; margin: 0 0 32px; }
+      th, td { border: 1px solid #595959; padding: 6px 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Fields split in parts</h1>
+      <p>Fields side by side that are the parts of one value. In the first five, the accessible names do not say which part each field is. The others are named part by part, or are fields of their own.</p>
+      <form action="#">
+        <!-- One label, tied to the first part; the two others have no name. -->
+        <div class="case" id="s-first-label">
+          <label for="dob-1">Date of birth</label>
+          <div><input class="n2" id="dob-1" name="d" inputmode="numeric" /> <input class="n2" name="m" inputmode="numeric" /> <input class="n4" name="y" inputmode="numeric" /></div>
+        </div>
+
+        <!-- Every part carries the name of the whole. -->
+        <div class="case" id="s-same-name">
+          <div class="q b">Start date</div>
+          <input class="n2" aria-label="Start date" /> <input class="n2" aria-label="Start date" /> <input class="n4" aria-label="Start date" />
+        </div>
+
+        <!-- A prefix without a name beside the number that has the label. -->
+        <div class="case" id="s-phone">
+          <label for="tel">Téléphone</label>
+          <div><select name="prefix"><option>+33</option><option>+44</option></select> <input type="tel" id="tel" name="tel" /></div>
+        </div>
+
+        <!-- One part is named like the whole, the other by its part. -->
+        <div class="case" id="s-whole-name">
+          <div class="q b">Expiry date</div>
+          <input class="n2" aria-label="Expiry date" /> <input class="n4" aria-label="Year" />
+        </div>
+
+        <!-- Two fields without any name under one visible text. -->
+        <div class="case" id="s-unnamed">
+          <div class="q b">Card security</div>
+          <input class="n2" name="a" /> <input class="n2" name="b" />
+        </div>
+
+        <!-- Each part has a label of its own; the title over them is tied to nothing: advisory. -->
+        <div class="case" id="s-advisory">
+          <div class="q b">Date of arrival</div>
+          <div class="parts">
+            <div><label for="arr-d">Day</label><input class="n2" id="arr-d" /></div>
+            <div><label for="arr-m">Month</label><input class="n2" id="arr-m" /></div>
+            <div><label for="arr-y">Year</label><input class="n4" id="arr-y" /></div>
+          </div>
+        </div>
+
+        <!-- Named by placeholders, which tell the parts apart: advisory. -->
+        <div class="case" id="s-placeholders">
+          <div class="q b">Date of departure</div>
+          <input class="n2" placeholder="DD" /> <input class="n2" placeholder="MM" /> <input class="n4" placeholder="YYYY" />
+        </div>
+
+        <!-- Grouped and named part by part: nothing to report. -->
+        <fieldset id="s-fieldset">
+          <legend>Date of issue</legend>
+          <div class="parts">
+            <div><label for="iss-d">Day</label><input class="n2" id="iss-d" /></div>
+            <div><label for="iss-m">Month</label><input class="n2" id="iss-m" /></div>
+            <div><label for="iss-y">Year</label><input class="n4" id="iss-y" /></div>
+          </div>
+        </fieldset>
+
+        <!-- Two fields of their own, side by side. -->
+        <div class="case cols" id="s-names">
+          <div><label for="first">First name</label><input id="first" name="first" /></div>
+          <div><label for="last">Last name</label><input id="last" name="last" /></div>
+        </div>
+
+        <!-- A value and its unit, each with a name. -->
+        <div class="case" id="s-amount">
+          <label for="amount">Amount</label>
+          <input id="amount" name="amount" /> <select aria-label="Currency"><option>EUR</option><option>GBP</option></select>
+        </div>
+      </form>
+
+      <!-- A search bar: a category and a query, no visible label. Missing names are for axe. -->
+      <form action="#" role="search" id="s-search">
+        <select name="cat"><option>All</option><option>Books</option></select> <input type="search" name="q" placeholder="Search" /> <button type="submit">Go</button>
+      </form>
+
+      <!-- Fields in the cells of a table. -->
+      <p class="q b" style="margin-top: 32px">Order lines</p>
+      <table id="s-table">
+        <tr><th scope="col">Item</th><th scope="col">Quantity</th><th scope="col">Price</th></tr>
+        <tr><th scope="row">Paper</th><td><input class="n2" /></td><td><input class="n4" /></td></tr>
+        <tr><th scope="row">Ink</th><td><input class="n2" /></td><td><input class="n4" /></td></tr>
+      </table>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "description": "Pairs of cases on either side of a limit: the distance between the text and the set (labelMaxGapEm), the distance to a text beside the set (labelInlineMaxGapEm), the length of the text (labelMaxChars), the number of words of the names (shortNameMaxWords), the share of short names (ambiguousMinShare), the distance between the parts of a split field (splitMaxGapEm), and the number of other controls in a fieldset (groupExtraControlsMax).",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#n-gap-in", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label" },
+    { "selector": "#n-gap-out", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["labelFar"] },
+    { "selector": "#n-beside-in", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label", "flags": ["labelBeside"] },
+    { "selector": "#n-beside-out", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["labelFar"] },
+    { "selector": "#n-long-in", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label" },
+    { "selector": "#n-long-out", "check": "grouping", "status": "info", "rule": "grouping/group-candidate", "flags": ["labelLong"] },
+    { "selector": "#n-words-in", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label" },
+    { "selector": "#n-words-out", "check": "grouping", "status": "advisory", "rule": "grouping/ungrouped-controls", "flags": ["selfExplanatory"] },
+    { "selector": "#n-share-in", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label" },
+    { "selector": "#n-share-out", "check": "grouping", "status": "advisory", "rule": "grouping/ungrouped-controls", "flags": ["selfExplanatory"] },
+    { "selector": "#n-split-in", "check": "grouping", "status": "likely", "rule": "grouping/split-field", "flags": ["duplicateNames"] },
+    { "selector": "#n-extra-out-set", "check": "grouping", "status": "likely", "rule": "grouping/unassociated-label", "flags": ["inLargerGroup"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

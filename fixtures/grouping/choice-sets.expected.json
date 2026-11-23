@@ -1,0 +1,18 @@
+{
+  "description": "Sets of radios and checkboxes under a visible question or title that nothing ties to them: no fieldset with a legend, no named group, a fieldset without a legend, a group without a name, custom radios without a radiogroup, a question beside its answers, a label element without a control, native radios hidden under styled labels, and a set inside a fieldset that groups a larger part of the form. Each is likely, never a fail.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#q-car", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#q-contact", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["checkboxes"] },
+    { "selector": "#q-topics", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["checkboxes"] },
+    { "selector": "#q-unnamed-fieldset", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios", "unnamedGroup"] },
+    { "selector": "#q-unnamed-group", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios", "unnamedGroup"] },
+    { "selector": "#q-custom", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#q-inline", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#q-label-element", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#q-rating", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios"] },
+    { "selector": "#q-gift", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label", "flags": ["radios", "inLargerGroup"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

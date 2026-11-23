@@ -1,3 +1,4 @@
+import { groupingJudgements } from './checks/grouping-adjudication.js';
 import { headingJudgements } from './checks/headings-adjudication.js';
 import { listJudgements } from './checks/lists-adjudication.js';
 import { sortFindings } from './run.js';
@@ -53,6 +54,7 @@ type JudgementSource = (snapshot: Snapshot, findings: Finding[], config: Config)
 const SOURCES: Partial<Record<CheckId, JudgementSource>> = {
   headings: headingJudgements,
   lists: listJudgements,
+  grouping: groupingJudgements,
 };
 
 /**

@@ -3,9 +3,9 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M5. Four checks are implemented, and all run by default. None of them needs a model. When a model is
-configured it judges the heading candidates and the series of lines with bullets or numbers, and nothing else
-(see "Having a model judge candidates").
+Status: M6. Five checks are implemented, and all run by default. None of them needs a model. When a model is
+configured it judges the heading candidates, the series of lines with bullets or numbers and the sets of radios
+or checkboxes under a visible text, and nothing else (see "Having a model judge candidates").
 
 - `focus-indicator`: 2.4.7, 1.4.11 for the indicator, 2.4.11.
 - `icon-contrast`: 1.4.11 for the icon of controls without visible text, and for the boundary of form controls.
@@ -14,8 +14,12 @@ configured it judges the heading candidates and the series of lines with bullets
 - `lists`: 1.3.1 for content presented as a list (bullets, numbers) that is not exposed as one, for lists whose
   role was removed while their markers still show, and, as advisory, for series of blocks of one shape and for
   names and values in pairs. It never reports a `fail`.
+- `grouping`: 1.3.1 (related 3.3.2 and 4.1.2) for sets of radios or checkboxes under a visible question that
+  nothing ties to them, for fields split in parts whose names do not say which part each is, and for sections of
+  one form whose fields have the same names. It never reports a `fail`.
 
-`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings` or `--checks lists` runs one of them.
+`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings`, `--checks lists` or `--checks grouping`
+runs one of them.
 
 ## Use
 
@@ -38,9 +42,10 @@ Chromium only.
 Optional, and off unless you configure it: with no provider, no model is asked, nothing is sent anywhere, and the
 report is the one deterministic code gives. There is no default endpoint and no default model.
 
-At present the model is asked two things: for each heading candidate, whether the text functions as a heading for
-what follows it; and for each series of lines that open with a bullet or a number, whether it is presented as a
-list. The checks find and measure; the model only answers `yes`, `no` or `unsure`.
+At present the model is asked three things: for each heading candidate, whether the text functions as a heading
+for what follows it; for each series of lines that open with a bullet or a number, whether it is presented as a
+list; and for each set of radios or checkboxes under a visible text, whether that text is the label of the set.
+The checks find and measure; the model only answers `yes`, `no` or `unsure`.
 
 ```sh
 node packages/cli/dist/bin.js scan https://example.com \
@@ -54,11 +59,11 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-key-env <NAME>` | `A11Y_VISION_AI_KEY_ENV` | NAME of the environment variable that holds the API key. The key is never given on the command line or in a file. Leave it out for an endpoint that takes no key. |
 | `--ai-label <text>` | | Name shown in reports for the provider (default `openai-compatible`). |
 | `--ai-allow-remote` | | Allow an endpoint that is not on this machine. It has to be an `https` URL. |
-| `--ai-lower-on-no` | | Lower a `likely` heading or list candidate to `info` when the model says it is not one (`headingNoStatus: "info"` and `listNoStatus: "info"`). Off by default, see "What a verdict changes". |
+| `--ai-lower-on-no` | | Lower a `likely` heading, list or group candidate to `info` when the model says it is not one (`headingNoStatus: "info"`, `listNoStatus: "info"` and `groupNoStatus: "info"`). Off by default, see "What a verdict changes". |
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
-| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `adjudication`). Options win over the environment, which wins over the file. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `adjudication`). Options win over the environment, which wins over the file. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -83,10 +88,12 @@ const { result, adjudication } = await new A11yVision({ page })
 
 With the API nothing is cached unless `cacheFile` or `cache` is given; `adjudicator` takes an adapter of your own.
 
-**What a verdict changes.** Only the status of a heading candidate or of a series of lines with bullets or
-numbers, and only between `likely` and `info`. The table and what follows it are written for headings; lists
-follow the same rules with `listNoStatus` in place of `headingNoStatus`, and their `advisory` findings, lists
-with a removed role and the inventory are never sent:
+**What a verdict changes.** Only the status of a heading candidate, of a series of lines with bullets or
+numbers, or of a set of radios or checkboxes under a visible text, and only between `likely` and `info`. The
+table and what follows it are written for headings; lists follow the same rules with `listNoStatus` in place of
+`headingNoStatus`, and their `advisory` findings, lists with a removed role and the inventory are never sent;
+groups follow them with `groupNoStatus`, and their `advisory` findings, split fields and sections with the same
+field names are never sent:
 
 | Deterministic status | `yes` | `no` | `unsure` |
 |---|---|---|---|
@@ -346,7 +353,8 @@ What is asked and what an answer may change is decided in `core`, per check; ask
    outlined or null, its `cropHash`, and a compact `context`) and an `apply(finding, ai, config)` that returns the
    finding after the verdict. `headings-adjudication.ts` is the model to copy.
 2. Register it in `SOURCES` in `packages/core/src/adjudication.ts`. `lists-adjudication.ts` is the second
-   entry, and shows a check of which only some findings are a model's to judge.
+   entry, and shows a check of which only some findings are a model's to judge; `grouping-adjudication.ts` is
+   the third, where the target outlined in the capture is the text and not the whole finding.
 3. Give the candidates what `headingCandidates` gives: the id of their finding, whether a judgement could change
    anything, a capture with the place of the target in it.
 
@@ -578,6 +586,191 @@ status is a policy), nor the inventory.
 - The capture shows the series as far as the window does: a list taller than the window is cut. Other covers than
   fixed or sticky content over its middle are not looked for.
 
+### What `grouping` reports
+
+Form controls that belong together under a visible text, where nothing ties that text to them (1.3.1, related
+3.3.2 and 4.1.2). No model is needed, and nothing is ever a `fail`: the brief rules it out for this check
+(section 3E), and that a text is the label of a set, or that names say too little without it, is a judgement a
+tester confirms.
+
+What a control is, what it is called and what groups it are taken from the accessibility tree of each document
+(`Accessibility.getFullAXTree`), never worked out from tags or attributes. Verified against Chrome in November
+2026:
+
+- A `fieldset` is exposed with the role `group` and the text of its `legend` as its name; without a legend the
+  name is empty. `role="group"` and `role="radiogroup"` are exposed with the name `aria-label` or
+  `aria-labelledby` gives them, or an empty one. A `fieldset` with `role="presentation"` has no node: its legend
+  is then plain text. `details` and `address` are groups without a name too, and are left out.
+- Radios, checkboxes and switches are `radio`, `checkbox` and `switch`, native or by role. Text fields are
+  `textbox` (also `textarea`, email, tel, url and password inputs, and editable boxes with the role),
+  `searchbox`, `spinbutton` (number), `combobox` (a `select` that drops down, an input with a `datalist`, the
+  ARIA role), `listbox` (a `select` shown as a list), `Date`, `DateTime` (datetime-local, month, week) and
+  `InputTime`. Sliders, colour and file inputs are not looked at. The parts Chrome builds inside a date input are in a shadow tree of the browser and are not read.
+- The name of a control is the one Chrome computes: from `aria-labelledby`, `aria-label` or `label`, and
+  failing those from `title` or `placeholder`; a `select` without any of them has an empty name.
+  `aria-describedby` gives the description.
+- A control that is not rendered (`display: none`, `visibility: hidden`), inert or under `aria-hidden` has no
+  node and is never looked at. One that is only transparent or clipped to a pixel has: a native radio hidden
+  under a styled label is read, and its label is what is measured and captured (`styledLabels`).
+
+Text is read as for `headings`: the same blocks of visible text, from the same walk. For each block the page also
+says where it stands among the controls and what it is tied to: a control (inside its `label`, or a target of its
+`aria-labelledby`), a group (its `legend`, or a target of its `aria-labelledby`), a description (a target of an
+`aria-describedby`), or nothing. Only text that is tied to nothing can be the visible label of a set.
+
+**Sets of radios and checkboxes** (section 5.5, steps 1 to 4). A set is: native radios of one `name` in one
+form; custom radios inside one `role="radiogroup"`; otherwise radios, or checkboxes and switches, that follow
+each other with no other control between them and no text between them that could start a new set. From
+`minSetSize` (2) to `maxSetSize` (40) controls. For each set:
+
+1. **The visible label.** Going back from the first control: its own labels are passed over; hints (targets of
+   `aria-describedby`), text of links and buttons, code, and text hidden from assistive technology are passed
+   over, `labelMaxSkipped` (2) at most; another control, or the label of one, ends the search with nothing. What
+   is found first is the possible label. No such text: nothing is reported (`setsWithoutVisibleLabel` in the
+   survey).
+2. **Already tied.** Nothing is reported when that text is the legend of a fieldset, or what a group, a dialog or
+   a region is named by, that holds the set; when the set is inside a named `group` or `radiogroup` and the text
+   stands before that group, or the group holds the set and at most `groupExtraControlsMax` (1) other control (an
+   "Other" field); or when the text is part of the accessible name of every control of the set
+   (`aria-labelledby="question option"`), compared as whole words after `nameTrimPattern` has taken the colon and
+   the asterisk off.
+3. **Status.**
+   - `likely` (`grouping/unassociated-label`): a plain text, right above the set (no more than `labelMaxGapEm`,
+     3 font sizes) or beside its first control on one row (`labelInlineMaxGapEm`, 20 font sizes: the label
+     column of a form in two columns), and names that say little on their own: at least `ambiguousMinShare`
+     (0.5) of them are short, that is of `shortNameMaxWords` (2) words and `shortNameMaxChars` (24) characters
+     at most, or empty. "Yes" and "No", "Oui" and "Non", a size, a brand: no word of any language is involved.
+   - `advisory` (`grouping/ungrouped-controls`): the text is a heading in the accessibility tree
+     (`headingLabel`) or the button that opens the set (`disclosureLabel`, a button with `aria-expanded` or a
+     `summary`); or the controls are switches (`switches`); or most names are longer (`selfExplanatory`: "I
+     agree to the terms and conditions").
+   - `info` (`grouping/group-candidate`), with the reason as a flag: `labelFar` (further than a label is),
+     `labelLong` (more than `labelMaxChars`, 160, or `labelMaxLines`, 3), `labelSentence` (ends with a full
+     stop, an exclamation mark or an ellipsis and has `labelSentenceMinWords`, 3, words or more: a sentence of
+     prose before an example, a hint; a question mark and a colon do not count), `labelNearerPrevious` (its
+     distance to the control before it is less than `hintNearerShare`, 0.5, of its distance to the set: a hint
+     under a field), `labelNamesContainer` (a region, a form, a dialog or a group around the set has the words
+     of the text in its name).
+
+   Flags say more: `radios` or `checkboxes`, `unnamedGroup` (inside a fieldset or a group without a name),
+   `inLargerGroup` (inside a named group that holds more), `labelBeside`, `styledLabels`.
+
+Left out, and counted in the survey: one control alone (a consent checkbox), controls in the cells of a table
+(the headers of the table may say what they are), and controls inside a toolbar, a menu, a tab list, a tree, a
+grid or a list box. Buttons, pressed or not, and tabs are no form controls here.
+
+**Fields split in parts** (`grouping/split-field`, `likely`). Fields that follow each other with no control
+between them, on one row, no further apart than `splitMaxGapEm` (2 font sizes), in one form and one table cell,
+at most `splitMaxParts` (6). Likely when their names do not say which part each is:
+
+- `duplicateNames`: two parts have the same name, and not every part has a visible label of its own (two
+  fields that each show the label "Input Label" are fields of their own with a poor label, which is no matter of
+  grouping);
+- `unnamedPart`: a part has no name, while a visible label is tied to another part, or a text right before the
+  row or a fieldset around it stands for the whole (one `label` for three fields of a date, a prefix without a
+  name beside the number). Fields without names and without any label at all are left to rule engines;
+- `namedAsWhole`: a part has exactly the name of the text over the row, or of the fieldset around it.
+
+When every part has a name of its own, a plain text right before the row that is tied to nothing gives an
+`advisory` (`grouping/ungrouped-controls`, flag `fields`); a heading there gives nothing.
+
+**Sections with the same field names** (`grouping/duplicate-names`, `likely`). The fields of one form are cut
+into sections where a name comes back and where the named container around them changes. Two sections are
+reported, once, on the second of them, when at least `duplicateMinShared` (2) names are in both, the fields are
+in no named container that differs, and their descriptions do not differ: billing and delivery address with
+"Street" and "City" twice, the two dates of a period. `advisory` when every section stands under a heading
+(`headingLabel`): headings are exposed as structure, but are not read when moving from field to field. `info`
+(`grouping/group-candidate`, flag `noForm`) when the fields are in no `form` element: that the sections are
+parts of one form is then not known (two examples on a page of documentation have the same names too). Fields
+in the cells of a table are left out. A row of parts inside such sections is not reported a second time.
+
+`grouping/survey` (`info`) gives the counts, and the flag `truncated` when something was left out: at most
+`maxControls` (600) controls are read, in document order, `maxCandidates` (150) findings reported (`likely`
+first, then `advisory`, then `info`, each in document order) and `maxCaptures` (120) captures taken. A finding
+beyond the captures, under a fixed banner or in a place that cannot be shown carries `notCaptured` or `covered`
+and keeps its status: nothing is measured on a capture here. When the accessibility tree cannot be read, or a
+document has more controls or more groups than can be marked (`maxAxMarks`, 1500), nothing is above `info`
+(`axIncomplete`).
+
+A finding names the lowest element that holds the controls, their labels and the text taken for their label,
+and no other control; failing that, the first control. It gives the number of controls, the text, the first
+accessible names, and a capture of the text and the controls. The id of a set or a row does not depend on its
+status.
+
+Every pattern is an option and holds no word of any language.
+
+#### Decisions left to the owner, and their defaults
+
+- **A heading over a set** (not in section 10 of the brief, which only says "not programmatically associated
+  (no fieldset/legend, no named group)"): `advisory` by default, `grouping.headingLabelStatus: "likely"` reports
+  such sets like the others. The option takes those two values only: `fail` is turned into `likely`, anything
+  else into `advisory`, when the configuration is resolved and again where the status is computed. The same
+  option rules sections under headings and sets under a button that opens them.
+- **What a "no" of a model does** to a `likely` set: nothing by default, as for headings and lists
+  (`adjudication.groupNoStatus: "likely"`); `"info"` or `--ai-lower-on-no` lowers it.
+- **What makes names ambiguous.** The brief gives "Yes"/"No" as the example. Without a list of words, the test is
+  the length of the names; `shortNameMaxWords`, `shortNameMaxChars` and `ambiguousMinShare` set it. A set whose
+  names are longer is `advisory`, the level the brief gives to "related fields with unique, self-explanatory
+  labels and no grouping".
+- **Sections of fields with names of their own** under a visible title (an address under "Delivery address",
+  alone in its form) are not reported at all, although the brief lists "related fields with unique,
+  self-explanatory labels and no grouping" as `advisory`. On every form with a title that would be one more
+  advisory finding. The advisory level is given to sets with longer names, to rows of named parts and to what
+  stands under headings.
+
+#### How the adjudicator layer takes the candidates
+
+`groupingCandidates(snapshot.grouping, config.grouping)` gives what the check reports as data: `findingId` (a
+fingerprint under the constant key `grouping/set` for sets and `grouping/row` for rows, so that the id survives a
+change of status and of rule name), `status` (`likely`, `advisory` or `info`), `adjudicate`, `crop` (or null)
+with `cropTarget` (the visible text inside the capture), and a compact `context` (the kind of controls, their
+number, the visible text and where it stands, up to `contextMaxItems` (12) accessible names, the reasons).
+
+Only sets of radios and checkboxes under a plain text are sent to a model: the `likely` ones, and those held
+back as `info` for `labelFar`, `labelLong`, `labelSentence` or `labelNearerPrevious` whose names are short. The
+question is fixed (`GROUP_QUESTION`, version `grouping-1`): is the target text the question or the title the set
+of controls answers. Sets under a heading or a button, sets of switches and sets with longer names are not sent
+(their status is a policy), nor are split fields and sections with the same names (names and groups are facts
+read from the accessibility tree), nor the inventory.
+
+### Known limits of the grouping check
+
+- One viewport width and one state, as for headings: the page as it is. A set inside a closed panel, a step of
+  a form that is not shown, or filters behind a button are not in the accessibility tree and are not read. No
+  control is focused, changed or submitted.
+- The text right before a set is taken for its possible label whatever it is. What tells a label from other
+  text is its place, its length and its closing punctuation, never its meaning: the value shown by a custom
+  control that has no role ("France" in a `div` drawn as a select), a short line of prose without a full stop,
+  or the title of a larger part of the page can be reported as the label of the set that follows (`likely`).
+  A real question that ends with a full stop ("Please tell us how you heard of us.") is held back as `info`.
+- A label above a set of independent checkboxes ("Notifications" over "Email" and "SMS") and a title above
+  settings that each stand for themselves look the same: both are `likely` when the names are short. Switches
+  are the only ones told apart.
+- Names are short or not by their length. "Samsung" under "Brand" is as short as "Yes"; a long name that still
+  needs its question ("In the last twelve months") is `advisory`.
+- A text that is the `aria-describedby` target of a control is a hint and is passed over: a set whose question
+  is only its description is not reported, although a description is not announced as a group label is.
+- Containment is that of the DOM: `aria-owns` is not followed, and a group counts as holding a control when its
+  element does. A named `group` that holds the set and more than one other control is not taken for the group
+  of the set when a text of its own stands before the set.
+- Checkboxes are a set by standing next to each other. Two unrelated checkboxes after a field are a set of two;
+  they are reported only when a text tied to nothing stands before them.
+- Sets in the cells of a table (a matrix of radios, a table of inputs) are not looked at, whether or not the
+  table has headers, and neither are the rows of a layout table that does not say so with
+  `role="presentation"`.
+- A split field is fields side by side, close together, with nothing between them: parts stacked under each
+  other, or separated by another control, are not found. A value and a button, or a field and a checkbox, are
+  no row.
+- Sections with the same names are found by the names coming back. Sections whose names differ by a word
+  ("Billing street", "Delivery street"), or that share one name only (several "Quantity" in a basket), are not
+  reported; fields outside any `form` are `info` at most.
+- Radios of one set that have no `name` and no radiogroup, each in a wrapper with text between them that is tied
+  to nothing, are cut into sets of one and not reported.
+- Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. A set
+  never spans two documents. Outside a modal dialog opened with `showModal()` nothing is reported.
+- The capture shows the text and the controls as far as the window does. Other covers than fixed or sticky
+  content over its middle are not looked for.
+
 ### What `icon-contrast` reports
 
 Everything is measured on a capture of the control at rest, at device scale factor 2. The scale of each capture is
@@ -653,8 +846,9 @@ that is larger than the device screen, so more of the page counts as on screen t
 The icon check also blurs the focused element before it looks at the controls, so that a focus ring is not measured
 as part of a control. Focus is put back with everything else.
 
-The headings and the lists checks read the accessibility tree of the page and of its same-origin iframes, and
-scroll what they report into view to capture it. On a page that uses `content-visibility: auto`, they also have
+The headings, the lists and the grouping checks read the accessibility tree of the page and of its same-origin
+iframes, and scroll what they report into view to capture it. The grouping check reads form controls and does
+nothing to them: none is focused, checked, filled in or submitted. On a page that uses `content-visibility: auto`, they also have
 the browser render what it skips, until the scan ends: Chrome leaves skipped content out of the accessibility
 tree (verified: a list or a heading in such a subtree has no node in `Accessibility.getFullAXTree` while it is
 off screen), so text read from the DOM there would look like text without semantics. Only the elements whose
@@ -809,4 +1003,4 @@ node e2e/support/dump.mjs focus-indicator/gradient
 | `packages/cli` | `scan <url>` |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings and lists, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |
+| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings, lists and grouping, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |

@@ -1,0 +1,15 @@
+{
+  "description": "Fields side by side that are the parts of one value. Likely when the accessible names do not identify the parts: one label tied to the first part only, every part named like the whole, a prefix without a name beside the labelled number, one part named like the visible title, parts without any name under one text. Advisory when each part has a name of its own (labels, placeholders) and the visible title is tied to nothing. Nothing for a fieldset with named parts, two fields of their own side by side, a value and its unit that are both named, a search bar without a label, and fields in the cells of a table.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#s-first-label", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "unnamedPart"] },
+    { "selector": "#s-same-name", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "duplicateNames"] },
+    { "selector": "#s-phone", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "unnamedPart"] },
+    { "selector": "#s-whole-name", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "namedAsWhole"] },
+    { "selector": "#s-unnamed", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/split-field", "flags": ["fields", "unnamedPart"] },
+    { "selector": "#s-advisory", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["fields"] },
+    { "selector": "#s-placeholders", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["fields"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

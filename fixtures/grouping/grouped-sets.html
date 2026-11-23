@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: grouped-sets</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      label { display: block; margin: 4px 0; }
+      fieldset { margin: 0 0 32px; padding: 12px 16px; border: 1px solid #595959; }
+      legend h2 { font-size: 24px; margin: 0; }
+      .hint { color: #505a5f; margin: 0 0 8px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      input[type="text"], input[type="password"] { font: inherit; padding: 4px 8px; border: 1px solid #595959; }
+      table { border-collapse: collapse; margin: 0 0 32px; }
+      th, td { border: 1px solid #595959; padding: 6px 12px; text-align: center; }
+      [role="toolbar"] [role="radio"] { display: inline-block; padding: 4px 10px; border: 1px solid #595959; }
+      [role="dialog"], section { border: 1px solid #595959; padding: 12px 16px; margin: 0 0 32px; }
+      h2 { font-size: 20px; margin: 0 0 8px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sets that are grouped, or that need no group</h1>
+      <p>Nothing on this page is a set of controls under a visible label that is left unassociated.</p>
+      <form action="#">
+        <fieldset id="g-fieldset">
+          <legend>Do you have a car?</legend>
+          <label><input type="radio" name="car" /> Yes</label>
+          <label><input type="radio" name="car" /> No</label>
+        </fieldset>
+
+        <div class="case">
+          <span class="q b" id="g-radiogroup-label">Payment</span>
+          <div id="g-radiogroup" role="radiogroup" aria-labelledby="g-radiogroup-label">
+            <label><input type="radio" name="pay" /> Card</label>
+            <label><input type="radio" name="pay" /> Transfer</label>
+          </div>
+        </div>
+
+        <!-- The group is named with aria-label; the visible title stands before it, outside. -->
+        <div class="case">
+          <div class="q b">Toppings</div>
+          <div id="g-group-label" role="group" aria-label="Toppings">
+            <label><input type="checkbox" name="t1" /> Cheese</label>
+            <label><input type="checkbox" name="t2" /> Ham</label>
+          </div>
+        </div>
+
+        <!-- The question is part of the name of every option. -->
+        <div class="case" id="g-names">
+          <span class="q" id="g-names-q">Seat</span>
+          <label><input type="radio" name="seat" aria-labelledby="g-names-q seat-1" /> <span id="seat-1">Window</span></label>
+          <label><input type="radio" name="seat" aria-labelledby="g-names-q seat-2" /> <span id="seat-2">Aisle</span></label>
+        </div>
+
+        <!-- The question is the description of every option. -->
+        <div class="case" id="g-described">
+          <p class="q" id="g-described-q">Preferred time</p>
+          <label><input type="radio" name="time" aria-describedby="g-described-q" /> Morning</label>
+          <label><input type="radio" name="time" aria-describedby="g-described-q" /> Evening</label>
+        </div>
+
+        <fieldset id="g-nested-outer">
+          <legend>Delivery</legend>
+          <fieldset id="g-nested">
+            <legend>Speed</legend>
+            <label><input type="radio" name="speed" /> Standard</label>
+            <label><input type="radio" name="speed" /> Express</label>
+          </fieldset>
+          <fieldset id="g-nested-2">
+            <legend>Day</legend>
+            <label><input type="radio" name="day" /> Weekday</label>
+            <label><input type="radio" name="day" /> Saturday</label>
+          </fieldset>
+        </fieldset>
+
+        <!-- A legend that holds a heading, and a hint tied to the fieldset. -->
+        <fieldset id="g-hinted" aria-describedby="g-hinted-hint">
+          <legend><h2>Which types of waste do you transport?</h2></legend>
+          <div class="hint" id="g-hinted-hint">Select all that apply.</div>
+          <label><input type="checkbox" name="w1" /> Animal</label>
+          <label><input type="checkbox" name="w2" /> Mines</label>
+          <label><input type="checkbox" name="w3" /> Farm</label>
+        </fieldset>
+
+        <!-- A hint inside the fieldset that is tied to nothing: the legend is still the label of the set. -->
+        <fieldset id="g-hint-inside">
+          <legend>Size</legend>
+          <p class="hint">Choose one.</p>
+          <label><input type="radio" name="size" /> Small</label>
+          <label><input type="radio" name="size" /> Large</label>
+        </fieldset>
+
+        <!-- A legend that is visually hidden, and the same words shown as plain text. -->
+        <fieldset id="g-sr-legend">
+          <legend class="sr-only">Colour</legend>
+          <div class="q b" aria-hidden="true">Colour</div>
+          <label><input type="radio" name="colour" /> Red</label>
+          <label><input type="radio" name="colour" /> Blue</label>
+        </fieldset>
+
+        <!-- One checkbox is no set. -->
+        <div class="case" id="g-consent">
+          <p class="q b">Terms</p>
+          <label><input type="checkbox" name="terms" /> I agree</label>
+        </div>
+
+        <!-- Two checkboxes after a field: what stands before them is the label of that field. -->
+        <div class="case" id="g-two-unrelated">
+          <label for="pw">Password</label>
+          <input type="password" id="pw" name="pw" />
+          <label><input type="checkbox" name="remember" /> Remember me</label>
+          <label><input type="checkbox" name="updates" /> Send updates</label>
+        </div>
+
+        <!-- Radios in the cells of a table: its headers say what each is. -->
+        <p class="q b" id="g-matrix-title">How satisfied are you?</p>
+        <table id="g-matrix">
+          <tr><td></td><th scope="col">Poor</th><th scope="col">Good</th></tr>
+          <tr><th scope="row">Delivery</th><td><input type="radio" name="m1" aria-label="Poor" /></td><td><input type="radio" name="m1" aria-label="Good" /></td></tr>
+          <tr><th scope="row">Packaging</th><td><input type="radio" name="m2" aria-label="Poor" /></td><td><input type="radio" name="m2" aria-label="Good" /></td></tr>
+        </table>
+
+        <!-- Radios of a toolbar. -->
+        <div class="case">
+          <div class="q b">Alignment</div>
+          <div id="g-toolbar" role="toolbar" aria-label="Text formatting">
+            <span role="radio" aria-checked="true" tabindex="0">Left</span>
+            <span role="radio" aria-checked="false" tabindex="-1">Centre</span>
+            <span role="radio" aria-checked="false" tabindex="-1">Right</span>
+          </div>
+        </div>
+
+        <!-- A dialog named by its title: the title is tied to what holds the checkboxes. -->
+        <div id="g-dialog" role="dialog" aria-labelledby="g-dialog-title">
+          <h2 id="g-dialog-title">Cookie preferences</h2>
+          <label><input type="checkbox" name="c1" /> Analytics</label>
+          <label><input type="checkbox" name="c2" /> Marketing</label>
+        </div>
+
+        <!-- A region named with the words of the visible title: recorded, not reported as likely. -->
+        <section id="g-region" aria-label="Notifications">
+          <div class="q b">Notifications</div>
+          <label><input type="checkbox" name="n1" /> Email</label>
+          <label><input type="checkbox" name="n2" /> Push</label>
+        </section>
+      </form>
+    </main>
+  </body>
+</html>

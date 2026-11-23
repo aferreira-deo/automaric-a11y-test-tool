@@ -1,4 +1,4 @@
-import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, IconConfig, ListsConfig } from './types.js';
+import type { AdjudicationConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +6,7 @@ import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, 
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping'],
   focus: {
     deviceScaleFactor: 2,
     captureSizeTolerancePx: 1,
@@ -206,6 +206,41 @@ export const defaultConfig: Config = {
     keyValueLinePattern: '^([^:\\uff1a]{1,48}?)(?:\\s?:\\s+|\\uff1a\\s*)\\S',
     keyEndPattern: '[:\\uff1a]$',
   },
+  grouping: {
+    maxControls: 600,
+    maxAxMarks: 1500,
+    maxNameChars: 160,
+    maxLabelTargets: 8,
+    maxAncestorLevels: 8,
+    maxCandidates: 150,
+    maxCaptures: 120,
+    clipMarginCssPx: 16,
+    minControlSizeCssPx: 4,
+    minSetSize: 2,
+    maxSetSize: 40,
+    labelMaxGapEm: 3,
+    labelInlineMaxGapEm: 20,
+    labelMaxChars: 160,
+    labelMaxLines: 3,
+    labelSentenceEndPattern: '[.\\u3002\\uff0e\\u06d4\\u0964!\\uff01\\u2026][\\p{Pe}\\p{Pf}"\']*$',
+    labelSentenceMinWords: 3,
+    labelMaxSkipped: 2,
+    hintNearerShare: 0.5,
+    sameRowMinOverlap: 0.5,
+    toleranceCssPx: 3,
+    shortNameMaxWords: 2,
+    shortNameMaxChars: 24,
+    ambiguousMinShare: 0.5,
+    nameTrimPattern: '^[\\s*\\uff0a]+|[\\s:\\uff1a*\\uff0a]+$',
+    groupExtraControlsMax: 1,
+    splitMaxGapEm: 2,
+    splitMaxParts: 6,
+    duplicateMinShared: 2,
+    headingLabelStatus: 'advisory',
+    messageItems: 4,
+    itemTextMaxChars: 60,
+    contextMaxItems: 12,
+  },
   adjudication: {
     provider: 'none',
     baseUrl: '',
@@ -239,6 +274,7 @@ export const defaultConfig: Config = {
     outlineGapCssPx: 3,
     headingNoStatus: 'likely',
     listNoStatus: 'likely',
+    groupNoStatus: 'likely',
   },
 };
 
@@ -248,6 +284,7 @@ export type ConfigInput = {
   icon?: Partial<IconConfig>;
   headings?: Partial<HeadingsConfig>;
   lists?: Partial<ListsConfig>;
+  grouping?: Partial<GroupingConfig>;
   adjudication?: Partial<AdjudicationConfig>;
 };
 
@@ -272,6 +309,15 @@ export function clampCardListStatus(value: unknown): 'advisory' | 'likely' {
   return clampInversionStatus(value, 'advisory');
 }
 
+/**
+ * The status of a set of controls whose visible label is a heading or the button that opens it,
+ * whatever was configured: `advisory` or `likely` and never `fail`. A configured `fail` becomes
+ * `likely`, anything else that is not one of the two becomes the default.
+ */
+export function clampHeadingLabelStatus(value: unknown): 'advisory' | 'likely' {
+  return clampInversionStatus(value, 'advisory');
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
@@ -292,7 +338,7 @@ function duration(value: unknown, min: number, fallback: number): number {
 /**
  * Settings of the adjudicator layer, with anything that is not a usable value put back to its
  * default: a configuration can come from a JSON file. Whatever is configured, a status that
- * depends on a model is `likely` at most (`headingNoStatus` and `listNoStatus` take `info` or `likely` only).
+ * depends on a model is `likely` at most (`headingNoStatus`, `listNoStatus` and `groupNoStatus` take `info` or `likely` only).
  */
 export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): AdjudicationConfig {
   const base = defaultConfig.adjudication;
@@ -331,6 +377,7 @@ export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): Ad
     outlineGapCssPx: atLeast(merged.outlineGapCssPx, 0, base.outlineGapCssPx, false),
     headingNoStatus: oneOf(merged.headingNoStatus, ['info', 'likely'], base.headingNoStatus),
     listNoStatus: oneOf(merged.listNoStatus, ['info', 'likely'], base.listNoStatus),
+    groupNoStatus: oneOf(merged.groupNoStatus, ['info', 'likely'], base.groupNoStatus),
   };
 }
 
@@ -340,12 +387,15 @@ export function resolveConfig(input: ConfigInput = {}): Config {
   headings.extremeInversionStatus = clampInversionStatus(headings.extremeInversionStatus, defaultConfig.headings.extremeInversionStatus);
   const lists = { ...defaultConfig.lists, ...input.lists };
   lists.cardListStatus = clampCardListStatus(lists.cardListStatus);
+  const grouping = { ...defaultConfig.grouping, ...input.grouping };
+  grouping.headingLabelStatus = clampHeadingLabelStatus(grouping.headingLabelStatus);
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
     headings,
     lists,
+    grouping,
     adjudication: resolveAdjudication(input.adjudication),
   };
 }

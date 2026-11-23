@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: advisory-sets</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      h2 { font-size: 20px; margin: 0 0 8px; }
+      label { display: block; margin: 4px 0; }
+      button { font: inherit; }
+      .row { display: flex; justify-content: space-between; align-items: center; margin: 4px 0; max-width: 320px; }
+      [role="switch"] { width: 44px; height: 24px; border: 2px solid #1a1a1a; border-radius: 12px; background: #fff; padding: 0; }
+      [role="switch"][aria-checked="true"] { background: #1a1a1a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sets that are reported as advisory</h1>
+      <p>Each set below stands under a visible title without a group. They are advisory, not likely: the title is a heading or a button, which assistive technology exposes as structure, or the names of the controls say what they are on their own.</p>
+      <form action="#">
+        <!-- A heading right above the set. -->
+        <div class="case" id="a-heading">
+          <h2>Shipping method</h2>
+          <label><input type="radio" name="ship" /> Standard</label>
+          <label><input type="radio" name="ship" /> Express</label>
+        </div>
+
+        <!-- Names that say what they are without the title. -->
+        <div class="case" id="a-long">
+          <p class="q b">Consents</p>
+          <label><input type="checkbox" name="terms" /> I agree to the terms and conditions</label>
+          <label><input type="checkbox" name="news" /> I would like to receive the newsletter</label>
+        </div>
+
+        <!-- The title is the button that opens the set. -->
+        <div class="case" id="a-disclosure">
+          <button type="button" aria-expanded="true" aria-controls="a-disclosure-panel">Brand</button>
+          <div id="a-disclosure-panel">
+            <label><input type="checkbox" name="b1" /> Apple</label>
+            <label><input type="checkbox" name="b2" /> Samsung</label>
+          </div>
+        </div>
+
+        <!-- Switches: settings that each stand for themselves. -->
+        <div class="case" id="a-switches">
+          <div class="q b">Connections</div>
+          <div class="row"><span id="sw-1">Wi-Fi</span><button type="button" role="switch" aria-checked="true" aria-labelledby="sw-1"></button></div>
+          <div class="row"><span id="sw-2">Bluetooth</span><button type="button" role="switch" aria-checked="false" aria-labelledby="sw-2"></button></div>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

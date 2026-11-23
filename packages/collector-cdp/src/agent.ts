@@ -18,6 +18,79 @@ export interface AgentOptions {
   icon: AgentIconOptions;
   headings: AgentHeadingsOptions;
   lists: AgentListsOptions;
+  grouping: AgentGroupingOptions;
+}
+
+/** Subset of GroupingConfig the agent needs; documented there. */
+export interface AgentGroupingOptions {
+  maxControls: number;
+  maxNameChars: number;
+  maxAncestorLevels: number;
+  minControlSizeCssPx: number;
+  clipMarginCssPx: number;
+  maxLabelTargets: number;
+}
+
+/** Mirror GroupingControl, GroupingGroup and GroupingBlock of core. */
+export interface AgentGroupingControl {
+  selector: string;
+  frame: string;
+  ord: number;
+  chain: number[];
+  box: AgentRect;
+  proxied?: boolean;
+  kind: 'radio' | 'checkbox' | 'field';
+  role: string;
+  element: string;
+  name: string;
+  description: string;
+  setKey: string;
+  form: number;
+  region: string;
+  cell: number;
+  inWidget: boolean;
+  fontSize: number;
+  rtl: boolean;
+  switch?: boolean;
+}
+
+export interface AgentGroupingGroup {
+  selector: string;
+  frame: string;
+  ord: number;
+  end: number;
+  role: string;
+  name: string;
+}
+
+export interface AgentGroupingBlock {
+  frame: string;
+  at: number;
+  end: number;
+  text: string;
+  chars: number;
+  words: number;
+  lines: number;
+  box: AgentRect;
+  style: AgentTextStyle;
+  contexts: AgentTextContext[];
+  heading: number;
+  labels: number[];
+  group: number;
+  describes: boolean;
+  otherLabel: boolean;
+  inControl: boolean;
+  disclosure: boolean;
+  free: boolean;
+  freeText?: string;
+}
+
+export interface AgentGroupingSurvey {
+  controls: AgentGroupingControl[];
+  totalControls: number;
+  groups: AgentGroupingGroup[];
+  blocks: AgentGroupingBlock[];
+  totalBlocks: number;
 }
 
 /** Subset of HeadingsConfig the agent needs; documented there. */
@@ -364,10 +437,21 @@ export interface Agent {
   /** Records that the accessibility tree exposes this element as a list or a description list. Called on the node itself. */
   markList(element: unknown): boolean;
   listSurvey(): AgentListSurvey;
-  /** Selectors of elements of the last list survey, by their position; null for a position it does not know. */
+  /** Selectors of elements of the last list or grouping survey, by their position; null for a position it does not know. */
   listSelectors(ords: number[]): (string | null)[];
   /** Scrolls what a finding of the lists check is about into view and says what to capture. */
   prepareList(kind: 'blocks' | 'elements', ids: number[]): Promise<AgentHeadingPrepared>;
+  /** Records what the accessibility tree says about a form control: its role, its name and its description. Called on the node itself. */
+  markControl(element: unknown, role: string, name: string, description: string): boolean;
+  /** Records that the accessibility tree exposes this element as a group or another container with a role, and its name. Called on the node itself. */
+  markGroup(element: unknown, role: string, name: string): boolean;
+  groupingSurvey(): AgentGroupingSurvey;
+  /**
+   * Scrolls what a finding of the grouping check is about into view and says what to capture:
+   * blocks of text and controls of the last grouping survey, by index. `target` is the block to
+   * point at inside the capture, or -1 for all of it.
+   */
+  prepareGrouping(blocks: number[], controls: number[], target: number): Promise<AgentHeadingPrepared>;
   cleanup(): void;
 }
 
@@ -1940,12 +2024,43 @@ export function agentFactory(options: AgentOptions): Agent {
     return true;
   }
 
+  /**
+   * Form controls and containers with a role, as the accessibility tree exposes them. Filled by
+   * the collector before the grouping survey: role, name and description are those the browser
+   * computed, and are never worked out from attributes here.
+   */
+  const controlMarks = new Map<Element, { role: string; name: string; description: string }>();
+  const groupMarks = new Map<Element, { role: string; name: string }>();
+  /** The controls of the last grouping survey, by index. */
+  let groupingControls: Element[] = [];
+
+  function markControl(element: unknown, role: string, name: string, description: string): boolean {
+    if (!element || (element as Node).nodeType !== 1) return false;
+    // The ARIA role listbox is a list of options, often the popup of a combobox: only a `select` shown as a list is a field.
+    if (role === 'listbox' && (element as Element).localName !== 'select') return true;
+    controlMarks.set(element as Element, { role, name, description });
+    return true;
+  }
+
+  function markGroup(element: unknown, role: string, name: string): boolean {
+    if (!element || (element as Node).nodeType !== 1) return false;
+    // Chrome exposes `details`, `address` and others as groups too. Without a name, only a
+    // fieldset and an element with a role of its own are groups an author made.
+    if (role === 'group' && name === '' && (element as Element).localName !== 'fieldset' && !(element as Element).hasAttribute('role')) return true;
+    groupMarks.set(element as Element, { role, name });
+    return true;
+  }
+
   function headingSurvey(): AgentHeadingSurvey {
-    return textSurvey(false).survey;
+    return textSurvey('headings').survey;
   }
 
   function listSurvey(): AgentListSurvey {
-    return textSurvey(true).lists!;
+    return textSurvey('lists').lists!;
+  }
+
+  function groupingSurvey(): AgentGroupingSurvey {
+    return textSurvey('grouping').grouping!;
   }
 
   /**
@@ -1954,7 +2069,11 @@ export function agentFactory(options: AgentOptions): Agent {
    * series of sibling elements of one shape and the lists of interest; nothing of that is done,
    * and nothing changes, for the headings check.
    */
-  function textSurvey(forLists: boolean): { survey: AgentHeadingSurvey; lists: AgentListSurvey | null } {
+  function textSurvey(mode: 'headings' | 'lists' | 'grouping'): { survey: AgentHeadingSurvey; lists: AgentListSurvey | null; grouping?: AgentGroupingSurvey } {
+    const forLists = mode === 'lists';
+    const forGrouping = mode === 'grouping';
+    // Both number the elements of the page in document order, to say what comes before what.
+    const withOrds = forLists || forGrouping;
     const limits = options.headings;
     const blocks: AgentTextBlock[] = [];
     surveyedBlocks = [];
@@ -1985,6 +2104,10 @@ export function agentFactory(options: AgentOptions): Agent {
     const targets: Element[][] = [];
     let totalLists = 0;
     let exposedLists = 0;
+    /** Grouping: the marked controls and containers the walk met, in document order. */
+    const controlElements: Element[] = [];
+    const groupElements: Element[] = [];
+    const groupingBlocks: AgentGroupingBlock[] = [];
 
     const shortKey = (text: string): string => (text.length <= 160 ? text : text.length + ':' + text.slice(0, 80) + text.slice(-80));
     const markerSized = (width: number, height: number): boolean =>
@@ -2201,10 +2324,10 @@ export function agentFactory(options: AgentOptions): Agent {
     }
 
     /** The element and its ancestors in its document, innermost first: position, and position of the last element inside. */
-    function chainOf(element: Element): number[] {
+    function chainOf(element: Element, levels: number = listLimits.maxAncestorLevels): number[] {
       const chain: number[] = [];
       let level = 0;
-      for (let current: Element | null = element; current && level < listLimits.maxAncestorLevels; current = parentElementOf(current), level++) {
+      for (let current: Element | null = element; current && level < levels; current = parentElementOf(current), level++) {
         const slot = ords.get(current);
         if (!slot) break;
         chain.push(slot.ord, slot.end);
@@ -2279,6 +2402,8 @@ export function agentFactory(options: AgentOptions): Agent {
       apart?: boolean;
       /** Lists: the small graphic met just before this text, with no other text in between. */
       before?: Graphic;
+      /** Grouping: how many elements the walk had numbered when it met this text. */
+      at?: number;
     }
     interface Pending {
       pieces: Piece[];
@@ -2537,6 +2662,7 @@ export function agentFactory(options: AgentOptions): Agent {
         if (!piece) return;
         if (lastGraphic) piece.before = lastGraphic;
         lastGraphic = null;
+        if (forGrouping) piece.at = ordElements.length;
         open ??= [[]];
         open[open.length - 1]!.push(piece);
         return;
@@ -2546,6 +2672,12 @@ export function agentFactory(options: AgentOptions): Agent {
       const name = element.localName;
       if (TEXT_SKIPPED.includes(name)) {
         if (forLists && (name === 'img' || name === 'svg')) noteGraphic(element);
+        // Grouping: a native control is numbered like any element, although nothing is read inside it.
+        if (forGrouping && controlMarks.has(element)) {
+          ords.set(element, { ord: ordElements.length, end: ordElements.length });
+          ordElements.push(element);
+          controlElements.push(element);
+        }
         return;
       }
       const view = element.ownerDocument.defaultView;
@@ -2557,10 +2689,14 @@ export function agentFactory(options: AgentOptions): Agent {
         return;
       }
       // Lists: the position of the element among the elements of the page, and of the last one inside it.
-      const slot = forLists ? { ord: ordElements.length, end: 0 } : null;
+      const slot = withOrds ? { ord: ordElements.length, end: 0 } : null;
       if (slot) {
         ords.set(element, slot);
         ordElements.push(element);
+        if (forGrouping) {
+          if (controlMarks.has(element)) controlElements.push(element);
+          if (groupMarks.has(element)) groupElements.push(element);
+        }
       }
       if (isFrame(element)) {
         flush();
@@ -2577,7 +2713,7 @@ export function agentFactory(options: AgentOptions): Agent {
       if (!inline) flush();
       if (slot) {
         slot.end = ordElements.length - 1;
-        afterElement(element);
+        if (forLists) afterElement(element);
       }
     }
 
@@ -2685,6 +2821,136 @@ export function agentFactory(options: AgentOptions): Agent {
       blocksToRead.push(entry);
     }
 
+    // Grouping: which text is tied to which control or container. Worked out now that the walk
+    // has met every control: a label can stand before its control.
+    interface Binding {
+      /** Controls this element labels, by index; -1 stands for a control that is not among those read. */
+      labels: number[];
+      group: number;
+      describes: boolean;
+      inControl: boolean;
+      disclosure: boolean;
+    }
+    const NO_BINDING: Binding = { labels: [], group: -1, describes: false, inControl: false, disclosure: false };
+    const MAX_LABELLED = options.grouping.maxLabelTargets;
+    const controlIndex = new Map<Element, number>();
+    const groupIndex = new Map<Element, number>();
+    const boundTargets = new Map<Element, Binding>();
+    const bindings = new Map<Element, Binding>();
+    /** The controls that show, or whose labels show, with what shows of them (client coordinates of their frame). */
+    const shownControls: { element: Element; rect: AgentRect; proxied: boolean }[] = [];
+    if (forGrouping) {
+      const minSide = options.grouping.minControlSizeCssPx;
+      const shownRect = (target: Element): AgentRect | null => {
+        const view = target.ownerDocument.defaultView;
+        if (!view || !target.checkVisibility(VISIBLE)) return null;
+        let rect = plainRect(target.getBoundingClientRect());
+        const root = target.ownerDocument.documentElement;
+        rect = intersect(rect, { x: -view.scrollX, y: -view.scrollY, width: root.scrollWidth, height: root.scrollHeight });
+        const holder = parentElementOf(target);
+        const clip = holder ? clipOf(holder) : null;
+        if (clip) rect = intersect(rect, clip);
+        return rect.width >= minSide && rect.height >= minSide ? rect : null;
+      };
+      for (const element of controlElements) {
+        let rect = shownRect(element);
+        let proxied = false;
+        if (!rect) {
+          // A native control hidden under its label: the label is what shows of it.
+          const labels = (element as HTMLInputElement).labels;
+          for (const label of labels ? [...labels].slice(0, MAX_LABELLED) : []) {
+            const own = shownRect(label);
+            if (own) rect = rect ? union(rect, own) : own;
+          }
+          proxied = rect !== null;
+        }
+        if (rect) shownControls.push({ element, rect, proxied });
+      }
+      shownControls.slice(0, options.grouping.maxControls).forEach((entry, index) => controlIndex.set(entry.element, index));
+      groupElements.forEach((element, index) => groupIndex.set(element, index));
+      const targetOf = (element: Element): Binding => {
+        let binding = boundTargets.get(element);
+        if (!binding) {
+          binding = { labels: [], group: -1, describes: false, inControl: false, disclosure: false };
+          boundTargets.set(element, binding);
+        }
+        return binding;
+      };
+      const referenced = (owner: Element, attribute: string): Element[] => {
+        const value = owner.getAttribute(attribute);
+        if (!value) return [];
+        const root = owner.getRootNode() as Document | ShadowRoot;
+        const found: Element[] = [];
+        for (const id of value.split(/\s+/).filter(Boolean).slice(0, MAX_LABELLED)) {
+          const target = typeof root.getElementById === 'function' ? root.getElementById(id) : null;
+          if (target) found.push(target);
+        }
+        return found;
+      };
+      // Every control the accessibility tree exposes, also those that do not show or are beyond
+      // the limit: text that names one of them is not free to be the label of something else.
+      for (const element of controlMarks.keys()) {
+        const index = controlIndex.get(element) ?? -1;
+        for (const target of referenced(element, 'aria-labelledby')) {
+          const binding = targetOf(target);
+          if (binding.labels.length < MAX_LABELLED && !binding.labels.includes(index)) binding.labels.push(index);
+        }
+        for (const target of referenced(element, 'aria-describedby')) targetOf(target).describes = true;
+      }
+      groupElements.forEach((element, index) => {
+        for (const target of referenced(element, 'aria-labelledby')) {
+          const binding = targetOf(target);
+          if (binding.group < 0) binding.group = index;
+        }
+        for (const target of referenced(element, 'aria-describedby')) targetOf(target).describes = true;
+      });
+    }
+    /** What an element is tied to, itself or through what it is inside. */
+    function bindingOf(element: Element): Binding {
+      const chain: Element[] = [];
+      let base: Binding | undefined;
+      for (let current: Element | null = element; current; current = parentElementOf(current)) {
+        base = bindings.get(current);
+        if (base) break;
+        chain.push(current);
+      }
+      let binding = base ?? NO_BINDING;
+      for (let index = chain.length - 1; index >= 0; index--) {
+        const current = chain[index]!;
+        const name = current.localName;
+        const target = boundTargets.get(current);
+        let labels = target ? target.labels : [];
+        let group = target ? target.group : -1;
+        if (name === 'label') {
+          const control = (current as HTMLLabelElement).control;
+          if (control) labels = [...labels, controlIndex.get(control) ?? -1];
+        } else if (name === 'legend' && group < 0) {
+          const fieldset = current.parentElement;
+          if (fieldset && fieldset.localName === 'fieldset') {
+            let first: Element | null = fieldset.firstElementChild;
+            while (first && first.localName !== 'legend') first = first.nextElementSibling;
+            const index = first === current ? groupIndex.get(fieldset) : undefined;
+            if (index !== undefined) group = index;
+          }
+        }
+        const inControl = controlMarks.has(current);
+        const disclosure =
+          name === 'summary' || (current.hasAttribute('aria-expanded') && (name === 'button' || (current.getAttribute('role') ?? '').trim().toLowerCase() === 'button'));
+        if (labels.length > 0 || group >= 0 || target?.describes || inControl || disclosure) {
+          binding = {
+            labels: labels.length > 0 ? [...new Set([...binding.labels, ...labels])].slice(0, MAX_LABELLED) : binding.labels,
+            // The nearest container that the text names.
+            group: group >= 0 ? group : binding.group,
+            describes: binding.describes || target?.describes === true,
+            inControl: binding.inControl || inControl,
+            disclosure: binding.disclosure || disclosure,
+          };
+        }
+        bindings.set(current, binding);
+      }
+      return binding;
+    }
+
     for (const entry of blocksToRead) {
       const { pieces, breaks } = entry;
       const first = pieces[0]!;
@@ -2737,6 +3003,47 @@ export function agentFactory(options: AgentOptions): Agent {
         });
         continue;
       }
+      if (forGrouping) {
+        const tied = pieces.map((piece) => bindingOf(piece.holder));
+        const loose = tied.map((own) => own.labels.length === 0 && own.group < 0 && !own.describes && !own.inControl);
+        // The part that is tied to nothing, when another part is the label of a control.
+        const looseText = loose.every(Boolean)
+          ? ''
+          : pieces
+              .filter((_, at) => loose[at])
+              .map((piece) => piece.text)
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+        const labels: number[] = [];
+        for (const own of tied) {
+          for (const index of own.labels) if (!labels.includes(index)) labels.push(index);
+        }
+        groupingBlocks.push({
+          frame: frameOf(element),
+          at: first.at ?? 0,
+          end: pieces[pieces.length - 1]!.at ?? 0,
+          text: text.slice(0, limits.maxTextChars),
+          chars: text.replace(/\s/g, '').length,
+          words: text.split(' ').filter(Boolean).length,
+          lines: lines.length,
+          box: page(lines.reduce(union)),
+          style: look.style,
+          contexts: CONTEXT_ORDER.filter((context) => piecePlaces.every((own) => own.contexts.has(context))),
+          heading: isHeading ? (headingMarks.get(headingElement) ?? 0) : 0,
+          labels: labels.filter((index) => index >= 0).slice(0, MAX_LABELLED),
+          group: tied.find((own) => own.group >= 0)?.group ?? -1,
+          describes: tied.every((own) => own.describes),
+          otherLabel: labels.includes(-1),
+          inControl: tied.every((own) => own.inControl),
+          disclosure: tied.every((own) => own.disclosure),
+          // Some of the text is tied to nothing at all. Punctuation alone does not count: the colon
+          // after a label (`<label>Summary</label>:`) does not make that label free text.
+          free: loose.some((own, at) => own && /[\p{L}\p{N}]/u.test(pieces[at]!.text)),
+          ...(/[\p{L}\p{N}]/u.test(looseText) ? { freeText: looseText.slice(0, limits.maxTextChars) } : {}),
+        });
+        continue;
+      }
       blocks.push({
         selector: selectorOf(element),
         frame: frameOf(element),
@@ -2758,6 +3065,83 @@ export function agentFactory(options: AgentOptions): Agent {
         heading: isHeading ? { level: headingMarks.get(headingElement) ?? 0, selector: selectorOf(headingElement) } : null,
         ...(pieces.every((piece) => piece.look.blends) ? { sameColourAsBackground: true } : {}),
       });
+    }
+    if (forGrouping) {
+      const limit = options.grouping;
+      const CHOICES: Record<string, 'radio' | 'checkbox'> = { radio: 'radio', checkbox: 'checkbox', switch: 'checkbox' };
+      const COMPOSITES = ['toolbar', 'menu', 'menubar', 'tablist', 'tree', 'treegrid', 'grid', 'listbox'];
+      const ownRole = (element: Element): string => (element.getAttribute('role') ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+      const forms = new Map<Element, number>();
+      const roots = new Map<Node, number>();
+      const numberOf = <K>(map: Map<K, number>, key: K): number => {
+        let index = map.get(key);
+        if (index === undefined) {
+          index = map.size;
+          map.set(key, index);
+        }
+        return index;
+      };
+      const kept = shownControls.slice(0, limit.maxControls);
+      const controls: AgentGroupingControl[] = kept.map(({ element, rect, proxied }) => {
+        const mark = controlMarks.get(element)!;
+        const name = element.localName;
+        const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+        const offset = offsetOf(element);
+        const place = placeOf(element);
+        const slot = ords.get(element)!;
+        const type = name === 'input' ? ((element as HTMLInputElement).type || 'text').toLowerCase() : '';
+        const form = (element as HTMLInputElement).form ?? element.closest('form');
+        let inWidget = false;
+        let radiogroup: Element | null = null;
+        for (let current = parentElementOf(element); current; current = parentElementOf(current)) {
+          const role = ownRole(current);
+          if (COMPOSITES.includes(role)) inWidget = true;
+          if (role === 'radiogroup' && !radiogroup) radiogroup = current;
+        }
+        const kind = CHOICES[mark.role] ?? 'field';
+        const formNumber = form ? numberOf(forms, form) : -1;
+        let setKey = '';
+        const nameAttribute = name === 'input' && (type === 'radio' || type === 'checkbox') ? (element.getAttribute('name') ?? '') : '';
+        if (nameAttribute !== '') setKey = 'n:' + numberOf(roots, element.getRootNode()) + ':' + formNumber + ':' + nameAttribute;
+        else if (mark.role === 'radio' && radiogroup) {
+          const at = ords.get(radiogroup);
+          if (at) setKey = 'g:' + at.ord;
+        }
+        const cellElement = place.contexts.has('tableCell') || place.contexts.has('tableHeader') ? element.closest('td,th,[role="cell"],[role="gridcell"],[role="columnheader"],[role="rowheader"]') : null;
+        return {
+          selector: selectorOf(element),
+          frame: frameOf(element),
+          ord: slot.ord,
+          chain: chainOf(element, limit.maxAncestorLevels),
+          box: toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y }),
+          ...(proxied ? { proxied: true } : {}),
+          kind,
+          role: mark.role,
+          element: name + (type ? ':' + type : ''),
+          name: mark.name,
+          description: mark.description,
+          setKey,
+          form: formNumber,
+          region: regionName(place.region),
+          cell: cellElement ? (ords.get(cellElement)?.ord ?? -1) : -1,
+          inWidget,
+          fontSize: style ? parseFloat(style.fontSize) || 0 : 0,
+          rtl: style?.direction === 'rtl',
+          ...(mark.role === 'switch' ? { switch: true } : {}),
+        };
+      });
+      const groups: AgentGroupingGroup[] = groupElements.map((element) => {
+        const slot = ords.get(element)!;
+        const mark = groupMarks.get(element)!;
+        return { selector: selectorOf(element), frame: frameOf(element), ord: slot.ord, end: slot.end, role: mark.role, name: mark.name };
+      });
+      groupingControls = kept.map((entry) => entry.element);
+      listOrdElements = ordElements;
+      return {
+        survey: { blocks, total },
+        lists: null,
+        grouping: { controls, totalControls: shownControls.length, groups, blocks: groupingBlocks, totalBlocks: total },
+      };
     }
     if (!forLists) return { survey: { blocks, total }, lists: null };
 
@@ -2995,6 +3379,80 @@ export function agentFactory(options: AgentOptions): Agent {
     return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, target: shown, covered: false };
   }
 
+  /**
+   * Scrolls what a finding of the grouping check is about into view and says what to capture: the
+   * text (blocks of the last survey, by index) and the controls (of the last grouping survey, by
+   * index) with their labels, with a margin, as far as the window shows them.
+   */
+  async function prepareGrouping(blockIds: number[], controlIds: number[], targetBlock: number): Promise<AgentHeadingPrepared> {
+    const none = { clip: null, covered: false };
+    const entries = blockIds.map((id) => surveyedBlocks[id]).filter((entry) => entry !== undefined);
+    const members = controlIds.map((id) => groupingControls[id]).filter((element) => element !== undefined);
+    const pointed = targetBlock >= 0 ? surveyedBlocks[targetBlock] : undefined;
+    const anchor = pointed?.element ?? entries[0]?.element ?? members[0];
+    if (!anchor || !anchor.isConnected) return none;
+    // Registered, so that the scroll positions of what holds it are put back by cleanup().
+    keyOf(anchor);
+    ensureStableAround(anchor);
+    anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    await settle();
+    if (!anchor.isConnected || inTransformedFrame(anchor)) return none;
+    const textRect = (nodes: Text[]): AgentRect | null => {
+      let box: AgentRect | null = null;
+      for (const node of nodes) {
+        if (!node.isConnected || node.ownerDocument !== anchor.ownerDocument) continue;
+        const range = node.ownerDocument.createRange();
+        range.selectNodeContents(node);
+        const rect = plainRect(range.getBoundingClientRect());
+        if (rect.width > 0 && rect.height > 0) box = box ? union(box, rect) : rect;
+      }
+      return box;
+    };
+    let own: AgentRect | null = null;
+    const add = (rect: AgentRect | null): void => {
+      if (rect && rect.width > 0 && rect.height > 0) own = own ? union(own, rect) : rect;
+    };
+    for (const entry of entries) add(textRect(entry.nodes));
+    for (const member of members) {
+      if (!member.isConnected || member.ownerDocument !== anchor.ownerDocument) continue;
+      add(plainRect(member.getBoundingClientRect()));
+      const labels = (member as HTMLInputElement).labels;
+      for (const label of labels ? [...labels].slice(0, options.grouping.maxLabelTargets) : []) {
+        if (label.checkVisibility(VISIBLE)) add(plainRect(label.getBoundingClientRect()));
+      }
+    }
+    const found = own as AgentRect | null;
+    if (!found) return none;
+    const view = anchor.ownerDocument.defaultView;
+    if (!view) return none;
+    const offset = frameOffset(anchor);
+    const margin = options.grouping.clipMarginCssPx;
+    let left = Math.max(0, found.x + offset.x - margin);
+    let right = Math.min(window.innerWidth, found.x + found.width + offset.x + margin);
+    let upper = Math.max(0, found.y + offset.y - margin);
+    let lower = Math.min(window.innerHeight, found.y + found.height + offset.y + margin);
+    if (view !== window) {
+      // Inside a frame, only what the frame shows.
+      left = Math.max(left, offset.x);
+      right = Math.min(right, offset.x + view.innerWidth);
+      upper = Math.max(upper, offset.y);
+      lower = Math.min(lower, offset.y + view.innerHeight);
+    }
+    if (right - left < 1 || lower - upper < 1) return none;
+    // A capture is evidence only if it shows the content: not when a banner or a dialog lies over it.
+    if (floatsOver(anchor, (left + right) / 2 - offset.x, (upper + lower) / 2 - offset.y)) return { clip: null, covered: true };
+    const x0 = Math.floor(left + window.scrollX);
+    const y0 = Math.floor(upper + window.scrollY);
+    const x1 = Math.ceil(right + window.scrollX);
+    const y1 = Math.ceil(lower + window.scrollY);
+    const aim = (pointed ? textRect(pointed.nodes) : null) ?? found;
+    const shown = intersect(
+      { x: aim.x + offset.x + window.scrollX, y: aim.y + offset.y + window.scrollY, width: aim.width, height: aim.height },
+      { x: x0, y: y0, width: x1 - x0, height: y1 - y0 },
+    );
+    return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, target: shown, covered: false };
+  }
+
   /** Scrolls a block of the last survey into view and says what to capture: the block with what is above and below it. */
   async function prepareHeading(index: number): Promise<AgentHeadingPrepared> {
     const block = surveyedBlocks[index];
@@ -3209,6 +3667,10 @@ export function agentFactory(options: AgentOptions): Agent {
     listSurvey,
     listSelectors,
     prepareList,
+    markControl,
+    markGroup,
+    groupingSurvey,
+    prepareGrouping,
 
     connected(key) {
       return get(key).isConnected;

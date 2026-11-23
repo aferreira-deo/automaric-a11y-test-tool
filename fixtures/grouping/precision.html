@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: precision</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      header, main, footer { padding: 24px 32px; }
+      main { max-width: 760px; }
+      p { margin: 0 0 16px; }
+      section, form { margin: 0 0 40px; }
+      h2 { font-size: 22px; margin: 0 0 12px; }
+      h3 { font-size: 18px; margin: 16px 0 8px; }
+      label { display: block; margin: 8px 0 2px; }
+      label.check { margin: 4px 0; }
+      input, select, button, textarea { font: inherit; color: inherit; }
+      input:not([type="checkbox"]):not([type="radio"]), select { padding: 4px 8px; border: 1px solid #595959; background: #fff; }
+      button { padding: 6px 14px; border: 1px solid #1a1a1a; background: #fff; }
+      fieldset { margin: 0 0 16px; padding: 12px 16px; border: 1px solid #595959; }
+      .cols { display: flex; gap: 24px; }
+      .cols > div { flex: 1; }
+      .bar { display: flex; gap: 8px; align-items: center; }
+      .hint { color: #505a5f; font-size: 14px; margin: 2px 0 0; }
+      .seg button[aria-pressed="true"], [role="tab"][aria-selected="true"] { background: #1a1a1a; color: #fff; }
+      [role="tablist"] { display: flex; gap: 4px; }
+      [role="tab"] { padding: 6px 14px; border: 1px solid #1a1a1a; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      .stars label { display: inline-block; margin: 0 4px 0 0; padding: 2px 8px; border: 1px solid #595959; }
+      .stars input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+      aside { border: 1px solid #595959; padding: 12px 16px; max-width: 280px; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid #595959; padding: 6px 12px; }
+      .n2 { width: 40px; }
+      .n4 { width: 64px; }
+      footer { background: #f2f2f2; }
+      .banner { border: 2px solid #1a1a1a; padding: 12px 16px; margin: 0 32px 24px; }
+      .setting { display: flex; justify-content: space-between; max-width: 360px; margin: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <form action="#" role="search" class="bar" id="p-search">
+        <label for="q" class="sr-only">Search</label>
+        <input type="search" id="q" name="q" />
+        <button type="submit">Search</button>
+      </form>
+    </header>
+    <main>
+      <h1>Forms as they are usually built</h1>
+      <p>Common forms and sets of controls, marked up as careful sites do, or built in a way that needs no group. Nothing on this page is likely.</p>
+
+      <form action="#" id="p-login">
+        <h2>Sign in</h2>
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" autocomplete="username" />
+        <label for="login-pass">Password</label>
+        <input type="password" id="login-pass" autocomplete="current-password" />
+        <label class="check"><input type="checkbox" name="remember" /> Remember me</label>
+        <button type="submit">Sign in</button>
+      </form>
+
+      <form action="#" id="p-signup">
+        <h2>Create an account</h2>
+        <div class="cols">
+          <div><label for="su-first">First name</label><input id="su-first" /></div>
+          <div><label for="su-last">Last name</label><input id="su-last" /></div>
+        </div>
+        <label for="su-email">Email</label>
+        <input type="email" id="su-email" />
+        <label for="su-pass">Password</label>
+        <input type="password" id="su-pass" aria-describedby="su-pass-hint" />
+        <p class="hint" id="su-pass-hint">At least 12 characters.</p>
+        <label for="su-pass2">Confirm password</label>
+        <input type="password" id="su-pass2" />
+        <label class="check"><input type="checkbox" name="terms" /> I accept the terms of use</label>
+        <label class="check"><input type="checkbox" name="news" /> Send me the newsletter</label>
+        <button type="submit">Create account</button>
+      </form>
+
+      <form action="#" id="p-checkout">
+        <h2>Checkout</h2>
+        <fieldset>
+          <legend>Delivery address</legend>
+          <label for="co-d-street">Street</label><input id="co-d-street" />
+          <div class="cols">
+            <div><label for="co-d-post">Postcode</label><input id="co-d-post" class="n4" /></div>
+            <div><label for="co-d-city">City</label><input id="co-d-city" /></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Billing address</legend>
+          <label for="co-b-street">Street</label><input id="co-b-street" />
+          <div class="cols">
+            <div><label for="co-b-post">Postcode</label><input id="co-b-post" class="n4" /></div>
+            <div><label for="co-b-city">City</label><input id="co-b-city" /></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Payment</legend>
+          <label class="check"><input type="radio" name="pay" /> Card</label>
+          <label class="check"><input type="radio" name="pay" /> Transfer</label>
+          <label for="co-card">Card number</label><input id="co-card" inputmode="numeric" />
+          <fieldset>
+            <legend>Expiry date</legend>
+            <div class="bar">
+              <div><label for="co-mm">Month</label><input id="co-mm" class="n2" /></div>
+              <div><label for="co-yy">Year</label><input id="co-yy" class="n2" /></div>
+            </div>
+          </fieldset>
+        </fieldset>
+        <button type="submit">Pay</button>
+      </form>
+
+      <!-- A filter sidebar: one fieldset, and one group named by a heading. -->
+      <aside id="p-filters">
+        <h2>Filters</h2>
+        <form action="#">
+          <fieldset>
+            <legend>Brand</legend>
+            <label class="check"><input type="checkbox" name="brand" value="a" /> Acme</label>
+            <label class="check"><input type="checkbox" name="brand" value="b" /> Bolt</label>
+            <label class="check"><input type="checkbox" name="brand" value="c" /> Core</label>
+          </fieldset>
+          <div role="group" aria-labelledby="p-filter-colour">
+            <h3 id="p-filter-colour">Colour</h3>
+            <label class="check"><input type="checkbox" name="colour" value="r" /> Red</label>
+            <label class="check"><input type="checkbox" name="colour" value="b" /> Blue</label>
+          </div>
+          <fieldset>
+            <legend>Price</legend>
+            <div class="bar">
+              <div><label for="p-min">Minimum</label><input id="p-min" class="n4" inputmode="numeric" /></div>
+              <div><label for="p-max">Maximum</label><input id="p-max" class="n4" inputmode="numeric" /></div>
+            </div>
+          </fieldset>
+        </form>
+      </aside>
+
+      <section id="p-rating">
+        <h2>Leave a review</h2>
+        <form action="#">
+          <fieldset class="stars">
+            <legend>Your rating</legend>
+            <input type="radio" name="stars" id="st-1" /><label for="st-1">1</label>
+            <input type="radio" name="stars" id="st-2" /><label for="st-2">2</label>
+            <input type="radio" name="stars" id="st-3" /><label for="st-3">3</label>
+          </fieldset>
+          <label for="review">Your review</label>
+          <textarea id="review" rows="3" cols="40"></textarea>
+        </form>
+      </section>
+
+      <!-- Buttons that are pressed, a toolbar and tabs: not form controls in a set. -->
+      <section id="p-widgets">
+        <h2>View</h2>
+        <div class="q">Period</div>
+        <div class="seg">
+          <button type="button" aria-pressed="true">Day</button>
+          <button type="button" aria-pressed="false">Week</button>
+          <button type="button" aria-pressed="false">Month</button>
+        </div>
+        <div role="toolbar" aria-label="Formatting">
+          <button type="button">Bold</button>
+          <button type="button">Italic</button>
+        </div>
+        <div role="tablist" aria-label="Sections">
+          <span role="tab" aria-selected="true" tabindex="0">Overview</span>
+          <span role="tab" aria-selected="false" tabindex="-1">Details</span>
+        </div>
+      </section>
+
+      <!-- A dashboard: a row of filters, each with its label. -->
+      <section id="p-dashboard">
+        <h2>Sales</h2>
+        <form action="#" class="bar">
+          <label for="dash-period">Period</label>
+          <select id="dash-period"><option>This month</option></select>
+          <label for="dash-region">Region</label>
+          <select id="dash-region"><option>All</option></select>
+        </form>
+      </section>
+
+      <!-- A settings page: each section under a heading. -->
+      <section id="p-settings">
+        <h2>Settings</h2>
+        <h3>Privacy</h3>
+        <div class="setting"><label for="set-1">Share usage data</label><input type="checkbox" id="set-1" /></div>
+        <div class="setting"><label for="set-2">Personalised adverts</label><input type="checkbox" id="set-2" /></div>
+        <h3>Account</h3>
+        <label for="set-name">Display name</label>
+        <input id="set-name" />
+        <label for="set-lang">Language</label>
+        <select id="set-lang"><option>English</option><option>Français</option></select>
+      </section>
+
+      <!-- A hint under a field, tied to nothing, and then a set of checkboxes: the hint is not their label. -->
+      <form action="#" id="p-hint">
+        <h2>Alerts</h2>
+        <label for="alert-email">Email</label>
+        <input type="email" id="alert-email" />
+        <div class="hint">We never share it.</div>
+        <div id="p-hint-set" style="margin-top: 28px">
+          <label class="check"><input type="checkbox" name="al1" /> Orders</label>
+          <label class="check"><input type="checkbox" name="al2" /> Offers</label>
+        </div>
+      </form>
+
+      <!-- A table of inputs. -->
+      <section id="p-table">
+        <h2>Guests</h2>
+        <table>
+          <tr><th scope="col">Guest</th><th scope="col">Name</th><th scope="col">Meal</th></tr>
+          <tr><th scope="row">1</th><td><input aria-label="Name" /></td><td><select aria-label="Meal"><option>Standard</option></select></td></tr>
+          <tr><th scope="row">2</th><td><input aria-label="Name" /></td><td><select aria-label="Meal"><option>Standard</option></select></td></tr>
+        </table>
+      </section>
+    </main>
+
+    <!-- A cookie banner with choices: a named dialog, the choices in a fieldset. -->
+    <div class="banner" role="dialog" aria-labelledby="p-cookie-title">
+      <h2 id="p-cookie-title">Cookies</h2>
+      <p>We use cookies to measure visits. Choose what you accept.</p>
+      <fieldset>
+        <legend>Purposes</legend>
+        <label class="check"><input type="checkbox" checked disabled /> Necessary</label>
+        <label class="check"><input type="checkbox" /> Statistics</label>
+      </fieldset>
+      <button type="button">Save</button> <button type="button">Accept all</button>
+    </div>
+
+    <footer>
+      <form action="#" id="p-newsletter">
+        <label for="nl-email">Newsletter</label>
+        <div class="bar"><input type="email" id="nl-email" placeholder="you@example.org" /> <button type="submit">Subscribe</button></div>
+      </form>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "description": "A well-marked registration form: every set of related controls is a fieldset with a legend or has a group role and a name. As it is, nothing is reported above info. The mutation test strips the grouping and expects the sets back.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

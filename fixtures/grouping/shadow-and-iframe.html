@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: shadow-and-iframe</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      iframe { border: 3px solid #595959; padding: 10px; display: block; margin: 0 0 16px; }
+      #tilted { transform: rotate(2deg) scale(0.9); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>A set of radios under a question that is tied to nothing, inside an open shadow root and inside a same-origin iframe that has a border and padding, each next to a set that is grouped. The same document in an iframe that is rotated and scaled is not looked into.</p>
+      <div id="host"></div>
+      <iframe id="frame" src="shadow-and-iframe-child.html" title="Child document" width="480" height="230"></iframe>
+      <iframe id="tilted" src="shadow-and-iframe-child.html" title="Rotated child document" width="480" height="230"></iframe>
+    </main>
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+        '<style>label { display: block; margin: 4px 0; } .q { margin: 0 0 8px; } div, fieldset { margin: 0 0 16px; }</style>' +
+        '<div id="set"><p class="q">Shadow question?</p><label><input type="radio" name="s"> Yes</label><label><input type="radio" name="s"> No</label></div>' +
+        '<span id="shadow-label" class="q">Grouped in the shadow tree</span><div id="grouped" role="radiogroup" aria-labelledby="shadow-label"><label><input type="radio" name="g"> Yes</label><label><input type="radio" name="g"> No</label></div>';
+    </script>
+  </body>
+</html>

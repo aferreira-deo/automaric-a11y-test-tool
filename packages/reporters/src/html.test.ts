@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ScanResult } from '@a11y-vision/core';
+import { resolveConfig, runChecks } from '@a11y-vision/core';
+import type { GroupingBlock, GroupingControl, ScanResult, Snapshot } from '@a11y-vision/core';
 import { toBase64, toHtmlReport } from './html.js';
 
 describe('toBase64', () => {
@@ -195,6 +196,81 @@ describe('toHtmlReport for headings findings', () => {
     expect(page).toContain('<dt>followedByBody</dt><dd>yes</dd>');
     expect(page).toContain('<dt>broken</dt><dd></dd>');
     expect(page).not.toContain('<img src=x');
+    expect(page).not.toContain('<i>');
+    expect(page).toContain('<figcaption>In context</figcaption>');
+  });
+});
+
+describe('toHtmlReport for grouping findings', () => {
+  // Findings made by the check itself, from a page whose visible text and accessible names are markup.
+  const hostile = '<img src=x onerror=alert(1)>';
+  const control = (index: number, name: string): GroupingControl => ({
+    selector: `#c${index}`,
+    frame: '',
+    ord: 2 + index,
+    chain: [2 + index, 2 + index, 0, 9],
+    box: { x: 32, y: 40 + index * 24, width: 16, height: 16 },
+    kind: 'radio',
+    role: 'radio',
+    element: 'input:radio',
+    name,
+    description: '',
+    setKey: 'n:0:0:x',
+    form: 0,
+    region: '',
+    cell: -1,
+    inWidget: false,
+    fontSize: 16,
+    rtl: false,
+  });
+  const label: GroupingBlock = {
+    frame: '',
+    at: 1,
+    end: 1,
+    text: `${hostile} ?`,
+    chars: 20,
+    words: 3,
+    lines: 1,
+    box: { x: 32, y: 16, width: 200, height: 18 },
+    style: { family: 'arial', size: 16, weight: 400, color: '#1a1a1a', transform: 'none', italic: false },
+    contexts: [],
+    heading: 0,
+    labels: [],
+    group: -1,
+    describes: false,
+    otherLabel: false,
+    inControl: false,
+    disclosure: false,
+    free: true,
+  };
+  const snapshot: Snapshot = {
+    environment: result.environment,
+    grouping: {
+      controls: [control(0, '<b>Yes</b>'), control(1, '"No"')],
+      totalControls: 2,
+      groups: [],
+      blocks: [label],
+      totalBlocks: 1,
+      axComplete: true,
+      containers: { '0': '#set"<i>' },
+      captures: { 'set:0': { crop: 'grouping/x.png' } },
+    },
+    nodes: [],
+    axTree: [],
+    screenshots: { tiles: [], clips: {} },
+  };
+  const findings = runChecks(snapshot, resolveConfig({ checks: ['grouping'] }));
+  const page = toHtmlReport({ ...result, findings }, { 'grouping/x.png': Uint8Array.of(1, 2, 3) });
+
+  it('reports the set as likely and never as a fail', () => {
+    expect(findings.map((finding) => finding.status).sort()).toEqual(['info', 'likely']);
+  });
+  it('shows the visible text and the accessible names, escaped, with the capture', () => {
+    expect(page).toContain('&lt;img src=x onerror=alert(1)&gt; ?');
+    expect(page).toContain('&lt;b&gt;Yes&lt;/b&gt;');
+    expect(page).toContain('#set&quot;&lt;i&gt;');
+    expect(page).not.toContain('<img src=x');
+    expect(page).not.toContain('<b>Yes');
     expect(page).not.toContain('<i>');
     expect(page).toContain('<figcaption>In context</figcaption>');
   });

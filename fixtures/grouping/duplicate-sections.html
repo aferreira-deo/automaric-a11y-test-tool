@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: duplicate-sections</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      form { margin: 0 0 40px; padding: 0 0 24px; border-bottom: 1px solid #595959; }
+      .t { font-weight: 700; font-size: 18px; margin: 16px 0 8px; }
+      h2 { font-size: 20px; margin: 16px 0 8px; }
+      label { display: block; margin: 8px 0 2px; }
+      input, select { font: inherit; padding: 4px 8px; border: 1px solid #595959; background: #fff; color: inherit; }
+      fieldset { margin: 0 0 16px; padding: 12px 16px; border: 1px solid #595959; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid #595959; padding: 6px 12px; }
+      .n4 { width: 64px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sections with the same field names</h1>
+      <p>Forms with two sections whose fields have the same accessible names. Only the first and the last form leave a screen reader user without a way to tell them apart.</p>
+
+      <!-- Titles in bold, tied to nothing. -->
+      <form action="#" id="f-plain">
+        <div class="t">Billing address</div>
+        <div id="d-billing">
+          <label for="b-street">Street</label><input id="b-street" />
+          <label for="b-city">City</label><input id="b-city" />
+          <label for="b-post">Postcode</label><input id="b-post" class="n4" />
+        </div>
+        <div class="t">Delivery address</div>
+        <div id="d-delivery">
+          <label for="d-street">Street</label><input id="d-street" />
+          <label for="d-city">City</label><input id="d-city" />
+          <label for="d-post">Postcode</label><input id="d-post" class="n4" />
+        </div>
+      </form>
+
+      <!-- The same with fieldsets. -->
+      <form action="#" id="f-fieldsets">
+        <fieldset>
+          <legend>Billing address</legend>
+          <label for="fb-street">Street</label><input id="fb-street" />
+          <label for="fb-city">City</label><input id="fb-city" />
+        </fieldset>
+        <fieldset>
+          <legend>Delivery address</legend>
+          <label for="fd-street">Street</label><input id="fd-street" />
+          <label for="fd-city">City</label><input id="fd-city" />
+        </fieldset>
+      </form>
+
+      <!-- The same under headings: advisory. -->
+      <form action="#" id="f-headings">
+        <h2>Billing address</h2>
+        <div id="h-billing">
+          <label for="hb-street">Street</label><input id="hb-street" />
+          <label for="hb-city">City</label><input id="hb-city" />
+        </div>
+        <h2>Delivery address</h2>
+        <div id="h-delivery">
+          <label for="hd-street">Street</label><input id="hd-street" />
+          <label for="hd-city">City</label><input id="hd-city" />
+        </div>
+      </form>
+
+      <!-- Each field is described by the title of its section. -->
+      <form action="#" id="f-described">
+        <div class="t" id="x-billing">Billing address</div>
+        <div>
+          <label for="xb-street">Street</label><input id="xb-street" aria-describedby="x-billing" />
+          <label for="xb-city">City</label><input id="xb-city" aria-describedby="x-billing" />
+        </div>
+        <div class="t" id="x-delivery">Delivery address</div>
+        <div>
+          <label for="xd-street">Street</label><input id="xd-street" aria-describedby="x-delivery" />
+          <label for="xd-city">City</label><input id="xd-city" aria-describedby="x-delivery" />
+        </div>
+      </form>
+
+      <!-- Names that differ. -->
+      <form action="#" id="f-distinct">
+        <div class="t">Billing address</div>
+        <div>
+          <label for="nb-street">Billing street</label><input id="nb-street" />
+          <label for="nb-city">Billing city</label><input id="nb-city" />
+        </div>
+        <div class="t">Delivery address</div>
+        <div>
+          <label for="nd-street">Delivery street</label><input id="nd-street" />
+          <label for="nd-city">Delivery city</label><input id="nd-city" />
+        </div>
+      </form>
+
+      <!-- Two forms, each complete in itself. -->
+      <form action="#" id="f-login">
+        <div class="t">Sign in</div>
+        <label for="l-email">Email</label><input id="l-email" type="email" />
+        <label for="l-pass">Password</label><input id="l-pass" type="password" />
+      </form>
+      <form action="#" id="f-register">
+        <div class="t">Create an account</div>
+        <label for="r-email">Email</label><input id="r-email" type="email" />
+        <label for="r-pass">Password</label><input id="r-pass" type="password" />
+      </form>
+
+      <!-- The rows of a table: its headers tell them apart. -->
+      <form action="#" id="f-table">
+        <table>
+          <tr><th scope="col">Guest</th><th scope="col">First name</th><th scope="col">Last name</th></tr>
+          <tr><th scope="row">1</th><td><input aria-label="First name" /></td><td><input aria-label="Last name" /></td></tr>
+          <tr><th scope="row">2</th><td><input aria-label="First name" /></td><td><input aria-label="Last name" /></td></tr>
+        </table>
+      </form>
+
+      <!-- A period: two dates whose parts have the same names. -->
+      <form action="#" id="f-period">
+        <div class="t">From</div>
+        <div id="p-from">
+          <select aria-label="Day"><option>1</option></select> <select aria-label="Month"><option>January</option></select> <select aria-label="Year"><option>2026</option></select>
+        </div>
+        <div class="t">To</div>
+        <div id="p-to">
+          <select aria-label="Day"><option>1</option></select> <select aria-label="Month"><option>January</option></select> <select aria-label="Year"><option>2026</option></select>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

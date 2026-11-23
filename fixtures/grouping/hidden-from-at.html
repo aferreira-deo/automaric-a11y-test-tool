@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: hidden-from-at</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      label { display: block; margin: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sets that assistive technology is not given</h1>
+      <p>Only the first set is in the accessibility tree.</p>
+      <div class="case" id="exposed">
+        <p class="q">Exposed question?</p>
+        <label><input type="radio" name="e" /> Yes</label>
+        <label><input type="radio" name="e" /> No</label>
+      </div>
+      <div class="case" id="aria-hidden" aria-hidden="true">
+        <p class="q">Hidden question?</p>
+        <label><input type="radio" name="h" tabindex="-1" /> Yes</label>
+        <label><input type="radio" name="h" tabindex="-1" /> No</label>
+      </div>
+      <div class="case" id="inert" inert>
+        <p class="q">Inert question?</p>
+        <label><input type="radio" name="i" /> Yes</label>
+        <label><input type="radio" name="i" /> No</label>
+      </div>
+      <div class="case" id="not-displayed" style="display: none">
+        <p class="q">Question that is not displayed?</p>
+        <label><input type="radio" name="n" /> Yes</label>
+        <label><input type="radio" name="n" /> No</label>
+      </div>
+      <details class="case" id="closed">
+        <summary>More questions</summary>
+        <p class="q">Question in a closed panel?</p>
+        <label><input type="radio" name="c" /> Yes</label>
+        <label><input type="radio" name="c" /> No</label>
+      </details>
+    </main>
+  </body>
+</html>

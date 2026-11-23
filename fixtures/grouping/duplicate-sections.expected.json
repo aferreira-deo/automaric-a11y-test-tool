@@ -1,0 +1,11 @@
+{
+  "description": "Two sections of one form whose fields have the same accessible names. Likely when nothing tells them apart programmatically: titles in bold tied to nothing, and the two dates of a period. Advisory when each section stands under a heading. Nothing when each section is a fieldset with a legend, when each field is described by the title of its section, when the names differ, when the fields are in two forms, and when they are in the rows of a table.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#d-delivery", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/duplicate-names", "flags": ["fields"] },
+    { "selector": "#h-delivery", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/duplicate-names", "flags": ["fields", "headingLabel"] },
+    { "selector": "#p-to", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/duplicate-names", "flags": ["fields"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

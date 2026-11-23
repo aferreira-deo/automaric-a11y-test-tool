@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: choice-sets</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      label { display: block; margin: 4px 0; }
+      .inline label, .inline .q { display: inline-block; margin: 0 16px 0 0; }
+      fieldset { margin: 0 0 32px; padding: 12px 16px; border: 1px solid #595959; }
+      input[type="text"], input[type="email"] { font: inherit; padding: 4px 8px; border: 1px solid #595959; }
+      .opts [role="radio"] { display: inline-block; padding: 6px 12px; margin-right: 8px; border: 2px solid #595959; border-radius: 4px; }
+      .opts [aria-checked="true"] { background: #1a1a1a; color: #fff; }
+      /* A native radio hidden under its label, which is drawn as a pill. */
+      .vh { position: absolute; opacity: 0; width: 1px; height: 1px; }
+      .pills label { display: inline-block; padding: 6px 12px; margin-right: 8px; border: 2px solid #595959; border-radius: 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Order form</h1>
+      <p>Every set of radios or checkboxes below has a visible question or title, and nothing ties that text to the controls: no fieldset with a legend, no named group. The names of the options say little on their own.</p>
+      <form action="#">
+        <div class="case" id="q-car">
+          <p class="q">Do you have a car?</p>
+          <label><input type="radio" name="car" /> Yes</label>
+          <label><input type="radio" name="car" /> No</label>
+        </div>
+
+        <div class="case" id="q-contact">
+          <div class="q b">How should we contact you?</div>
+          <label><input type="checkbox" name="by-email" /> Email</label>
+          <label><input type="checkbox" name="by-sms" /> SMS</label>
+          <label><input type="checkbox" name="by-post" /> Post</label>
+        </div>
+
+        <!-- Checkboxes right after the checkboxes above: the title between them starts a set of its own. -->
+        <div class="case" id="q-topics">
+          <div class="q b">Topics</div>
+          <label><input type="checkbox" name="news" /> News</label>
+          <label><input type="checkbox" name="offers" /> Offers</label>
+        </div>
+
+        <!-- A fieldset without a legend is a group without a name. -->
+        <fieldset id="q-unnamed-fieldset">
+          <div class="q">Preferred language</div>
+          <label><input type="radio" name="lang" /> English</label>
+          <label><input type="radio" name="lang" /> French</label>
+        </fieldset>
+
+        <div class="case" id="q-unnamed-group" role="group">
+          <div class="q">Size</div>
+          <label><input type="radio" name="size" /> Small</label>
+          <label><input type="radio" name="size" /> Medium</label>
+          <label><input type="radio" name="size" /> Large</label>
+        </div>
+
+        <!-- Custom radios without a radiogroup around them. -->
+        <div class="case" id="q-custom">
+          <span class="q b">Plan</span>
+          <div class="opts">
+            <div role="radio" aria-checked="true" tabindex="0">Basic</div>
+            <div role="radio" aria-checked="false" tabindex="-1">Pro</div>
+            <div role="radio" aria-checked="false" tabindex="-1">Team</div>
+          </div>
+        </div>
+
+        <!-- The question beside its answers, on one line. -->
+        <div class="case inline" id="q-inline">
+          <span class="q">Newsletter?</span>
+          <label><input type="radio" name="news-yn" /> Yes</label>
+          <label><input type="radio" name="news-yn" /> No</label>
+        </div>
+
+        <!-- A label element that belongs to no control. -->
+        <div class="case" id="q-label-element">
+          <label class="q">Gift wrapping</label>
+          <label><input type="radio" name="wrap" /> None</label>
+          <label><input type="radio" name="wrap" /> Paper</label>
+          <label><input type="radio" name="wrap" /> Box</label>
+        </div>
+
+        <!-- Native radios hidden under labels drawn as pills. -->
+        <div class="case" id="q-rating">
+          <div class="q b">Your rating</div>
+          <div class="pills">
+            <input class="vh" type="radio" name="rate" id="rate-1" /><label for="rate-1">Poor</label>
+            <input class="vh" type="radio" name="rate" id="rate-2" /><label for="rate-2">Fair</label>
+            <input class="vh" type="radio" name="rate" id="rate-3" /><label for="rate-3">Good</label>
+          </div>
+        </div>
+
+        <!-- A fieldset that groups a larger part of the form: its legend is not the question of the radios inside. -->
+        <fieldset id="order">
+          <legend>Your order</legend>
+          <label>Name <input type="text" name="name" /></label>
+          <label>Email <input type="email" name="email" /></label>
+          <div id="q-gift" style="margin-top: 20px">
+            <div class="q b">Gift receipt?</div>
+            <label><input type="radio" name="gift" /> Yes</label>
+            <label><input type="radio" name="gift" /> No</label>
+          </div>
+        </fieldset>
+      </form>
+    </main>
+  </body>
+</html>

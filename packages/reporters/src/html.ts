@@ -58,7 +58,7 @@ function cropLabel(id: string): string {
   if (id.endsWith('-focused.png')) return 'Focused';
   if (id.endsWith('-unfocused.png')) return 'Not focused';
   if (id.startsWith('icon-contrast/')) return 'At rest';
-  if (id.startsWith('headings/') || id.startsWith('lists/')) return 'In context';
+  if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/')) return 'In context';
   return 'Capture';
 }
 

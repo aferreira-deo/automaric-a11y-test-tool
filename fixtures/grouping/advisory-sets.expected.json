@@ -1,0 +1,12 @@
+{
+  "description": "Sets under a visible title without a group that are advisory and not likely: the title is a heading, the names of the controls are self-explanatory, the title is the button that opens the set, the controls are switches.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#a-heading", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["radios", "headingLabel"] },
+    { "selector": "#a-long", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "selfExplanatory"] },
+    { "selector": "#a-disclosure", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "disclosureLabel"] },
+    { "selector": "#a-switches", "check": "grouping", "status": "advisory", "wcag": "1.3.1", "rule": "grouping/ungrouped-controls", "flags": ["checkboxes", "switches"] },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

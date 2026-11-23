@@ -1,0 +1,9 @@
+{
+  "description": "Sets that assistive technology is not given: under aria-hidden, inert, not displayed, in a closed details element. Nothing is reported for them. One set that is exposed stands next to them and is likely.",
+  "checks": ["grouping"],
+  "exact": true,
+  "expected": [
+    { "selector": "#exposed", "check": "grouping", "status": "likely", "wcag": "1.3.1", "rule": "grouping/unassociated-label" },
+    { "selector": "html", "check": "grouping", "status": "info", "rule": "grouping/survey" }
+  ]
+}

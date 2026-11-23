@@ -553,8 +553,140 @@ export interface ListSurvey {
   captures: Record<string, ListCapture>;
 }
 
+/**
+ * What a form control is to the grouping check.
+ * - `radio`: the role radio. `checkbox`: the roles checkbox and switch.
+ * - `field`: a control that takes a value: text fields, `select`, comboboxes, spin buttons, date and time inputs.
+ */
+export type GroupingControlKind = 'radio' | 'checkbox' | 'field';
+
+/**
+ * A form control the accessibility tree exposes, with what the tree says about it. Role, name
+ * and description are those Chrome computed (`Accessibility.getFullAXTree`), never worked out
+ * from attributes here. Boxes are CSS pixels in page coordinates.
+ */
+export interface GroupingControl {
+  selector: string;
+  /** Same convention as FocusStop.frame. */
+  frame: string;
+  /** Position among the elements of the page, in document order, frames in place. Text blocks use the same scale (`GroupingBlock.at`). */
+  ord: number;
+  /** The element and its ancestors in its document, innermost first: position, and position of the last element inside, for each (`maxAncestorLevels` at most). */
+  chain: number[];
+  /** What shows of it: its own box, or that of its labels when the control itself is visually hidden (`proxied`). */
+  box: Box;
+  /** The box is that of the labels: a native control hidden under a styled label. */
+  proxied?: boolean;
+  kind: GroupingControlKind;
+  /** Role in the accessibility tree, as Chrome names it (`radio`, `textbox`, `combobox`, `Date`, …). */
+  role: string;
+  /** Tag, and for `input` its type: `input:radio`, `select`, `div`. For messages only. */
+  element: string;
+  /** Accessible name, white space collapsed, cut to `maxNameChars`. Empty when it has none. */
+  name: string;
+  /** Accessible description, likewise. */
+  description: string;
+  /**
+   * What ties a radio or a checkbox to its set, when markup says so: form and `name` attribute of
+   * a native control, or the element with the role radiogroup around a custom one. Empty otherwise.
+   */
+  setKey: string;
+  /** Form owner, as an index that only tells forms apart; -1 for none. */
+  form: number;
+  /** The region (`headings.regionSelector`) the control is in, as for text blocks; empty for none. */
+  region: string;
+  /** Position of the table cell the control is in, or -1. */
+  cell: number;
+  /** Inside a composite widget: a toolbar, a menu, a tab list, a tree, a grid, a list box. */
+  inWidget: boolean;
+  /** Computed font size of the control, CSS px: the unit of the distances that are measured from it. */
+  fontSize: number;
+  rtl: boolean;
+  /** The role is switch: an on/off setting, which stands for itself more often than an option of a set does. */
+  switch?: boolean;
+}
+
+/** An element the accessibility tree exposes as a container that can name what it holds. */
+export interface GroupingGroup {
+  selector: string;
+  frame: string;
+  /** Position of the element, and of the last element inside it. A control is inside when its position is between the two. */
+  ord: number;
+  end: number;
+  /** `group` (also what a `fieldset` is), `radiogroup`, or one of `region`, `form`, `dialog`, `alertdialog`, `tabpanel`, `search`. */
+  role: string;
+  /** Accessible name, as for controls. Empty when it has none: an unnamed group names nothing. */
+  name: string;
+}
+
+/** A block of visible text, as the grouping check needs it. Read by the same walk as for headings. */
+export interface GroupingBlock {
+  frame: string;
+  /** Where the text starts among the elements of the page: it comes before every control whose `ord` is at least this. */
+  at: number;
+  /** Where it ends: it comes after every control whose `ord` is less than this. */
+  end: number;
+  text: string;
+  chars: number;
+  words: number;
+  lines: number;
+  box: Box;
+  style: TextStyle;
+  contexts: TextContext[];
+  /** Level when the accessibility tree exposes the block as a heading, else 0. */
+  heading: number;
+  /** Controls (indexes into `controls`) this text is the label of: through `label`, or as a target of `aria-labelledby`. */
+  labels: number[];
+  /** Group (index into `groups`) this text names: its `legend`, or a target of its `aria-labelledby`; -1 for none. */
+  group: number;
+  /** A target of `aria-describedby` of a control or a group. */
+  describes: boolean;
+  /** Inside a `label` that belongs to a control which is not among `controls` (not exposed, or beyond the limit). */
+  otherLabel: boolean;
+  /** Inside a control: the text of a custom radio, the value of an editable box. */
+  inControl: boolean;
+  /** The text of a button that opens and closes something (`aria-expanded`), or of a `summary`. */
+  disclosure: boolean;
+  /**
+   * Some of the text is tied to nothing: it is no label of a control, names and describes
+   * nothing, and is not inside a control. Only such text can be the visible label of a set.
+   */
+  free: boolean;
+  /**
+   * That part of the text, when the block also holds text that is tied to something: in
+   * "Gender: ( ) Male ( ) Female" set as one line, with "Male" and "Female" in labels, it is "Gender:".
+   */
+  freeText?: string;
+}
+
+/** The capture of something the grouping check reports. */
+export type GroupingCapture = ListCapture;
+
+export interface GroupingSurvey {
+  /** In document order. */
+  controls: GroupingControl[];
+  /** Controls found, including those beyond `maxControls`. */
+  totalControls: number;
+  groups: GroupingGroup[];
+  blocks: GroupingBlock[];
+  /** Blocks found, including those beyond `headings.maxBlocks`. */
+  totalBlocks: number;
+  /**
+   * False when the accessibility tree of a document the survey looked into could not be read, or
+   * held more controls or groups than can be marked: names and groups are then not known in full,
+   * and nothing is reported above `info`.
+   */
+  axComplete: boolean;
+  /** Selectors of the elements that hold what is reported, by their position. Filled by the collector for the elements core names. */
+  containers: Record<string, string>;
+  /** Captures, by `GroupingCandidate.key`. */
+  captures: Record<string, GroupingCapture>;
+}
+
 export interface Snapshot {
   environment: Environment;
+  /** Present when the grouping check was collected. */
+  grouping?: GroupingSurvey;
   /** Present when the lists check was collected. */
   lists?: ListSurvey;
   /** Present when the headings check was collected. */
@@ -1331,6 +1463,113 @@ export interface AdjudicationConfig {
    * (default) keeps it with the verdict recorded; `info` lowers it.
    */
   listNoStatus: 'info' | 'likely';
+  /**
+   * The same open decision for the grouping check: status of a set of controls under a visible
+   * text that deterministic code reported as `likely` and of which the model judged that the text
+   * is not the label of the set. `likely` (default) keeps it with the verdict recorded; `info` lowers it.
+   */
+  groupNoStatus: 'info' | 'likely';
+}
+
+/**
+ * The grouping check (section 5.5 of the brief). Nothing it reports is ever a `fail`: the options
+ * that hold a status take `advisory` or `likely` only.
+ */
+export interface GroupingConfig {
+  /** At most this many form controls are read from the page, in document order. The survey says when there were more. */
+  maxControls: number;
+  /** At most this many controls, and this many named containers, are marked from the accessibility tree of one document. Beyond it nothing is above `info`. */
+  maxAxMarks: number;
+  /** Accessible names and descriptions are cut to this many characters. */
+  maxNameChars: number;
+  /**
+   * At most this many targets of one `aria-labelledby` or `aria-describedby` are followed, this
+   * many controls recorded for one label, and this many labels of one control shown in a capture.
+   */
+  maxLabelTargets: number;
+  /** Ancestors recorded for each control, to name the element that holds a set. */
+  maxAncestorLevels: number;
+  /** At most this many findings are reported, `likely` first. */
+  maxCandidates: number;
+  /** At most this many captures are taken. */
+  maxCaptures: number;
+  /** Margin around what a capture shows, CSS px. */
+  clipMarginCssPx: number;
+  /** A control smaller than this on one side, CSS px, is taken as visually hidden: its labels stand for it. */
+  minControlSizeCssPx: number;
+  /** Radios or checkboxes that make a set. */
+  minSetSize: number;
+  /** A set with more controls than this is not looked at as one question (a long form of independent checkboxes). */
+  maxSetSize: number;
+  /** A text above a set is its possible label when no further above it than this, in font sizes of the text. */
+  labelMaxGapEm: number;
+  /**
+   * A text beside a set, on the line of its first control, is its possible label when no further
+   * from it than this, in font sizes. Wide on purpose: in a form laid out in two columns the
+   * label stands a column away from its controls (seen on a real page: 8 font sizes), and
+   * nothing else stands between the two in the document.
+   */
+  labelInlineMaxGapEm: number;
+  /** A longer text is a paragraph and not a label: the set is then held back as `info`. */
+  labelMaxChars: number;
+  labelMaxLines: number;
+  /**
+   * A text that ends this way and has at least `labelSentenceMinWords` words is a sentence of
+   * prose, and the set under it is held back as `info`: a full stop, an exclamation mark or an
+   * ellipsis, of any script, with or without a closing bracket or quotation mark. A question
+   * mark and a colon are left out on purpose. No word of any language.
+   */
+  labelSentenceEndPattern: string;
+  labelSentenceMinWords: number;
+  /** Hints and other text that is no label (a description, a link, a button), passed over between a set and the text before it, at most. */
+  labelMaxSkipped: number;
+  /**
+   * A text above a set is taken for a hint of the control before it, and not for the label of
+   * the set, when its distance to that control is less than this share of its distance to the set.
+   */
+  hintNearerShare: number;
+  /** Vertical overlap, as a share of the lower of two boxes, from which they are on one row. */
+  sameRowMinOverlap: number;
+  /** Slack for comparisons of positions, CSS px. */
+  toleranceCssPx: number;
+  /**
+   * A name is short when it has at most this many words and at most `shortNameMaxChars`
+   * characters: "Yes", "No", "Not sure", a brand, a size. Short names say little without the
+   * question they answer. No word of any language is involved.
+   */
+  shortNameMaxWords: number;
+  shortNameMaxChars: number;
+  /** The names of a set are ambiguous on their own when at least this share of them is short or empty. */
+  ambiguousMinShare: number;
+  /**
+   * Stripped from names and from label texts before they are compared: white space, the colon
+   * that ends a label, the asterisk of a required field.
+   */
+  nameTrimPattern: string;
+  /**
+   * A fieldset or a named group is the group of a set when it holds at most this many other
+   * controls (a text field for "Other", say). With more, it is the group of a larger part of the
+   * form, and a text of its own before the set still counts as that set's label.
+   */
+  groupExtraControlsMax: number;
+  /** Fields side by side are the parts of one split field when no further apart than this, in font sizes of the field. */
+  splitMaxGapEm: number;
+  /** More fields than this in one row are a row of a grid, not a split field. */
+  splitMaxParts: number;
+  /** Two sections are reported when at least this many of their fields have the same accessible name. */
+  duplicateMinShared: number;
+  /**
+   * Status when the visible label is a heading in the accessibility tree, or the button that
+   * opens the set: a structure assistive technology does expose, although it is not tied to the
+   * controls. `advisory` by default; `likely` reports such sets like the others.
+   */
+  headingLabelStatus: 'advisory' | 'likely';
+  /** Names shown in a message, at most. */
+  messageItems: number;
+  /** Each cut to this many characters. */
+  itemTextMaxChars: number;
+  /** Names of controls handed to the adjudicator layer, at most. */
+  contextMaxItems: number;
 }
 
 export interface Config {
@@ -1345,6 +1584,8 @@ export interface Config {
   headings: HeadingsConfig;
   /** The lists check reads text blocks as the headings check does, with the settings of `headings` for that part. */
   lists: ListsConfig;
+  /** The grouping check reads text blocks as the headings check does, with the settings of `headings` for that part. */
+  grouping: GroupingConfig;
   adjudication: AdjudicationConfig;
 }
 

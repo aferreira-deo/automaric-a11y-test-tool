@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>grouping: near-threshold</title>
+    <style>
+      body { margin: 32px; font: 16px/24px Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      .case { margin: 0 0 32px; }
+      .q { margin: 0 0 8px; }
+      .b { font-weight: 700; }
+      label { display: block; margin: 0; }
+      input[type="text"] { font: inherit; padding: 4px 8px; border: 1px solid #595959; width: 40px; box-sizing: content-box; }
+      fieldset { margin: 0 0 32px; padding: 12px 16px; border: 1px solid #595959; }
+      .row { display: flex; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Near the limits</h1>
+      <p>Pairs of cases on either side of a limit of the grouping check. Font size 16 px: three font sizes are 48 px, two are 32 px.</p>
+      <form action="#">
+        <!-- labelMaxGapEm (3): the text ends 40 px above the set, then 60 px. -->
+        <div class="case" id="n-gap-in">
+          <div class="q" style="margin-bottom: 34px">Do you smoke?</div>
+          <label><input type="radio" name="g1" /> Yes</label>
+          <label><input type="radio" name="g1" /> No</label>
+        </div>
+        <div class="case" id="n-gap-out">
+          <div class="q" style="margin-bottom: 60px">Do you drink?</div>
+          <label><input type="radio" name="g2" /> Yes</label>
+          <label><input type="radio" name="g2" /> No</label>
+        </div>
+
+        <!-- labelInlineMaxGapEm (20): the text ends about 305 px before the set on its row, then about 345 px; the limit is 320 px. -->
+        <div class="case row" id="n-beside-in">
+          <div style="width: 400px"><span>Do you cycle?</span></div>
+          <div><label><input type="radio" name="b1" /> Yes</label></div>
+          <div><label><input type="radio" name="b1" /> No</label></div>
+        </div>
+        <div class="case row" id="n-beside-out">
+          <div style="width: 440px"><span>Do you swim?</span></div>
+          <div><label><input type="radio" name="b2" /> Yes</label></div>
+          <div><label><input type="radio" name="b2" /> No</label></div>
+        </div>
+
+        <!-- labelMaxChars (160): 150 characters, then 190. -->
+        <div class="case" id="n-long-in">
+          <div class="q">Would you like us to keep the details of this order on file so that the next one takes less time to fill in, and so that we can tell you when it ships?</div>
+          <label><input type="radio" name="l1" /> Yes</label>
+          <label><input type="radio" name="l1" /> No</label>
+        </div>
+        <div class="case" id="n-long-out">
+          <div class="q">We keep the details of an order on file for as long as the law requires, and no longer, unless you ask us to keep them so that the next order takes less time to fill in than this one did today.</div>
+          <label><input type="radio" name="l2" /> Yes</label>
+          <label><input type="radio" name="l2" /> No</label>
+        </div>
+
+        <!-- shortNameMaxWords (2): names of two words, then of three. -->
+        <div class="case" id="n-words-in">
+          <div class="q">Seating</div>
+          <label><input type="radio" name="w1" /> Window seat</label>
+          <label><input type="radio" name="w1" /> Aisle seat</label>
+        </div>
+        <div class="case" id="n-words-out">
+          <div class="q">Catering</div>
+          <label><input type="radio" name="w2" /> A vegetarian meal</label>
+          <label><input type="radio" name="w2" /> A standard meal</label>
+        </div>
+
+        <!-- ambiguousMinShare (0.5): two short names of four, then one of three. -->
+        <div class="case" id="n-share-in">
+          <div class="q">Membership</div>
+          <label><input type="radio" name="s1" /> None</label>
+          <label><input type="radio" name="s1" /> Student</label>
+          <label><input type="radio" name="s1" /> One year, paid monthly</label>
+          <label><input type="radio" name="s1" /> Two years, paid at once</label>
+        </div>
+        <div class="case" id="n-share-out">
+          <div class="q">Support</div>
+          <label><input type="radio" name="s2" /> None</label>
+          <label><input type="radio" name="s2" /> By email, within two days</label>
+          <label><input type="radio" name="s2" /> By phone, within the hour</label>
+        </div>
+
+        <!-- splitMaxGapEm (2): two fields with one name 30 px apart, then 40 px. -->
+        <div class="case row" id="n-split-in">
+          <input type="text" aria-label="Sort code" style="margin-right: 30px" /><input type="text" aria-label="Sort code" />
+        </div>
+        <div class="case row" id="n-split-out">
+          <input type="text" aria-label="Bank code" style="margin-right: 40px" /><input type="text" aria-label="Bank code" />
+        </div>
+
+        <!-- groupExtraControlsMax (1): a fieldset with one other control, then with two. -->
+        <fieldset id="n-extra-in">
+          <legend>Colour</legend>
+          <div class="q">Pick one</div>
+          <label><input type="radio" name="e1" /> Red</label>
+          <label><input type="radio" name="e1" /> Blue</label>
+          <label>Other <input type="text" name="e1-other" /></label>
+        </fieldset>
+        <fieldset id="n-extra-out">
+          <legend>Finish</legend>
+          <div id="n-extra-out-set">
+            <div class="q">Pick one</div>
+            <label><input type="radio" name="e2" /> Matt</label>
+            <label><input type="radio" name="e2" /> Gloss</label>
+          </div>
+          <label>Other <input type="text" name="e2-other" /></label>
+          <label>Note <input type="text" name="e2-note" /></label>
+        </fieldset>
+      </form>
+    </main>
+  </body>
+</html>
