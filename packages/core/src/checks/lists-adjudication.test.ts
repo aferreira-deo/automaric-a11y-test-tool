@@ -55,6 +55,8 @@ function snapshotOf(): Snapshot {
     totalBlocks: blocks.length,
     groups: [],
     totalGroups: 0,
+    parents: 0,
+    totalParents: 0,
     lists: [
       { kind: 'presentational', selector: '#presentational', frame: '', tag: 'ul', box: { x: 32, y: 400, width: 300, height: 60 }, ord: 500, items: 2, markers: 2, markersInside: false, target: 0 },
       { kind: 'unstyled', selector: '#unstyled', frame: '', tag: 'ul', box: { x: 32, y: 500, width: 300, height: 60 }, ord: 600, items: 2, markers: 0, markersInside: false, target: 1 },

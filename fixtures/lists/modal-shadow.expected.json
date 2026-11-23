@@ -1,0 +1,10 @@
+{
+  "description": "A modal dialog opened with showModal(). Content outside it is inert and not in the accessibility tree: its bulleted lines are not reported. Content inside it is read, in the light tree and in the shadow tree of a component the dialog holds: both bulleted lists are likely, and the title without heading semantics in the shadow tree is a likely heading.",
+  "checks": ["headings", "lists"],
+  "expected": [
+    { "selector": "#light", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#panel >>> #shadow", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#panel >>> #title", "check": "headings", "status": "likely", "wcag": "1.3.1" },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

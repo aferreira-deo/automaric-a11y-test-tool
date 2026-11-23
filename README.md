@@ -379,14 +379,20 @@ either separated by `br` inside one block, or sibling blocks: each the first tex
 side by side under one parent, with nothing else between them. A marker is:
 
 - a bullet character (`bulletPattern`: bullets, geometric shapes, arrows, dingbats, check marks, emoji, the
-  Japanese middle dot and reference mark);
-- a hyphen, an en dash, an asterisk, a middle dot or an angle followed by a space (`weakBulletPattern`). The em
-  dash and the horizontal bar are left out on purpose: they open the lines of a dialogue in French and other
-  languages. A figure after the hyphen is a reduction, not an item (`- 20 %`);
-- a number, a letter or a numeral with what closes it, in sequence: `1.` `2)` `(3)` `1.2.` `4/` `1°`, digits of any
-  script (`١.`), one letter of any script (`a)` `(b)` `C.`), roman numerals (`ii.`), Chinese and Japanese numerals
-  (`一、`), enclosed numbers (`①`). The numbers have to follow each other in one notation; "i." is read as a roman
-  numeral or as a letter, as the lines after it say;
+  Japanese middle dot and reference mark). A second symbol right after the first means the first is no bullet:
+  five stars are a rating (`★★★★☆ Pretty good`), three hyphens a rule;
+- a hyphen, an en dash, an asterisk, a middle dot or an angle followed by a space (`weakBulletPattern`). These
+  open many lines that are not items, so they are held to a stricter test, below. The em dash and the horizontal
+  bar are left out altogether: they open the lines of a dialogue and little else. A figure after the hyphen is a
+  reduction, a negative amount or a temperature, not an item: text that is mostly digits, or a number and the
+  sign of a unit (`figureStartPattern`: `- 20 %`, `- 3,50 €`, `- 3 °C at dawn`). A unit written in letters does not
+  make a figure (`- 200 g de farine` is an ingredient);
+- a number, a letter or a numeral with what closes it, in sequence: `1.` `2)` `(3)` `[4]` `1.2.` `4/` `1°`, digits
+  of any script (`١.`), one letter of any script (`a)` `(b)` `C.`), roman numerals (`ii.`), Chinese and Japanese
+  numerals (`一、`), enclosed numbers (`①`). The numbers have to follow each other in one notation; "i." is read as
+  a roman numeral or as a letter, as the lines after it say. Letters follow each other by code point, from the
+  letters in `firstLetters`; kana and hangul, whose order is another, are read from `letterSequences` (gojūon and
+  iroha order in hiragana and katakana, 가나다);
 - generated content of `::before`: a bullet character, a glyph of an icon font, a counter, or a small box that is
   painted (a dot, a square, an image);
 - the same small image, inline SVG or empty painted element before every line, from `markerMinSizeCssPx` (3) to
@@ -394,17 +400,42 @@ side by side under one parent, with nothing else between them. A marker is:
 - a list-item marker on an element that is no `li` (`display: list-item` with a list style, in a colour that
   paints, with room for it).
 
-A bullet in a box of its own before the text of each item (a flex row) counts as the start of that text.
+A bullet or a number in a box of its own (`loneMarkerMaxChars`, 4 characters at most) before the text of each
+item counts as the start of that text: in a flex row, and in a flat grid where the mark and the text are two
+cells of one parent, the next mark on a later row.
+
+**The test for hyphens, dashes, asterisks and angles.** Lines that open with one of `weakBulletPattern` are
+`likely` only when all of this holds; otherwise they are `info`:
+
+1. there are `weakMinItems` (3) of them or more;
+2. they do not open with the angle that quotes a message in plain-text mail (`quotePrefixPattern`, `>`);
+3. they read as items and not as sentences: no line ends as a sentence does (`sentenceEndPattern`: a full stop, a
+   question mark, an exclamation mark or an ellipsis of any script, with or without a closing quotation mark), or
+   every line but the last ends with the semicolon or the comma of an enumeration (`itemSeparatorEndPattern`).
+
+The reason for 3: the lines of a dialogue, and of any prose that opens with a dash, are sentences and end as
+sentences; the items of a list typed with dashes are phrases without closing punctuation ("– Farine complète"),
+or the parts of one sentence ("– le nom ; – l'adresse ; – la date."). The test uses punctuation only, no word of
+any language, and it is strict on purpose: one line that ends with a full stop holds the series back. A list
+whose items are full sentences after hyphens is therefore `info`, where a tester or a model still sees it. The
+end of each line is read from the page (`lineEndChars`, 8 characters), not from the start that is kept.
 
 Held back as `info` (`lists/glyph-list-candidate`), with the reason as a flag:
 
 | Flag | What it is |
 |---|---|
-| `fewWeakItems` | Fewer than `weakMinItems` (3) lines, each opening with a hyphen, a dash or an asterisk: asides, footnotes and quoted replies open that way too. |
+| `fewWeakItems` | Fewer than `weakMinItems` (3) lines, each opening with a hyphen, a dash or an asterisk: asides and footnotes open that way too. |
+| `weakSentences` | Three or more such lines, of which at least one ends as a sentence does: a dialogue ("– Tu viens demain ?"), prose that opens with dashes. See the test above. |
+| `quotePrefix` | Lines that open with `>`, however many: a quoted reply. |
 | `fewGraphicItems` | Fewer than `graphicMinItems` (3) lines with the same image or drawn shape before each: two links that share an icon. |
+| `fewSymbolItems` | Fewer than `symbolMinItems` (3) lines that open with an arrow, a triangle, a pictogram, a dingbat or an emoji (`symbolBulletPattern`: arrows, U+25B2 to U+25C5, U+2600 to U+27BF, emoji): two messages with a warning sign, two links with an arrow. Dots, squares and the other bullets need two. |
+| `itemsAreControls` | Lines that open with such a symbol and are each one block that is a link, or that shows the pointer of a link (`cursor: pointer`), and nothing more: calls to action, the titles of an accordion. A plain bullet before each link is a list of links and stays `likely`. |
+| `colouredMarkers` | The characters the lines open with are in different colours: the swatches of a legend ("■ Sales", "■ Costs"), the dots of a status. The bullets of a list look the same. |
 | `mixedGlyphs` | Lines that open with different symbols, one of them used once: symbols that label a line (a telephone, an envelope). |
 | `startsMidSequence` | Numbers that follow each other and do not start at 1, a or i: dates ("12. Mai", "13. Mai"), or a list that goes on from elsewhere. |
 | `fewLetterItems` | Fewer than `letterMinItems` (3) lines numbered "A.", "B.": initials of names. "a)" and "(a)" need two. |
+| `initialsAndNames` | Every line reads as a capital letter, a full stop and one capitalised word, then the end or punctuation (`initialNamePattern`): "A. Martin, Lyon", "B. Nguyen, Nantes". Titles of several words ("A. Scope of the regulation") and "a." or "A)" are not held back. |
+| `sameWordAfterNumber` | Every line goes on with the same word after "1.", "2.": dates ("1. Mai", "2. Mai"), ranks, floors. The items of a list seldom all open with one word; steps that do ("1. Add …", "2. Add …") are held back with them. Only for digits closed by a full stop. |
 | `itemsHeadText` | Numbered lines that each have further blocks of text under them (steps, or the numbered titles of sections), and lines with any other marker that each have `headedItemMinBlocks` (3) blocks or more: the titles of panels with an icon before each. |
 
 Not reported at all: one line alone; numbers that do not follow each other; bullets side by side on one line
@@ -432,8 +463,12 @@ of a series that is reported, and whatever is reported for its bullets or as pai
 
 **Names and values** (`lists/key-value`, `advisory`). Three or more rows that each hold a short name and a value
 side by side, the names in one style at one edge and the values in another style or after a colon; or three or
-more lines that each read as a name of at most `keyMaxWords` (5) words, a colon and a value. Outside `dl` and
-tables. Titles that are links are not names, and neither are hours ("09:30 Welcome").
+more lines that each read as a name of at most `keyMaxWords` (4) words, a colon and a value. Outside `dl` and
+tables. The names of one layout have to differ from each other, and the names of lines with a colon have to be
+set in one style each, the same on every line (the page gives the styles of the text before the colon,
+`keySeparatorChars`). That leaves out a chat ("Alice: …", "Bob: …", "Alice: …": the names come back) and a feed of
+activity ("**Marsha Labat** posted a video: …": a name in bold and a verb, and more words than a name has).
+Titles that are links are not names, and neither are hours ("09:30 Welcome").
 
 **Lists without markers** (`lists/list-style-none`, `info`). A real `ul`, `ol` or `menu`, exposed as a list by
 Chrome, of which no item shows a list marker or generated text or image of its own, without an explicit role and
@@ -449,12 +484,17 @@ accessible generated content in `::before`, or when the list is inside a navigat
 `lists/survey` (`info`) gives the counts, and the flag `truncated` when something was left out: at most
 `maxCandidates` (150) findings above the inventory are reported (`likely` first, then `advisory`, then `info`,
 each in document order), `maxCaptures` (120) captures taken, `maxGroups` (400) series and `maxListElements` (400)
-lists read. A finding beyond the captures, under a fixed banner or in a place that cannot be shown carries
+lists read, and `maxGroupParents` (5000) elements with three children or more looked at for series of siblings
+(`parentsNotRead` says how many were not). A finding beyond the captures, under a fixed banner or in a place that cannot be shown carries
 `notCaptured` or `covered` and keeps its status: nothing is measured on a capture here. When the accessibility
 tree cannot be read, or a document has more lists than can be marked, nothing is above `info` (`axIncomplete`).
 
 A finding names the element that holds the items and gives their number, the first of them as text, and a capture
-of the series. Of two series under one parent, the second is named after its first line.
+of the series. Of two series under one parent, the second is named after its first line. Two series of lines in
+one block (bullets, a line of text, then numbers, all in one `p`) are two findings on the same element: the
+first has the id it would have alone, the second an id that also holds the line it starts at, so both are the
+same from run to run. Should two findings still have one rule and one element (a page with the same `id`
+twice), the one of the highest status is listed and the survey counts the other (`sameElementNotListed`).
 
 Every pattern is an option and holds no word of any language.
 
@@ -467,10 +507,15 @@ Every pattern is an option and holds no word of any language.
 - **What a "no" of a model does** to a `likely` series of lines: nothing by default, as for headings
   (`adjudication.listNoStatus: "likely"`); `"info"` or `--ai-lower-on-no` lowers it.
 - **Two lines are a list.** The brief says "two or more"; that holds for bullet characters, numbers, counters and
-  list-item markers. Three are asked for hyphens, for images and shapes, and for letters with a full
-  stop (see the table above): with two, real pages gave more asides, pairs of links with one icon and initials
-  than lists. Each limit is an option (`minItems`, `weakMinItems`, `graphicMinItems`, `letterMinItems`); the two
-  lines are still reported, as `info`, and a model can raise them.
+  list-item markers. Three are asked for hyphens, for arrows, pictograms and emoji, for images and shapes, and
+  for letters with a full stop (see the table above): with two, real pages gave more asides, pairs of alerts,
+  pairs of links with one icon and initials than lists. Each limit is an option (`minItems`, `weakMinItems`,
+  `symbolMinItems`, `graphicMinItems`, `letterMinItems`); the two lines are still reported, as `info`, and a model
+  can raise them.
+- **Lines after a hyphen or a dash are `info` unless they read as items.** The brief asks for `likely` on lines
+  that start with a bullet glyph; for the glyphs that also open dialogue, asides and quoted mail, precision
+  comes first and the test above decides. `sentenceEndPattern` set to a pattern that never matches (`(?!)`) gives
+  `likely` from three lines again, quoted lines apart.
 
 #### How the adjudicator layer takes the candidates
 
@@ -498,10 +543,22 @@ status is a policy), nor the inventory.
   drawn twice with different markup is two icons. Icons cut out of one sprite are told apart by position.
 - Lines that are indented differently are not one series, so a list with one nested item under each other is
   missed; items in two columns are found when each edge is shared by two lines.
-- A dialogue whose lines open with an en dash or a hyphen is reported as a list (`likely` from three lines): the
-  em dash is the only dash left out. Dates in German that start on the first of a month ("1. Mai", "2. Mai") read
-  as a numbered list. Sequences of letters are known for scripts whose letters follow each other in Unicode, from
-  the letters in `firstLetters`.
+- What tells a list from its lookalikes is punctuation, colour, the pointer and the first word, never the
+  meaning. So: a dialogue whose lines have no closing punctuation, after hyphens, is still `likely`; a list typed
+  with hyphens whose items are sentences is `info` (`weakSentences`), and so are numbered steps that all open with
+  one word (`sameWordAfterNumber`) and letters before single capitalised words ("A. Scope", "B. Definitions":
+  `initialsAndNames`). Two numbered sentences that happen to open with "1." and "2." ("1. Januar ist ein
+  Feiertag …", "2. Weihnachtstag ebenso …") are `likely`. A legend whose swatches are images, or three alerts
+  with the same sign, are not told from lists. A temperature with its unit in letters and no degree sign
+  ("- 3 C") is an item.
+- Sequences of letters are known for scripts whose letters follow each other in Unicode, from the letters in
+  `firstLetters`, and for the sequences in `letterSequences`. Half-width kana and other orders are not known.
+- Lines are cut at `br` only. Text that keeps its line breaks through `white-space: pre` or `pre-line` is one
+  line to the survey, so bullets typed on such lines are not found. This is left as it is on purpose: outside
+  `pre` and `code`, which are never read for lists, such text is mostly code and configuration shown in a `div`
+  ("- name: build", "- name: test"), which would read as a list of three phrases.
+- In a flat grid, a mark in a cell of its own is paired with the one cell after it. Items of three cells or
+  more (a mark, a title, a price), and marks in the last column, are not found that way.
 - Lines in the cells of a table are never items, also in a table used for layout that does not say so with
   `role="presentation"`: bullets as images in the cells of an old layout table are missed.
 - A series of sibling blocks is compared by tags only. Cards that differ by one optional element are two shapes
@@ -512,7 +569,10 @@ status is a policy), nor the inventory.
   seen on a real page of legal text numbered a), b), c).
 - A modal dialog opened with `showModal()` makes the rest of the page inert, and Chrome takes it out of the
   accessibility tree: nothing outside the dialog is reported (it is treated as hidden from assistive technology,
-  for headings as well). A modal dialog inside a shadow root is not noticed.
+  for headings as well). Inside and outside are those of the composed tree: what a component of the dialog
+  renders in its shadow tree is inside it, and a dialog that lives in a shadow tree is found. The dialogs are
+  looked for once per reading of the page. With two modal dialogs open, the content of both is read, although
+  Chrome exposes only the one opened last (verified): the DOM does not say which one that is.
 - Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. A series
   never spans two documents.
 - The capture shows the series as far as the window does: a list taller than the window is cut. Other covers than
@@ -594,12 +654,25 @@ The icon check also blurs the focused element before it looks at the controls, s
 as part of a control. Focus is put back with everything else.
 
 The headings and the lists checks read the accessibility tree of the page and of its same-origin iframes, and
-scroll what they report into view to capture it. On a page that uses `content-visibility: auto`, they also adopt a
-style sheet that has the browser render what it skips, until the scan ends: Chrome leaves skipped content out of
-the accessibility tree (verified: a list or a heading in such a subtree has no node in
-`Accessibility.getFullAXTree` while it is off screen), so text read from the DOM there would look like text
-without semantics. The page can be taller while the scan runs; what the author hides with
-`content-visibility: hidden` stays unread. They change nothing else.
+scroll what they report into view to capture it. On a page that uses `content-visibility: auto`, they also have
+the browser render what it skips, until the scan ends: Chrome leaves skipped content out of the accessibility
+tree (verified: a list or a heading in such a subtree has no node in `Accessibility.getFullAXTree` while it is
+off screen), so text read from the DOM there would look like text without semantics. Only the elements whose
+computed `content-visibility` is `auto` are touched: each gets the attribute `data-a11y-vision-render` for the
+time of the scan, and a style sheet adopted by their document or shadow root makes those `visible`. The
+attribute is a change a `MutationObserver` of the page can see; it is removed with the style sheet. The page can
+be taller while the scan runs, and the browser may remember the real size of what was rendered
+(`contain-intrinsic-size: auto`), as it does after a reader has scrolled there. What the author hides with
+`content-visibility: hidden` or with `hidden="until-found"` is left as it is: not rendered, not read, and
+taking no room in a capture. They change nothing else.
+
+A page that goes to another document while it is being read (a redirect by script or by `meta refresh` that
+fires after `load`, as on a site that has moved to another domain) is read again from the start on the document
+it went to, once. The result then carries the address the scan started on (`environment.navigatedFrom`; `url` is
+the address the findings are about), and the CLI says so on stderr. Before that, such a scan stopped with
+"Cannot find context with specified id" or "Could not find node with given id". A page that navigates again
+during the second reading is an error that names the three addresses. A document that is still being parsed
+when the scan starts is waited for first (`focus.navigationTimeoutMs`, 15 s at most, for both waits).
 
 ### Known limits of the headings check
 

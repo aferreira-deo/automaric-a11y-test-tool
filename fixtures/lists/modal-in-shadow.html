@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: modal-in-shadow</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      dialog { width: 560px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>The modal dialog that is open over this page lives in the shadow tree of a component. What is outside the dialog is inert and left out of the accessibility tree, as with any modal dialog; what is inside it is not.</p>
+      <section id="outside">
+        <div>• Outside one</div>
+        <div>• Outside two</div>
+        <div>• Outside three</div>
+      </section>
+      <x-host id="host"></x-host>
+    </main>
+    <script>
+      customElements.define(
+        'x-host',
+        class extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: 'open' }).innerHTML =
+              '<dialog id="inner" style="width: 560px"><p>Text of a dialog that lives in a shadow tree.</p><section id="nested"><div>• Nested one</div><div>• Nested two</div><div>• Nested three</div></section></dialog>';
+          }
+        },
+      );
+      document.getElementById('host').shadowRoot.getElementById('inner').showModal();
+    </script>
+  </body>
+</html>

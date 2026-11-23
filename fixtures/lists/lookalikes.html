@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: lookalikes</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      section > p { margin: 0; }
+      .alert { background: #fff3cd; border: 1px solid #8a6100; padding: 8px; margin: 8px 0; }
+      .review { margin: 12px 0; }
+      .acc { padding: 8px; border: 1px solid #595959; margin: 2px 0; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Lines that open with a dash, an angle or a symbol and are not the items of a list. None of them may be reported as likely. First, a dialogue in French, each line in its own paragraph and opening with an en dash.</p>
+
+      <section id="dialogue-dash" lang="fr">
+        <p>– Tu viens demain ?</p>
+        <p>– Non, je ne peux pas, je travaille.</p>
+        <p>– Dommage, on t’attendait.</p>
+        <p>– Une autre fois, promis.</p>
+      </section>
+      <p>A dialogue with hyphens, on lines separated by line breaks.</p>
+
+      <p id="dialogue-br">- Where were you last night?<br>- At home, as always.<br>- Nobody saw you there.<br>- Nobody was looking.</p>
+      <p>A quoted reply, as in plain-text mail.</p>
+
+      <div id="quoted">&gt; I think we should ship on Friday<br>&gt; because the customer is waiting<br>&gt; and the tests are green<br>I disagree, see below.</div>
+      <p>Ratings: the first star is not a bullet.</p>
+
+      <section id="ratings">
+        <div class="review"><div>★★★★★ Excellent product</div><div>Works exactly as described, would buy again.</div></div>
+        <div class="review"><div>★★★★☆ Pretty good</div><div>Shipping was slow but the item is fine.</div></div>
+        <div class="review"><div>★★☆☆☆ Disappointing</div><div>Broke after two weeks of light use.</div></div>
+      </section>
+      <p>Two messages stacked, each with a warning sign.</p>
+
+      <section id="alerts">
+        <div class="alert">⚠️ Your trial ends in 3 days.</div>
+        <div class="alert">⚠️ Your last payment failed.</div>
+      </section>
+      <p>Two calls to action, then three, each a link that opens with an arrow.</p>
+
+      <section id="cta">
+        <div><a href="#pricing">→ Learn more about pricing</a></div>
+        <div><a href="#sales">→ Contact our sales team</a></div>
+      </section>
+      <section id="cta-three">
+        <div><a href="#pricing">→ Learn more about pricing</a></div>
+        <div><a href="#sales">→ Contact our sales team</a></div>
+        <div><a href="#docs">→ Read the documentation</a></div>
+      </section>
+      <p>Titles of an accordion made of clickable blocks, each with a triangle.</p>
+
+      <section id="accordion">
+        <div class="acc" onclick="">▶ Shipping and returns</div>
+        <div class="acc" onclick="">▶ Payment methods</div>
+        <div class="acc" onclick="">▶ Warranty</div>
+      </section>
+      <p>The legend of a chart: a square in the colour of each series.</p>
+
+      <section id="legend">
+        <div><span style="color: #b00020">■</span> Sales</div>
+        <div><span style="color: #0033a0">■</span> Costs</div>
+      </section>
+      <p>Temperatures below zero, dates in German, authors with their initials.</p>
+
+      <section id="temperatures">
+        <p>- 3 °C at dawn</p>
+        <p>- 5 °C at midnight</p>
+        <p>- 12 °C on the summit</p>
+      </section>
+      <section id="dates" lang="de">
+        <p>1. Mai Tag der Arbeit, alle Filialen geschlossen</p>
+        <p>2. Mai Betriebsversammlung im grossen Saal</p>
+        <p>3. Mai Sommerfest ab 16 Uhr</p>
+      </section>
+      <section id="initials">
+        <p>A. Martin, Université de Lyon</p>
+        <p>B. Nguyen, Université de Nantes</p>
+        <p>C. Okafor, Université de Lille</p>
+      </section>
+      <p>A chat and a feed of activity: a name, sometimes a verb, a colon, a message. Not names and values.</p>
+
+      <section id="chat">
+        <p>Alice: are you coming to the meeting?</p>
+        <p>Bob: yes, five minutes.</p>
+        <p>Alice: ok, room 4.</p>
+        <p>Bob: on my way.</p>
+      </section>
+      <section id="feed">
+        <p><b>Marsha Labat</b> posted a video: Building Better Dashboards</p>
+        <p><b>Elston Muffett</b> joined your webinar: Intro to TypeScript</p>
+        <p><b>Leigha Gorce</b> commented: This is so helpful</p>
+        <p><b>Dunn Slane</b> replied: Thank you all</p>
+      </section>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

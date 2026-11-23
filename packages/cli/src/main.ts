@@ -252,6 +252,9 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
     }
     const { result, crops, adjudication: stats } = await scanner.analyzeWithEvidence();
     if (stats) io.stderr(`${safe(describeStats(stats))}\n`);
+    if (result.environment.navigatedFrom !== undefined) {
+      io.stderr(`The page went from ${safe(result.environment.navigatedFrom)} to ${safe(result.url)} while it was being read. The findings are those of ${safe(result.url)}.\n`);
+    }
 
     const json = `${JSON.stringify(toJsonReport(result), null, 2)}\n`;
     if (values.output) await writeTo(values.output, json);

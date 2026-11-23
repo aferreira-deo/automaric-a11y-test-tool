@@ -24,7 +24,7 @@ export const REPEATED_STRUCTURE_RULE = 'lists/repeated-structure';
 export const KEY_VALUE_RULE = 'lists/key-value';
 export const LIST_STYLE_NONE_RULE = 'lists/list-style-none';
 /** Version of the candidate generator, part of the key of cached verdicts. */
-export const LISTS_GENERATOR_VERSION = '1';
+export const LISTS_GENERATOR_VERSION = '2';
 
 /** What kind of marker a series of lines has. */
 export type ListMarkerClass = 'bullet' | 'number' | 'image' | 'shape' | 'counter' | 'listItemMarker';
@@ -33,7 +33,17 @@ export type ListMarkerClass = 'bullet' | 'number' | 'image' | 'shape' | 'counter
  * Why a series of lines with bullets or numbers is `info` and not `likely`. Each is a matter of
  * judgement, which a tester or a model can settle.
  * - `fewWeakItems`: fewer than `weakMinItems` lines, all opening with a hyphen, a dash or an
- *   asterisk: asides, footnotes and quoted replies open that way too.
+ *   asterisk: asides and footnotes open that way too.
+ * - `weakSentences`: lines that open with a hyphen, a dash or an asterisk and end as sentences
+ *   do: the lines of a dialogue. Items after such a mark are phrases without closing punctuation,
+ *   or the parts of an enumeration, each closed by a semicolon or a comma.
+ * - `quotePrefix`: lines that open with the angle that quotes a message in plain-text mail.
+ * - `fewSymbolItems`: fewer than `symbolMinItems` lines that open with an arrow, a pictogram or
+ *   an emoji: two messages with a warning sign, two links with an arrow.
+ * - `itemsAreControls`: lines that open with such a symbol and are each a link or something
+ *   that is clicked, and nothing else: calls to action, titles of an accordion.
+ * - `colouredMarkers`: the characters the lines open with are in different colours: the
+ *   swatches of a legend, the dots of a status. The bullets of a list look the same.
  * - `fewGraphicItems`: fewer than `graphicMinItems` lines, each with the same image or drawn
  *   shape before it: two links with the same icon, two titles with the same ornament.
  * - `mixedGlyphs`: lines that open with different symbols, one of which is used once: symbols
@@ -41,11 +51,28 @@ export type ListMarkerClass = 'bullet' | 'number' | 'image' | 'shape' | 'counter
  * - `startsMidSequence`: numbers that follow each other but do not start at the beginning of
  *   their sequence: dates ("12. Mai", "13. Mai"), or a list that goes on from elsewhere.
  * - `fewLetterItems`: fewer than `letterMinItems` lines numbered "A.", "B.": initials of names.
+ * - `initialsAndNames`: every line reads as a capital letter, a full stop and one capitalised
+ *   word: "A. Martin", "B. Nguyen", however many there are.
+ * - `sameWordAfterNumber`: every line goes on with the same word after "1.", "2.": dates
+ *   ("1. Mai", "2. Mai"), ranks, floors. The items of a list seldom all open with one word.
  * - `itemsHeadText`: numbered lines that each have further blocks of text under them: steps, or
  *   the numbered titles of sections, which are headings rather than items. Also lines with any
  *   other marker that each have `headedItemMinBlocks` blocks or more: titles of panels with an icon.
  */
-export type ListReason = 'fewWeakItems' | 'fewGraphicItems' | 'mixedGlyphs' | 'startsMidSequence' | 'fewLetterItems' | 'itemsHeadText';
+export type ListReason =
+  | 'fewWeakItems'
+  | 'quotePrefix'
+  | 'weakSentences'
+  | 'fewGraphicItems'
+  | 'fewSymbolItems'
+  | 'itemsAreControls'
+  | 'colouredMarkers'
+  | 'mixedGlyphs'
+  | 'startsMidSequence'
+  | 'fewLetterItems'
+  | 'initialsAndNames'
+  | 'sameWordAfterNumber'
+  | 'itemsHeadText';
 
 export interface ListCandidate {
   /** Names the candidate within its survey, whatever its selector: the key of its capture in `ListSurvey.captures`. */
@@ -91,6 +118,8 @@ export interface ListReport {
   /** Left out because of `maxCandidates`, and of `maxUnstyledLists`. */
   omitted: number;
   omittedUnstyled: number;
+  /** Left out because a finding of the same rule on the same element is listed: one id, one finding. The one of the highest status stays. */
+  merged: number;
 }
 
 interface Ordinal {
@@ -116,13 +145,20 @@ export interface LineMark {
   /** What to show for it. */
   glyph: string;
   ordinals: Ordinal[];
+  /** The text of the line after the mark; all of it when the mark is not a character of the text. */
+  rest: string;
+  /** The mark is all there is in its box: the text of the item is in the next box on its line. */
+  alone: boolean;
+  /** For `keyValue`: the name, before the colon. */
+  name?: string;
 }
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 const LETTER = /\p{L}/gu;
 const DIGIT = /\p{N}/gu;
 const DECIMAL_DIGIT = /^\p{Nd}$/u;
-const CURRENCY_OR_PERCENT = /[\p{Sc}%‰]/u;
+/** Punctuation and symbols around a word: "Mai," and "Mai" are one word. */
+const PUNCTUATION_AROUND = /^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu;
 /** Enclosed numbers: first code point of each run in Unicode, and how many it holds. */
 const ENCLOSED_RUNS: readonly (readonly [number, number])[] = [
   [0x2460, 20],
@@ -229,6 +265,12 @@ interface Patterns {
   enclosed: RegExp;
   keyValue: RegExp;
   keyEnd: RegExp;
+  symbolBullet: RegExp;
+  quotePrefix: RegExp;
+  figureStart: RegExp;
+  sentenceEnd: RegExp;
+  separatorEnd: RegExp;
+  initialName: RegExp;
 }
 
 function compile(config: ListsConfig): Patterns {
@@ -245,15 +287,35 @@ function compile(config: ListsConfig): Patterns {
     enclosed: make(config.enclosedNumberPattern),
     keyValue: make(config.keyValueLinePattern),
     keyEnd: make(config.keyEndPattern),
+    symbolBullet: make(config.symbolBulletPattern),
+    quotePrefix: make(config.quotePrefixPattern),
+    figureStart: make(config.figureStartPattern),
+    sentenceEnd: make(config.sentenceEndPattern),
+    separatorEnd: make(config.itemSeparatorEndPattern),
+    initialName: make(config.initialNamePattern),
   };
 }
 
-/** A figure after a hyphen ("- 20 %", "- 3,50 €") is a reduction or a negative amount, not an item. */
-function isFigure(text: string, config: ListsConfig): boolean {
+/**
+ * A figure after a hyphen ("- 20 %", "- 3,50 €", "- 3 °C at dawn") is a reduction, a negative
+ * amount or a temperature below zero, not an item: text that is mostly digits, or that opens
+ * with a number and the sign of a unit (`figureStartPattern`). A unit written in letters does
+ * not count: "- 200 g de farine" is an ingredient.
+ */
+function isFigure(text: string, config: ListsConfig, patterns: Patterns): boolean {
   const digits = text.match(DIGIT)?.length ?? 0;
   if (digits === 0) return false;
   const letters = text.match(LETTER)?.length ?? 0;
-  return digits / (digits + letters) >= config.numericMinDigitShare || CURRENCY_OR_PERCENT.test(text);
+  return digits / (digits + letters) >= config.numericMinDigitShare || patterns.figureStart.test(text);
+}
+
+/**
+ * A second symbol right after the first: the first is not a bullet. Five stars are a rating,
+ * three hyphens a rule, two arrows an ornament.
+ */
+function symbolFollows(after: string, patterns: Patterns): boolean {
+  const next = [...after.trimStart()][0];
+  return next !== undefined && patterns.pseudoBullet.test(next);
 }
 
 function ordinalsOf(text: string, patterns: Patterns, config: ListsConfig): { ordinals: Ordinal[]; rest: string } {
@@ -282,16 +344,19 @@ function ordinalsOf(text: string, patterns: Patterns, config: ListsConfig): { or
   const letter = patterns.letter.exec(text);
   if (letter?.[1] !== undefined) {
     const shape = shapeOf(letter[0], letter[1]);
-    ordinals.push({
-      system: 'letter',
-      prefix: '',
-      value: letter[1].codePointAt(0)!,
-      shape,
-      first: config.firstLetters.includes(letter[1]),
-      // "A." also opens a name; "A)" and "(a)" do not.
-      letterDot: shape === '#.',
-      label: letter[0].trim(),
+    const token = letter[1];
+    // "A." also opens a name; "A)" and "(a)" do not.
+    const common = { prefix: '', shape, letterDot: shape === '#.', label: letter[0].trim() };
+    // Letters whose order is not the order of their code points (kana, hangul) are looked up in
+    // their sequences; a letter can be in two of them, and the lines after it tell which.
+    let listed = false;
+    config.letterSequences.forEach((sequence, index) => {
+      const position = [...sequence].indexOf(token);
+      if (position < 0) return;
+      listed = true;
+      ordinals.push({ system: `sequence-${index}`, value: position + 1, first: position === 0, ...common });
     });
+    if (!listed) ordinals.push({ system: 'letter', value: token.codePointAt(0)!, first: config.firstLetters.includes(token), ...common });
     rest = text.slice(letter[0].length);
   }
   const ideographic = patterns.ideographic.exec(text);
@@ -323,18 +388,22 @@ function ordinalsOf(text: string, patterns: Patterns, config: ListsConfig): { or
 export function classifyLineStart(text: string, config: ListsConfig, alone = false, patterns: Patterns = compile(config)): LineMark | null {
   const start = alone ? `${text.trim()} x` : text;
   const { ordinals, rest } = ordinalsOf(start, patterns, config);
+  const common = { key: '', pseudo: false, alone };
   if (ordinals.length > 0 && LETTER_OR_DIGIT.test(rest)) {
-    return { class: 'number', key: '', weak: false, pseudo: false, glyph: ordinals[0]!.label, ordinals };
+    return { class: 'number', weak: false, glyph: ordinals[0]!.label, ordinals, rest: alone ? '' : rest, ...common };
   }
   const strong = patterns.bullet.exec(start);
-  if (strong && LETTER_OR_DIGIT.test(start.slice(strong[0].length))) {
-    return { class: 'bullet', key: '', weak: false, pseudo: false, glyph: strong[0].trim(), ordinals: [] };
+  if (strong) {
+    const after = start.slice(strong[0].length);
+    if (LETTER_OR_DIGIT.test(after) && !symbolFollows(after, patterns)) {
+      return { class: 'bullet', weak: false, glyph: strong[0].trim(), ordinals: [], rest: alone ? '' : after, ...common };
+    }
   }
   const weak = patterns.weakBullet.exec(start);
   if (weak) {
     const after = start.slice(weak[0].length);
-    if (LETTER_OR_DIGIT.test(after) && !isFigure(after, config)) {
-      return { class: 'bullet', key: '', weak: true, pseudo: false, glyph: weak[0].trim(), ordinals: [] };
+    if (LETTER_OR_DIGIT.test(after) && !isFigure(after, config, patterns) && !symbolFollows(after, patterns)) {
+      return { class: 'bullet', weak: true, glyph: weak[0].trim(), ordinals: [], rest: alone ? '' : after, ...common };
     }
   }
   return null;
@@ -344,7 +413,8 @@ export function classifyLineStart(text: string, config: ListsConfig, alone = fal
 function markOf(line: ListLine, config: ListsConfig, patterns: Patterns, alone: boolean): LineMark | null {
   const marker = line.marker;
   if (marker) {
-    const drawn = (kind: ListMarkerClass, pseudo: boolean): LineMark => ({ class: kind, key: marker.key, weak: false, pseudo, glyph: '', ordinals: [] });
+    const rest = line.start;
+    const drawn = (kind: ListMarkerClass, pseudo: boolean): LineMark => ({ class: kind, key: marker.key, weak: false, pseudo, glyph: '', ordinals: [], rest, alone: false });
     if (marker.kind === 'list-item') return drawn('listItemMarker', false);
     if (marker.kind === 'pseudo-counter') return drawn('counter', true);
     if (marker.kind === 'pseudo-shape') return drawn('shape', true);
@@ -353,9 +423,9 @@ function markOf(line: ListLine, config: ListsConfig, patterns: Patterns, alone: 
     const text = marker.text.trim();
     // A glyph of an icon font: an image as far as a reader is concerned.
     if (patterns.iconGlyph.test(text)) return drawn('image', true);
-    if (patterns.pseudoBullet.test(text)) return { class: 'bullet', key: 'pseudo', weak: false, pseudo: true, glyph: text, ordinals: [] };
+    if (patterns.pseudoBullet.test(text)) return { class: 'bullet', key: 'pseudo', weak: false, pseudo: true, glyph: text, ordinals: [], rest, alone: false };
     const numbered = ordinalsOf(`${text} x`, patterns, config);
-    if (numbered.ordinals.length > 0) return { class: 'number', key: 'pseudo', weak: false, pseudo: true, glyph: text, ordinals: numbered.ordinals };
+    if (numbered.ordinals.length > 0) return { class: 'number', key: 'pseudo', weak: false, pseudo: true, glyph: text, ordinals: numbered.ordinals, rest, alone: false };
     // Any other generated text (a word, a quotation mark) is no bullet: the text of the line decides.
   }
   const mark = classifyLineStart(line.start, config, alone, patterns);
@@ -363,7 +433,7 @@ function markOf(line: ListLine, config: ListsConfig, patterns: Patterns, alone: 
   const pair = patterns.keyValue.exec(line.start);
   const name = pair?.[1]?.trim() ?? '';
   if (name !== '' && /\p{L}/u.test(name) && name.split(/\s+/).length <= config.keyMaxWords) {
-    return { class: 'keyValue', key: '', weak: false, pseudo: false, glyph: '', ordinals: [] };
+    return { class: 'keyValue', key: '', weak: false, pseudo: false, glyph: '', ordinals: [], rest: '', alone: false, name };
   }
   return null;
 }
@@ -488,7 +558,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
       const next = blocks[index + 1];
       // A bullet or a number in a box of its own, with the text of the item in the next box on its line.
       const alone =
-        segment === 0 && block.segments.length === 1 && block.chars <= 4 && next !== undefined && next.frame === block.frame && sameRow(block.firstLine, next.firstLine);
+        segment === 0 && block.segments.length === 1 && block.chars <= config.loneMarkerMaxChars && next !== undefined && next.frame === block.frame && sameRow(block.firstLine, next.firstLine);
       const mark = markOf(line, config, patterns, alone);
       // A title that holds a colon is no name and value: links and quotations are left out.
       return mark?.class === 'keyValue' && block.contexts.some((context) => NOT_KEYS.has(context)) ? null : mark;
@@ -538,7 +608,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
   });
 
   // Lines in sibling blocks: each the first text of its element, the elements side by side under one parent.
-  const siblings = (a: number, b: number): { container: number; itemB: [number, number] } | null => {
+  const siblings = (a: number, b: number, alone: boolean): { container: number; itemB: [number, number] } | null => {
     const first = blocks[a]!;
     const second = blocks[b]!;
     if (first.frame !== second.frame || first.chain.length < 2 || second.chain.length < 2) return null;
@@ -565,7 +635,15 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     const to = first.chain[at - 1]!;
     // The line is the first text of its item, and everything up to the next line belongs to it.
     if (a > 0 && inside(a - 1, from, to)) return null;
-    for (let between = a + 1; between < b; between++) if (!inside(between, from, to)) return null;
+    for (let between = a + 1; between < b; between++) {
+      if (inside(between, from, to)) continue;
+      // A mark in a cell of its own, the text of its item in the next cell of the same parent and
+      // the next mark on a later row: the cells of a flat grid, two to an item.
+      const text = blocks[between]!;
+      const flat =
+        alone && b === a + 2 && inside(between, container, first.chain[at + 1]!) && sameRow(first.firstLine, text.firstLine) && !sameRow(first.firstLine, second.firstLine);
+      if (!flat) return null;
+    }
     return { container, itemB: [second.chain[other - 2]!, second.chain[other - 1]!] };
   };
   {
@@ -581,6 +659,11 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
           const next = items[position + 1];
           const owned: number[] = [item.block];
           for (let index = item.block + 1; next ? index < next.block : index < blocks.length && inside(index, range[0], range[1]); index++) owned.push(index);
+          // The last mark of a flat grid: its text is in the next cell.
+          const beside = blocks[item.block + 1];
+          if (item.mark.alone && owned.length === 1 && beside && beside.frame === blocks[item.block]!.frame && sameRow(blocks[item.block]!.firstLine, beside.firstLine)) {
+            owned.push(item.block + 1);
+          }
           item.blocks = owned;
         });
         runs.push({ items, container, viaBreaks: false, sequence: readings[0] ?? null });
@@ -595,7 +678,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
       if (!mark || inBreakRun.has(index) || block.contexts.some((context) => CELLS.has(context))) return;
       const last = items[items.length - 1];
       if (last && compatible(last.mark, mark)) {
-        const relation = siblings(last.block, index);
+        const relation = siblings(last.block, index, last.mark.alone);
         const next = extend(readings, mark);
         if (relation && (container === null || container === relation.container) && (mark.class !== 'number' || next.length > 0)) {
           readings = next;
@@ -624,7 +707,44 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
   };
   const id = (rule: string, frame: string, selector: string): string => fingerprint({ rule, wcag: LISTS_SC, frame, selector });
 
+  /** How a line ends; for a mark that stands alone, how the text beside it ends. */
+  const endOf = (item: RunItem): string => {
+    const line = lineOf(item);
+    const text = item.mark.alone ? (blocks[item.block + 1]?.text ?? '') : (line.end ?? line.start);
+    return text.trim();
+  };
+  /** The text of an item after its mark. */
+  const restOf = (item: RunItem): string => (item.mark.alone ? (blocks[item.block + 1]?.text ?? '') : item.mark.rest).trim();
+  /** The start of an item as it reads: a mark that stands alone, with the text beside it. */
+  const shown = (item: RunItem): string => (item.mark.alone ? `${lineOf(item).start} ${blocks[item.block + 1]?.text ?? ''}`.trim() : lineOf(item).start);
+  /** Blocks of an item apart from a mark that stands alone. */
+  const textBlocks = (item: RunItem): number => item.blocks.length - (item.mark.alone ? 1 : 0);
+  /**
+   * Items after a hyphen or a dash, as against the lines of a dialogue and other sentences that
+   * open with one: none ends as a sentence does, or all but the last end with the semicolon or
+   * the comma of an enumeration.
+   */
+  const phrases = (items: RunItem[]): boolean => {
+    const ends = items.map(endOf);
+    if (!ends.some((end) => patterns.sentenceEnd.test(end))) return true;
+    return ends.length > 1 && ends.slice(0, -1).every((end) => patterns.separatorEnd.test(end));
+  };
+  const firstWord = (text: string): string => (text.split(/\s+/)[0] ?? '').replace(PUNCTUATION_AROUND, '');
+
   const found: ListCandidate[] = [];
+  /** Series of lines of one block that are reported, by rule: a second one gets a fingerprint of its own. */
+  const reportedInBlock = new Set<string>();
+  const ruleInBlock = (rule: string, run: Run): string => {
+    if (!run.viaBreaks) return rule;
+    const first = run.items[0]!;
+    const key = `${rule}\u0000${first.block}`;
+    if (!reportedInBlock.has(key)) {
+      reportedInBlock.add(key);
+      return rule;
+    }
+    // Stable from run to run: the line the series starts at.
+    return `${rule}@${first.segment}`;
+  };
   /** Blocks that belong to something reported: a series of blocks of one shape around them is not reported again. */
   const claimed = new Set<number>();
   const usedContainers = new Set<number>();
@@ -637,7 +757,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     if (!stackedLines(boxes, firstBlock.rtl, config)) continue;
     const owned = [...new Set(run.items.flatMap((item) => item.blocks))];
     const key = `${kind === 'keyValue' ? 'key-value' : 'glyph'}:${first.block}:${first.segment}`;
-    const texts = run.items.slice(0, config.messageItems).map((item) => cut(lineOf(item).start, config.itemTextMaxChars));
+    const texts = run.items.slice(0, config.messageItems).map((item) => cut(shown(item), config.itemTextMaxChars));
     const box = owned.map((index) => blocks[index]!.box).reduce(unionBox);
     // A second series under one element is named after its first line, so that the two stay apart.
     const free = run.container !== null && !usedContainers.has(run.container);
@@ -657,14 +777,21 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
 
     if (kind === 'keyValue') {
       if (run.items.length < config.keyValueMinPairs) continue;
+      // The names of a sheet of values differ from each other and are set in one style. Names
+      // that come back are the speakers of a chat; a name in two styles is a person and a verb.
+      const names = run.items.map((item) => (item.mark.name ?? '').toLowerCase());
+      if (new Set(names).size < names.length) continue;
+      const styles = new Set(run.items.map((item) => lineOf(item).keyStyle ?? ''));
+      if (styles.size > 1 || [...styles].some((style) => style.includes('\n'))) continue;
       if (run.container !== null) usedContainers.add(run.container);
       for (const index of owned) claimed.add(index);
+      const fingerprintRule = ruleInBlock(KEY_VALUE_RULE, run);
       found.push({
         ...base,
         kind: 'key-value',
         rule: KEY_VALUE_RULE,
-        fingerprintRule: KEY_VALUE_RULE,
-        findingId: id(KEY_VALUE_RULE, base.frame, base.selector),
+        fingerprintRule,
+        findingId: id(fingerprintRule, base.frame, base.selector),
         status: top('advisory'),
         flags: ['colonLines', ...(run.viaBreaks ? ['lineBreaks'] : []), ...axFlags],
         reasons: [],
@@ -677,8 +804,26 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
 
     if (run.items.length < config.minItems) continue;
     const reasons: ListReason[] = [];
-    if (kind === 'bullet' && run.items.every((item) => item.mark.weak) && run.items.length < config.weakMinItems) reasons.push('fewWeakItems');
+    if (kind === 'bullet' && run.items.every((item) => item.mark.weak)) {
+      // A hyphen, a dash, an asterisk or an angle opens a line for many reasons. Such lines are
+      // `likely` only when there are enough of them and they read as items do.
+      const quoted = run.items.every((item) => patterns.quotePrefix.test(item.mark.glyph));
+      if (run.items.length < config.weakMinItems) reasons.push('fewWeakItems');
+      if (quoted) reasons.push('quotePrefix');
+      else if (run.items.length >= config.weakMinItems && !phrases(run.items)) reasons.push('weakSentences');
+    }
     if ((kind === 'image' || kind === 'shape') && run.items.length < config.graphicMinItems) reasons.push('fewGraphicItems');
+    if (kind === 'bullet' && run.items.every((item) => patterns.symbolBullet.test(item.mark.glyph))) {
+      // An arrow, a triangle, a pictogram or an emoji is also an icon: of a message, of a link, of
+      // something that opens. It takes more lines, and lines that are more than a control each.
+      if (run.items.length < config.symbolMinItems) reasons.push('fewSymbolItems');
+      const control = (index: number): boolean => blocks[index]!.contexts.includes('link') || blocks[index]!.clickable === true;
+      if (run.items.every((item) => textBlocks(item) === 1 && item.blocks.every(control))) reasons.push('itemsAreControls');
+    }
+    if (kind === 'bullet' && !first.mark.pseudo) {
+      const colours = new Set(run.items.flatMap((item) => lineOf(item).startColor ?? []));
+      if (colours.size > 1) reasons.push('colouredMarkers');
+    }
     if (kind === 'bullet') {
       const uses = new Map<string, number>();
       for (const item of run.items) uses.set(item.mark.glyph, (uses.get(item.mark.glyph) ?? 0) + 1);
@@ -688,8 +833,13 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     if (kind === 'number' && ordinal) {
       if (!ordinal.first) reasons.push('startsMidSequence');
       if (ordinal.letterDot && run.items.length < config.letterMinItems) reasons.push('fewLetterItems');
-      if (!run.viaBreaks && run.items.some((item) => item.blocks.length > 1)) reasons.push('itemsHeadText');
-    } else if (!run.viaBreaks && run.items.every((item) => item.blocks.length >= config.headedItemMinBlocks)) {
+      if (!first.mark.pseudo) {
+        if (ordinal.letterDot && run.items.every((item) => patterns.initialName.test(lineOf(item).start))) reasons.push('initialsAndNames');
+        const words = run.items.map((item) => firstWord(restOf(item)));
+        if (ordinal.system === 'digits' && ordinal.shape === '#.' && /\p{L}/u.test(words[0]!) && words.every((word) => word === words[0])) reasons.push('sameWordAfterNumber');
+      }
+      if (!run.viaBreaks && run.items.some((item) => textBlocks(item) > 1)) reasons.push('itemsHeadText');
+    } else if (!run.viaBreaks && run.items.every((item) => textBlocks(item) >= config.headedItemMinBlocks)) {
       // An icon or a bullet before the title of each panel of a sidebar, of each section of a page.
       reasons.push('itemsHeadText');
     }
@@ -702,12 +852,13 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     const glyphs = [...new Set(run.items.map((item) => item.mark.glyph).filter((glyph) => glyph !== ''))];
     const before = blocks[first.block - 1];
     const after = blocks[owned[owned.length - 1]! + 1];
+    const fingerprintRule = ruleInBlock(GLYPH_FINGERPRINT_RULE, run);
     found.push({
       ...base,
       kind: 'glyph',
       rule: status === 'info' ? GLYPH_CANDIDATE_RULE : GLYPH_LIST_RULE,
-      fingerprintRule: GLYPH_FINGERPRINT_RULE,
-      findingId: id(GLYPH_FINGERPRINT_RULE, base.frame, base.selector),
+      fingerprintRule,
+      findingId: id(fingerprintRule, base.frame, base.selector),
       status,
       flags: [classFlag, ...(first.mark.pseudo ? ['pseudoElement'] : []), ...(run.viaBreaks ? ['lineBreaks'] : []), ...reasons, ...(navigation ? ['navigation'] : []), ...axFlags],
       reasons,
@@ -724,7 +875,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
         drawnBy: first.mark.pseudo ? 'generated content' : firstBlock.segments[first.segment]?.marker ? 'a graphic or a list marker' : 'characters of the text',
         separatedBy: run.viaBreaks ? 'line breaks inside one block' : 'sibling blocks',
         items: run.items.length,
-        itemStarts: run.items.slice(0, config.contextMaxItems).map((item) => cut(lineOf(item).start, config.itemTextMaxChars)),
+        itemStarts: run.items.slice(0, config.contextMaxItems).map((item) => cut(shown(item), config.itemTextMaxChars)),
         blocksPerItem: round(owned.length / run.items.length, 1),
         reasons: [...reasons],
         contexts: [...firstBlock.contexts],
@@ -763,6 +914,8 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
       pairs.push(next);
     }
     if (pairs.length < config.keyValueMinPairs) continue;
+    // Names that come back are not the names of a sheet of values.
+    if (new Set(pairs.map((at) => blocks[at]!.text.trim().toLowerCase())).size < pairs.length) continue;
     const firstBlock = blocks[index]!;
     const last = pairs[pairs.length - 1]! + 1;
     const owned: number[] = [];
@@ -916,16 +1069,17 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     }
   });
 
-  // One finding per rule and element: the first stands for it, so that finding ids stay unique.
+  // One finding per rule and element, so that finding ids stay unique: the one of the highest
+  // status stands for it, the first in the page among equals, and the others are counted.
+  const rank = { likely: 0, advisory: 1, info: 2 } as const;
+  const sorted = found.sort((a, b) => rank[a.status] - rank[b.status] || a.order - b.order || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const seen = new Set<string>();
-  const unique = found.filter((candidate) => {
+  const ordered = sorted.filter((candidate) => {
     const key = `${candidate.fingerprintRule}\u0000${candidate.frame}\u0000${candidate.selector}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  const rank = { likely: 0, advisory: 1, info: 2 } as const;
-  const ordered = unique.sort((a, b) => rank[a.status] - rank[b.status] || a.order - b.order || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   const inventory = ordered.filter((candidate) => candidate.kind === 'unstyled');
   const others = ordered.filter((candidate) => candidate.kind !== 'unstyled');
   const kept = [...others.slice(0, config.maxCandidates), ...inventory.slice(0, config.maxUnstyledLists)];
@@ -933,6 +1087,7 @@ export function listReport(survey: ListSurvey, config: ListsConfig): ListReport 
     candidates: kept,
     omitted: Math.max(0, others.length - config.maxCandidates),
     omittedUnstyled: Math.max(0, inventory.length - config.maxUnstyledLists),
+    merged: sorted.length - ordered.length,
   };
 }
 

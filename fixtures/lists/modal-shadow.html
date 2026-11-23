@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: modal-shadow</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      dialog { width: 560px; max-height: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>A modal dialog is open over this page. What is outside it is inert and left out of the accessibility tree; what is inside it is not, including what a component of the dialog renders in its shadow tree: a title that is no heading, and a bulleted list.</p>
+      <section id="outside">
+        <div>• Outside one</div>
+        <div>• Outside two</div>
+        <div>• Outside three</div>
+      </section>
+    </main>
+    <dialog id="dialog">
+      <p>Text of the dialog, in a paragraph of its own before the lists that follow it. It goes on for a few sentences, so that the dialog has body text to compare a title with. Everything in here is exposed to assistive technology, while the page behind the dialog is not.</p>
+      <section id="light">
+        <div>• Light one</div>
+        <div>• Light two</div>
+        <div>• Light three</div>
+      </section>
+      <x-panel id="panel"></x-panel>
+      <button type="button">Close</button>
+    </dialog>
+    <script>
+      customElements.define(
+        'x-panel',
+        class extends HTMLElement {
+          constructor() {
+            super();
+            this.attachShadow({ mode: 'open' }).innerHTML =
+              '<div id="title" style="font-size: 28px; font-weight: 700; margin: 16px 0 8px">Options of the panel</div><p>Text inside the component, in a paragraph of its own, long enough to be the body text that the title above it stands over.</p><section id="shadow"><div>• Shadow one</div><div>• Shadow two</div><div>• Shadow three</div></section>';
+          }
+        },
+      );
+      document.getElementById('dialog').showModal();
+    </script>
+  </body>
+</html>

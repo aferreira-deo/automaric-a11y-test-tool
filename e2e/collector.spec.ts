@@ -144,3 +144,54 @@ test('environment values are measured, not read from the page', async ({ page })
   await page.setContent(html);
   expect(dialogs).toEqual([]);
 });
+
+/**
+ * Sends the page to another document in the middle of a scan: each time the collector asks for
+ * the accessibility tree, which it does once the page is prepared and before any text is read,
+ * the page goes to the next of `paths`, for as long as there are any.
+ */
+function navigatingMidScan(page: Page, paths: string[]): void {
+  const context = page.context();
+  const newSession = context.newCDPSession.bind(context);
+  const left = [...paths];
+  context.newCDPSession = async (target: Page) => {
+    const session = await newSession(target);
+    const send = session.send.bind(session) as (method: string, params?: object) => Promise<unknown>;
+    (session as { send: unknown }).send = async (method: string, params?: object) => {
+      if (method === 'Accessibility.getFullAXTree' && left.length > 0) {
+        const path = left.shift()!;
+        // As a redirect by script does: the document is replaced under the scan.
+        await target.evaluate((to) => void setTimeout(() => location.replace(to), 0), path);
+        await target.waitForURL(`**${path}`, { waitUntil: 'commit' });
+      }
+      return send(method, params);
+    };
+    return session;
+  };
+}
+
+test('a page that goes to another document while it is read is read again there, once', async ({ page, baseURL }) => {
+  const scan = () => new A11yVision({ page }).withChecks(['headings', 'lists']).analyze();
+  await page.goto('/lists/near-threshold.html');
+  const direct = await scan();
+  expect(direct.environment.navigatedFrom).toBeUndefined();
+
+  await page.goto('/lists/plain-text.html');
+  navigatingMidScan(page, ['/lists/near-threshold.html']);
+  const redirected = await scan();
+  // The findings are those of the page the browser ended on, as if it had been scanned directly.
+  expect(redirected.url).toBe(`${baseURL}/lists/near-threshold.html`);
+  expect(redirected.environment.navigatedFrom).toBe(`${baseURL}/lists/plain-text.html`);
+  expect(redirected.findings).toEqual(direct.findings);
+  expect(redirected.findings.filter((finding) => finding.status === 'likely').length).toBeGreaterThan(3);
+  // The page is given back as any scanned page is.
+  expect(await page.evaluate(() => ({ sheets: document.adoptedStyleSheets.length, ratio: window.devicePixelRatio }))).toEqual({ sheets: 0, ratio: 1 });
+});
+
+test('a page that navigates during the second reading as well is an error that says so', async ({ page }) => {
+  await page.goto('/lists/plain-text.html');
+  navigatingMidScan(page, ['/lists/near-threshold.html', '/lists/glyph-lists.html']);
+  await expect(new A11yVision({ page }).withChecks(['lists']).analyze()).rejects.toThrow(
+    /went from .*plain-text\.html to .*near-threshold\.html while it was being read, and on to .*glyph-lists\.html/,
+  );
+});

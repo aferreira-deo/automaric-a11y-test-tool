@@ -37,6 +37,15 @@ The `lists/source-*` fixtures are well-marked pages as well. `e2e/lists-mutation
 `ol` and `li` by a `div` that keeps its attributes and expects every list back as `likely`, with nothing else
 `likely`.
 
+`lists/lookalikes` and `lists/more-lists` go together: the first holds lines that open like items and are not
+(dialogue, a quoted reply, ratings, alerts, calls to action, accordion titles, a legend, temperatures, dates,
+initials, a chat, a feed) and must give no `likely`; the second holds the lists that the same rules must still
+let through. A rule that is tightened for one has to keep the other green.
+
+`lists/modal-shadow`, `lists/modal-in-shadow` and `lists/content-hidden` open a dialog or depend on what the
+browser renders: `e2e/lists.spec.ts` has the tests that look at boxes, at the page during the scan and at the
+work done on a large page.
+
 `icon-contrast/assets/fixture-icons.ttf` is the icon font of the icon-contrast
 fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,
 so it carries no third-party licence.

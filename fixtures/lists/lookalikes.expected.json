@@ -1,0 +1,19 @@
+{
+  "description": "Precision control: lines that open with a dash, an angle or a symbol without being items of a list. Nothing is likely. Held back as info, each with its reason: a dialogue with en dashes in paragraphs and one with hyphens on lines separated by br (weakSentences), a quoted reply (quotePrefix), two alerts with a warning sign (fewSymbolItems), links that open with an arrow (itemsAreControls, and fewSymbolItems for two), clickable accordion titles with a triangle (itemsAreControls), a legend with a square in a different colour before each entry (colouredMarkers), German dates (sameWordAfterNumber), authors with initials (initialsAndNames). Not reported for their bullets at all: star ratings, temperatures below zero. Not reported as names and values: a chat whose names repeat, a feed of activity whose keys are in two styles.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#dialogue-dash", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "weakSentences"] },
+    { "selector": "#dialogue-br", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "lineBreaks", "weakSentences"] },
+    { "selector": "#quoted", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "lineBreaks", "quotePrefix"] },
+    { "selector": "#ratings", "check": "lists", "status": "advisory", "rule": "lists/repeated-structure", "flags": ["cards"] },
+    { "selector": "#alerts", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "fewSymbolItems"] },
+    { "selector": "#cta", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "fewSymbolItems", "itemsAreControls"] },
+    { "selector": "#cta-three", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "itemsAreControls"] },
+    { "selector": "#accordion", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "itemsAreControls"] },
+    { "selector": "#legend", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "colouredMarkers"] },
+    { "selector": "#dates", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "sameWordAfterNumber"] },
+    { "selector": "#initials", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "initialsAndNames"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

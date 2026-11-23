@@ -53,7 +53,7 @@ function surveyOf(root: Sketch, more: Partial<ListSurvey> = {}): ListSurvey {
         heading: false,
         rtl: false,
         chain: [],
-        segments: node.lines.map((start, at) => ({ start, box: line(at), ...(node.marker ? { marker: node.marker } : {}) })),
+        segments: node.lines.map((start, at) => ({ start, box: line(at), end: start.slice(-config.lineEndChars), ...(node.marker ? { marker: node.marker } : {}) })),
         ...node.over,
       });
     }
@@ -64,13 +64,18 @@ function surveyOf(root: Sketch, more: Partial<ListSurvey> = {}): ListSurvey {
   };
   walk(root, []);
   for (const [index, pairs] of chains) blocks[index]!.chain = pairs.flat();
-  return { blocks, totalBlocks: blocks.length, groups: [], totalGroups: 0, lists: [], totalLists: 0, exposedLists: 0, axComplete: true, containers, captures: {}, ...more };
+  return { blocks, totalBlocks: blocks.length, groups: [], totalGroups: 0, parents: 0, totalParents: 0, lists: [], totalLists: 0, exposedLists: 0, axComplete: true, containers, captures: {}, ...more };
 }
 
 const leaf = (text: string, over: Partial<Sketch> = {}): Sketch => ({ lines: [text], ...over });
 const listOf = (id: string, texts: string[], over: Partial<Sketch> = {}): Sketch => ({ id, children: texts.map((text) => leaf(text, over)) });
 const page = (...children: Sketch[]): Sketch => ({ children: [leaf('A paragraph of plain text before everything else.'), ...children, leaf('A paragraph of plain text after everything else.')] });
 const report = (root: Sketch, more: Partial<ListSurvey> = {}, input = config) => listReport(surveyOf(root, more), input);
+/** For sketches that give their own segments (`over.segments`): the box of each line is where the sketch stacked its block. */
+const placed = (survey: ListSurvey): ListSurvey => {
+  for (const block of survey.blocks) if (block.segments.length === 1) block.segments[0]!.box = block.firstLine;
+  return survey;
+};
 const summary = (root: Sketch, more: Partial<ListSurvey> = {}, input = config) =>
   report(root, more, input).candidates.map((candidate) => `${candidate.status} ${candidate.rule.replace('lists/', '')} ${candidate.selector} [${candidate.flags.join(',')}]`);
 
@@ -158,7 +163,7 @@ describe('lines with bullets or numbers', () => {
   });
   it('wants numbers that follow each other, from the start of their sequence', () => {
     expect(summary(page(listOf('list', ['3. Rue des Lilas', '17. Rue des Lilas', '42. Rue des Lilas'])))).toEqual([]);
-    expect(summary(page(listOf('list', ['12. Mai 2026', '13. Mai 2026', '14. Mai 2026'])))).toEqual(['info glyph-list-candidate #list [number,startsMidSequence]']);
+    expect(summary(page(listOf('list', ['12. Mai 2026', '13. Mai 2026', '14. Mai 2026'])))).toEqual(['info glyph-list-candidate #list [number,startsMidSequence,sameWordAfterNumber]']);
     expect(summary(page(listOf('list', ['9. nine', '10. ten', '11. eleven'])))).toEqual(['info glyph-list-candidate #list [number,startsMidSequence]']);
     expect(summary(page(listOf('list', ['1. one', '2. two', '4. four', '5. five'])))[0]).toBe('likely glyph-list #list [number]');
   });
@@ -174,11 +179,11 @@ describe('lines with bullets or numbers', () => {
     expect(letters.flags).toContain('startsMidSequence');
   });
   it('holds back two lines that open with a letter and a full stop, as initials do', () => {
-    expect(summary(page(listOf('list', ['A. Lovelace', 'B. Liskov'])))).toEqual(['info glyph-list-candidate #list [number,fewLetterItems]']);
+    expect(summary(page(listOf('list', ['A. Lovelace', 'B. Liskov'])))).toEqual(['info glyph-list-candidate #list [number,fewLetterItems,initialsAndNames]']);
     expect(summary(page(listOf('list', ['a) one', 'b) two'])))).toEqual(['likely glyph-list #list [number]']);
   });
   it('holds back lines that open with different symbols used once each', () => {
-    expect(summary(page(listOf('list', ['☎ 04 72 10 30 30', '✉ contact@example.org'])))).toEqual(['info glyph-list-candidate #list [bullet,mixedGlyphs]']);
+    expect(summary(page(listOf('list', ['☎ 04 72 10 30 30', '✉ contact@example.org'])))).toEqual(['info glyph-list-candidate #list [bullet,fewSymbolItems,mixedGlyphs]']);
     expect(summary(page(listOf('list', ['• one', '◦ sub one', '◦ sub two', '• two'])))).toEqual(['likely glyph-list #list [bullet]']);
   });
   it('holds back numbered blocks that each head further text', () => {
@@ -187,7 +192,8 @@ describe('lines with bullets or numbers', () => {
       'info glyph-list-candidate #steps [number,itemsHeadText]',
     ]);
     const feature = (title: string): Sketch => ({ children: [leaf(title), leaf('A sentence about it.')] });
-    expect(summary(page({ id: 'features', children: [feature('✓ Fast'), feature('✓ Private')] }))).toEqual(['likely glyph-list #features [bullet]']);
+    expect(summary(page({ id: 'features', children: [feature('✓ Fast'), feature('✓ Private'), feature('✓ Open')] }))).toEqual(['likely glyph-list #features [bullet]']);
+    expect(summary(page({ id: 'features', children: [feature('• Fast'), feature('• Private')] }))).toEqual(['likely glyph-list #features [bullet]']);
     // An icon before the title of each panel: the panels are not the items of a list.
     const icon: ListMarker = { kind: 'shape', text: '', key: 'shape|12x12' };
     const panel = (title: string): Sketch => ({ children: [leaf(title, { marker: icon }), leaf('First line of the panel.'), leaf('Second line of the panel.')] });
@@ -429,6 +435,189 @@ describe('lists of interest', () => {
   });
   it('lists real lists without markers as an inventory', () => {
     expect(run([element({ kind: 'unstyled', markers: 0 })])).toEqual(['info list-style-none #ul []']);
+  });
+});
+
+describe('lines that open like items and are not', () => {
+  const kind = (text: string): string => {
+    const mark = classifyLineStart(text, config);
+    return mark ? `${mark.class}${mark.weak ? ' weak' : ''}` : 'none';
+  };
+  const flagsOf = (root: Sketch): string => {
+    const candidates = report(root).candidates;
+    return candidates.length === 1 ? `${candidates[0]!.status} [${candidates[0]!.flags.join(',')}]` : `${candidates.length} candidates`;
+  };
+  it('does not take the first of several symbols for a bullet', () => {
+    for (const text of ['★★★★★ Excellent product', '★★☆☆☆ Disappointing', '★ ★ ★ Good', '→→ next', '•• two dots', '- - - cut here', '* * * break']) {
+      expect(kind(text), text).toBe('none');
+    }
+    expect(kind('★ Excellent product')).toBe('bullet');
+  });
+  it('takes a number and the sign of a unit after a hyphen for a figure, and not a unit written in letters', () => {
+    for (const text of ['- 3 °C at dawn', '- 12 °C on the summit', '- 5 ° de moins', '- 20 % on everything', '- 3,50 € par mois', '- $5 off']) expect(kind(text), text).toBe('none');
+    for (const text of ['- 200 g de farine', '- 2 œufs frais', '- 3 km to the station', '- Bake at 180 °C for 20 minutes']) expect(kind(text), text).toBe('bullet weak');
+  });
+  it('holds back lines after a dash that end as sentences do: a dialogue', () => {
+    expect(flagsOf(page(listOf('list', ['– Tu viens demain ?', '– Non, je ne peux pas, je travaille.', '– Dommage, on t’attendait.'])))).toBe('info [bullet,weakSentences]');
+    expect(flagsOf(page({ id: 'p', lines: ['- Where were you last night?', '- At home, as always.', '- Nobody saw you there.'] }))).toBe('info [bullet,lineBreaks,weakSentences]');
+    expect(flagsOf(page(listOf('list', ['– 「明日来る？」', '– 行けません。', '– 残念です。'])))).toBe('info [bullet,weakSentences]');
+    // One sentence among phrases is enough: precision first.
+    expect(flagsOf(page(listOf('list', ['- bread', '- butter', '- And then he left.'])))).toBe('info [bullet,weakSentences]');
+  });
+  it('takes lines after a dash for items when they are phrases, or the parts of an enumeration', () => {
+    expect(flagsOf(page(listOf('list', ['– Farine complète', '– Levure fraîche', '– Sel fin'])))).toBe('likely [bullet]');
+    expect(flagsOf(page({ id: 'p', lines: ['– le nom du demandeur ;', '– son adresse ;', '– la date de la demande.'] }))).toBe('likely [bullet,lineBreaks]');
+    expect(flagsOf(page(listOf('list', ['* one,', '* two,', '* three'])))).toBe('likely [bullet]');
+  });
+  it('reads the end of a line from what the page gave, not from the start that was kept', () => {
+    const long = (text: string, end: string): Sketch => ({ lines: [text], over: { segments: [{ start: text, end, box: { x: 32, y: 0, width: 300, height: 20 } }] } });
+    const root = page({ id: 'list', children: [long('- A line that goes on', 'ever?'), long('- A second line that goes on', 'on.'), long('- A third line that goes on', 'on.')] });
+    expect(listReport(placed(surveyOf(root)), config).candidates.map((candidate) => candidate.flags)).toEqual([['bullet', 'weakSentences']]);
+  });
+  it('holds back lines that open with the angle of a quoted reply, however many', () => {
+    expect(flagsOf(page({ id: 'p', lines: ['> I think we should ship on Friday', '> because the customer is waiting', '> and the tests are green'] }))).toBe('info [bullet,lineBreaks,quotePrefix]');
+    expect(flagsOf(page(listOf('list', ['> one', '> two'])))).toBe('info [bullet,fewWeakItems,quotePrefix]');
+    // The angle quotation marks that open links in French are not that angle.
+    expect(flagsOf(page(listOf('list', ['› Livraison', '› Retours', '› Contact'])))).toBe('likely [bullet]');
+  });
+  it('wants three lines when the bullet is an arrow, a pictogram or an emoji', () => {
+    expect(flagsOf(page(listOf('list', ['⚠️ Your trial ends in 3 days.', '⚠️ Your last payment failed.'])))).toBe('info [bullet,fewSymbolItems]');
+    expect(flagsOf(page(listOf('list', ['→ Learn more', '→ Contact us'])))).toBe('info [bullet,fewSymbolItems]');
+    expect(flagsOf(page(listOf('list', ['✓ Fast', '✓ Private'])))).toBe('info [bullet,fewSymbolItems]');
+    expect(flagsOf(page(listOf('list', ['🎉 One', '🎉 Two'])))).toBe('info [bullet,fewSymbolItems]');
+    expect(flagsOf(page(listOf('list', ['✓ Fast', '✓ Private', '✓ Open'])))).toBe('likely [bullet]');
+    expect(flagsOf(page(listOf('list', ['→ Bring a document', '→ Bring a photo', '→ Come early'])))).toBe('likely [bullet]');
+    // Dots and squares are bullets and nothing else: two are enough.
+    expect(flagsOf(page(listOf('list', ['■ one', '■ two'])))).toBe('likely [bullet]');
+    const arrow: ListMarker = { kind: 'pseudo-text', text: '→', key: '→|arial' };
+    expect(flagsOf(page(listOf('list', ['Learn more', 'Contact us'], { marker: arrow })))).toBe('info [bullet,pseudoElement,fewSymbolItems]');
+  });
+  it('holds back lines that open with such a symbol and are each a link or something clicked', () => {
+    const cta = ['→ Learn more about pricing', '→ Contact our sales team', '→ Read the documentation'];
+    expect(flagsOf(page(listOf('list', cta, { over: { contexts: ['link'] } })))).toBe('info [bullet,itemsAreControls]');
+    expect(flagsOf(page(listOf('list', ['▶ Shipping', '▶ Payment', '▶ Warranty'], { over: { clickable: true } })))).toBe('info [bullet,itemsAreControls]');
+    expect(flagsOf(page(listOf('list', ['▶ Shipping', '▶ Payment', '▶ Warranty'])))).toBe('likely [bullet]');
+    // A plain bullet before each link is a list of links.
+    expect(flagsOf(page(listOf('list', ['• Annual report', '• Minutes', '• Press releases'], { over: { contexts: ['link'] } })))).toBe('likely [bullet]');
+    // A link that heads further text is more than a control.
+    const teaser = (title: string): Sketch => ({ children: [leaf(title, { over: { contexts: ['link'] } }), leaf('A sentence about it.')] });
+    expect(flagsOf(page({ id: 'list', children: cta.map(teaser) }))).toBe('likely [bullet]');
+  });
+  it('holds back bullets in different colours: the swatches of a legend', () => {
+    const entry = (text: string, startColor: string): Sketch => ({ lines: [text], over: { segments: [{ start: text, startColor, box: { x: 32, y: 0, width: 300, height: 20 } }] } });
+    const legend = (colours: string[]): ListSurvey => {
+      return placed(surveyOf(page({ id: 'legend', children: colours.map((colour, index) => entry(`■ Series ${index + 1}`, colour)) })));
+    };
+    expect(listReport(legend(['#b00020', '#0033a0']), config).candidates.map((candidate) => candidate.flags)).toEqual([['bullet', 'colouredMarkers']]);
+    expect(listReport(legend(['#1a1a1a', '#1a1a1a']), config).candidates.map((candidate) => candidate.status)).toEqual(['likely']);
+  });
+  it('holds back numbered lines that all go on with the same word: dates, ranks', () => {
+    expect(flagsOf(page(listOf('list', ['1. Mai Tag der Arbeit', '2. Mai Betriebsversammlung', '3. Mai Sommerfest'])))).toBe('info [number,sameWordAfterNumber]');
+    expect(flagsOf(page(listOf('list', ['1. Platz: Lyon', '2. Platz: Paris'])))).toBe('info [number,sameWordAfterNumber]');
+    expect(flagsOf(page(listOf('list', ['1. Mix the flour', '2. Add the yeast', '3. Knead'])))).toBe('likely [number]');
+    // "1)" is not how an ordinal is written.
+    expect(flagsOf(page(listOf('list', ['1) Add flour', '2) Add yeast'])))).toBe('likely [number]');
+  });
+  it('holds back capital letters before one capitalised word each: initials and names', () => {
+    expect(flagsOf(page(listOf('list', ['A. Martin, Université de Lyon', 'B. Nguyen, Université de Nantes', 'C. Okafor, Université de Lille'])))).toBe('info [number,initialsAndNames]');
+    expect(flagsOf(page(listOf('list', ['A. Martin', 'B. Nguyen', 'C. Okafor'])))).toBe('info [number,initialsAndNames]');
+    expect(flagsOf(page(listOf('list', ['A. Scope of the regulation', 'B. Definitions and terms', 'C. Entry into force'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['a. Paper', 'b. Glass', 'c. Metal'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['A) Martin', 'B) Nguyen', 'C) Okafor'])))).toBe('likely [number]');
+  });
+  it('reads kana and hangul in the order of their sequences, and numbers in square brackets', () => {
+    expect(flagsOf(page(listOf('list', ['あ) 最初の項目', 'い) 二番目の項目', 'う) 三番目の項目'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['ア) 最初の項目', 'イ) 二番目の項目', 'ウ) 三番目の項目'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['イ) 最初の項目', 'ロ) 二番目の項目', 'ハ) 三番目の項目'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['い) 最初の項目', 'ろ) 二番目の項目', 'は) 三番目の項目'])))).toBe('likely [number]');
+    expect(flagsOf(page(listOf('list', ['가. 첫째 항목', '나. 둘째 항목', '다. 셋째 항목'])))).toBe('likely [number]');
+    // Not in sequence, and from the middle of one.
+    expect(summary(page(listOf('list', ['あ) 一', 'う) 二'])))).toEqual([]);
+    expect(flagsOf(page(listOf('list', ['か) 一', 'き) 二', 'く) 三'])))).toBe('info [number,startsMidSequence]');
+    expect(flagsOf(page(listOf('list', ['[1] Smith, J. (2020). On lists.', '[2] Doe, A. (2021). On headings.', '[3] Roe, B. (2022). On groups.'])))).toBe('likely [number]');
+  });
+  it('takes marks in cells of their own in a flat grid, the text of each item in the next cell', () => {
+    const cells = (texts: string[], mark: string): Sketch[] =>
+      texts.flatMap((text, row) => [leaf(mark, { at: { x: 32, y: 400 + row * 24, width: 16 } }), leaf(text, { at: { x: 60, y: 400 + row * 24 } })]);
+    expect(flagsOf(page({ id: 'grid', children: cells(['Unlimited projects', 'Priority support', 'Single sign-on'], '✓') }))).toBe('likely [bullet]');
+    const numbered = report(page({ id: 'grid', children: ['One', 'Two'].flatMap((text, row) => [leaf(`${row + 1}.`, { at: { x: 32, y: 400 + row * 24, width: 16 } }), leaf(text, { at: { x: 60, y: 400 + row * 24 } })]) })).candidates;
+    expect(numbered.map((candidate) => `${candidate.status} [${candidate.flags.join(',')}] ${candidate.items}`)).toEqual(['likely [number] 2']);
+    // Marks side by side on one row are the cells of a comparison, not items.
+    const row = { id: 'row', children: [leaf('SSO', { at: { x: 32, y: 400 } }), leaf('✓', { at: { x: 400, y: 400, width: 16 } }), leaf('✓', { at: { x: 500, y: 400, width: 16 } }), leaf('–', { at: { x: 600, y: 400, width: 16 } })] };
+    expect(summary(page(row))).toEqual([]);
+  });
+  it('takes the size of a box that holds a mark alone from the configuration', () => {
+    const item = (row: number): Sketch => ({ children: [leaf('(iii)', { at: { x: 32, y: 400 + row * 24 } }), leaf('text', { at: { x: 80, y: 400 + row * 24 } })] });
+    const root = page({ id: 'flex', children: [{ children: [leaf('(ii)', { at: { x: 32, y: 376 } }), leaf('text', { at: { x: 80, y: 376 } })] }, item(0)] });
+    expect(summary(root)).toEqual([]);
+    expect(summary(root, {}, { ...config, loneMarkerMaxChars: 5 })).toEqual(['info glyph-list-candidate #flex [number,startsMidSequence]']);
+  });
+});
+
+describe('several series on one element', () => {
+  const both = page({ id: 'p', lines: ['• apples', '• pears', '• plums', 'and then the steps', '1. wash', '2. peel', '3. eat'] });
+  it('reports two series of lines in one block, each under an id of its own', () => {
+    const result = report(both);
+    expect(result.candidates.map((candidate) => `${candidate.status} ${candidate.selector} [${candidate.flags.join(',')}] ${candidate.items}`)).toEqual([
+      'likely #p [bullet,lineBreaks] 3',
+      'likely #p [number,lineBreaks] 3',
+    ]);
+    expect(result.merged).toBe(0);
+    const [first, second] = result.candidates;
+    expect(first!.findingId).not.toBe(second!.findingId);
+    expect(first!.key).not.toBe(second!.key);
+    // The first keeps the id it has when it is alone; both are the same on a second run.
+    const alone = report(page({ id: 'p', lines: ['• apples', '• pears', '• plums', 'and then the steps'] })).candidates[0]!;
+    expect(first!.findingId).toBe(alone.findingId);
+    expect(report(both).candidates.map((candidate) => candidate.findingId)).toEqual([first!.findingId, second!.findingId]);
+  });
+  it('gives every finding of the check an id of its own', () => {
+    const snapshot: Snapshot = {
+      environment: { url: 'http://example.test/', devicePixelRatio: 2, viewport: { width: 1280, height: 720 }, colorScheme: 'light' },
+      lists: surveyOf(both),
+      nodes: [],
+      axTree: [],
+      screenshots: { tiles: [], clips: {} },
+    };
+    const findings = runChecks(snapshot, resolveConfig({ checks: ['lists'] }));
+    expect(findings.filter((finding) => finding.selector === '#p').map((finding) => finding.status)).toEqual(['likely', 'likely']);
+    expect(new Set(findings.map((finding) => finding.id)).size).toBe(findings.length);
+  });
+  it('keeps the finding of the highest status when two have one rule and one selector, and counts the other', () => {
+    // Two elements with one id: the page is wrong, and the report still has one finding per id.
+    const root = page(listOf('twin', ['- one', '- two']), leaf('Plain text between.'), listOf('twin', ['• one', '• two']));
+    const result = report(root);
+    expect(result.candidates.map((candidate) => `${candidate.status} ${candidate.selector} [${candidate.flags.join(',')}]`)).toEqual(['likely #twin [bullet]']);
+    expect(result.merged).toBe(1);
+  });
+});
+
+describe('names and values that are not', () => {
+  it('does not take the speakers of a chat for names: they come back', () => {
+    expect(summary(page(listOf('chat', ['Alice: are you coming to the meeting?', 'Bob: yes, five minutes.', 'Alice: ok, room 4.', 'Bob: on my way.'])))).toEqual([]);
+    expect(summary(page({ id: 'p', lines: ['Tel: 01 23 45 67 89', 'Tel: 01 23 45 67 90', 'Fax: 01 23 45 67 91'] }))).toEqual([]);
+  });
+  it('does not take a name and a verb for a name: more words than a name has', () => {
+    const feed = ['Marsha Labat posted a video: Building Better Dashboards', 'Elston Muffett joined your webinar: Intro to TypeScript', 'Leigha Gorce left a long comment: This is so helpful'];
+    expect(summary(page(listOf('feed', feed)))).toEqual([]);
+    expect(summary(page(listOf('sheet', ['Date of issue: 12 March', 'Numéro de sécurité sociale : 1 84', 'Place of birth: Lyon'])))).toEqual(['advisory key-value #sheet [colonLines]']);
+  });
+  it('wants the names set in one style, the same on every line', () => {
+    const line = (text: string, keyStyle: string): Sketch => ({ lines: [text], over: { segments: [{ start: text, keyStyle, box: { x: 32, y: 0, width: 300, height: 20 } }] } });
+    const sheet = (styles: string[]): string[] => {
+      const survey = placed(surveyOf(page({ id: 'sheet', children: ['Anna commented: yes', 'Karim replied: no', 'Lea wrote: maybe'].map((text, index) => line(text, styles[index]!)) })));
+      return listReport(survey, config).candidates.map((candidate) => candidate.rule);
+    };
+    expect(sheet(['bold', 'bold', 'bold'])).toEqual(['lists/key-value']);
+    expect(sheet(['bold\nplain', 'bold\nplain', 'bold\nplain'])).toEqual([]);
+    expect(sheet(['bold', 'plain', 'bold'])).toEqual([]);
+  });
+  it('wants the names of pairs side by side to differ', () => {
+    const pair = (name: string, value: string, row: number): Sketch[] => [
+      leaf(name, { at: { x: 32, y: 500 + row * 24, width: 120 }, over: { style: BOLD } }),
+      leaf(value, { at: { x: 200, y: 500 + row * 24 } }),
+    ];
+    expect(summary(page({ id: 'pairs', children: [...pair('Amélie', 'Has anyone seen the minutes?', 0), ...pair('Karim', 'In the shared folder.', 1), ...pair('Amélie', 'Found them.', 2)] }))).toEqual([]);
   });
 });
 

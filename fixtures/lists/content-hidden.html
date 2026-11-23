@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: content-hidden</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; padding: 32px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      .tall { height: 2000px; }
+      /* Hidden by the author: no height of its own, so that anything that renders its content moves the page. */
+      .closed { content-visibility: hidden; background: #b00020; color: #fff; }
+      .closed div, [hidden="until-found"] div { height: 150px; font-size: 40px; }
+      footer { content-visibility: auto; contain-intrinsic-size: auto 300px; padding: 24px 32px; background: #f2f2f2; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Two panels the author keeps closed, one with content-visibility: hidden and one with hidden="until-found", stand above a bulleted list. A footer with content-visibility: auto, far below the window, holds a real list. Rendering the footer for the scan must not open the panels: they stay unread and unpainted, and the list under them stays where it is.</p>
+      <div class="closed"><section id="closed-list"><div>• Closed line one</div><div>• Closed line two</div></section></div>
+      <div hidden="until-found"><section id="until-found-list"><div>• Until found one</div><div>• Until found two</div></section></div>
+      <section id="after">
+        <div>• Wholemeal flour</div>
+        <div>• Fresh yeast</div>
+      </section>
+      <div class="tall"><p>A long stretch of page between the top and the footer.</p></div>
+    </main>
+    <footer>
+      <ul id="real-list"><li>• Delivery</li><li>• Returns</li><li>• Payment</li></ul>
+      <p>Closing paragraph of the footer.</p>
+    </footer>
+  </body>
+</html>

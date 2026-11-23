@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: more-lists</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      section > p { margin: 0; }
+      .grid { display: grid; grid-template-columns: 24px 1fr; gap: 4px 8px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Lists without semantics that stand next to the lookalikes of the other fixture and must still be found. An enumeration with dashes, whose items end with semicolons, in French.</p>
+
+      <p id="enumeration" lang="fr">– le nom du demandeur ;<br>– son adresse ;<br>– la date de la demande.</p>
+      <p>Three lines of plain text that open with an arrow.</p>
+
+      <section id="arrows">
+        <div>→ Bring an identity document</div>
+        <div>→ Bring a proof of address</div>
+        <div>→ Come ten minutes early</div>
+      </section>
+      <p>Links with a bullet before each, outside navigation.</p>
+
+      <section id="bullet-links">
+        <div>• <a href="#one">Annual report</a></div>
+        <div>• <a href="#two">Minutes of the board</a></div>
+        <div>• <a href="#three">Press releases</a></div>
+      </section>
+      <p>Capital letters before titles of several words.</p>
+
+      <section id="letter-titles">
+        <div>A. Scope of the regulation</div>
+        <div>B. Definitions and terms</div>
+        <div>C. Entry into force</div>
+      </section>
+      <p>Two series in one paragraph: bullets, a line of text, then numbers.</p>
+
+      <p id="two-runs">• apples<br>• pears<br>• plums<br>and then the steps<br>1. wash<br>2. peel<br>3. eat</p>
+      <p>A flat grid: each mark in a cell of its own, the text of the item in the next cell.</p>
+
+      <div class="grid" id="flat-grid"><span>✓</span><span>Unlimited projects</span><span>✓</span><span>Priority support</span><span>✓</span><span>Single sign-on</span></div>
+      <p>Kana in gojūon order and in iroha order, then references numbered in square brackets.</p>
+
+      <section id="kana" lang="ja">
+        <p>あ) 最初の項目です</p>
+        <p>い) 二番目の項目です</p>
+        <p>う) 三番目の項目です</p>
+      </section>
+      <section id="iroha" lang="ja">
+        <p>イ) 最初の項目です</p>
+        <p>ロ) 二番目の項目です</p>
+        <p>ハ) 三番目の項目です</p>
+      </section>
+      <section id="references">
+        <p>[1] Smith, J. (2020). On lists.</p>
+        <p>[2] Doe, A. (2021). On headings.</p>
+        <p>[3] Roe, B. (2022). On groups.</p>
+      </section>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

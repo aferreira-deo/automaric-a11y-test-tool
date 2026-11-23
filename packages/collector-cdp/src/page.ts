@@ -77,6 +77,69 @@ export function captureScale(png: Png, clip: Box, expected: number, tolerancePx:
   );
 }
 
+/** The settings the in-page agent works from: the part of the configuration it needs, as plain data. */
+export function agentOptions(config: Config): AgentOptions {
+  return {
+    settleFrames: config.focus.settleFrames,
+    settleTimeoutMs: config.focus.settleTimeoutMs,
+    fontsTimeoutMs: config.focus.fontsTimeoutMs,
+    clipMarginCssPx: config.focus.clipMarginCssPx,
+    obscuredGrid: config.focus.obscuredGrid,
+    coverGrid: config.focus.coverGrid,
+    opaqueCoverMinAlpha: config.focus.opaqueCoverMinAlpha,
+    invisibleCoverMaxOpacity: config.focus.invisibleCoverMaxOpacity,
+    icon: {
+      clipMarginCssPx: config.icon.clipMarginCssPx,
+      minControlSizeCssPx: config.icon.minControlSizeCssPx,
+      maxGraphicSizeCssPx: config.icon.maxGraphicSizeCssPx,
+      iconFontFamilyPattern: config.icon.iconFontFamilyPattern,
+      inactiveHintPattern: config.icon.inactiveHintPattern,
+      logoHintPattern: config.icon.logoHintPattern,
+      homeLinkNamePattern: config.icon.homeLinkNamePattern,
+      minPaintedSizeCssPx: config.icon.minPaintedSizeCssPx,
+      boxToleranceCssPx: config.icon.boxToleranceCssPx,
+      boundaryProbeInsetCssPx: config.icon.boundaryProbeInsetCssPx,
+      minVisibleTextCssPx: config.icon.minVisibleTextCssPx,
+      boundaryWrapperLevels: config.icon.boundaryWrapperLevels,
+      boundaryWrapperSlackCssPx: config.icon.boundaryWrapperSlackCssPx,
+      coverGrid: config.icon.coverGrid,
+    },
+    headings: {
+      maxBlocks: config.headings.maxBlocks,
+      maxTextChars: config.headings.maxTextChars,
+      minVisibleTextCssPx: config.headings.minVisibleTextCssPx,
+      minFontSizeCssPx: config.headings.minFontSizeCssPx,
+      regionSelector: config.headings.regionSelector,
+      clipMarginCssPx: config.headings.clipMarginCssPx,
+      clipAboveCssPx: config.headings.clipAboveCssPx,
+      clipBelowCssPx: config.headings.clipBelowCssPx,
+      sameLineMinOverlap: config.headings.sameLineMinOverlap,
+      mergeMaxGapEm: config.headings.mergeMaxGapEm,
+    },
+    lists: {
+      lineStartChars: config.lists.lineStartChars,
+      lineEndChars: config.lists.lineEndChars,
+      keySeparatorChars: config.lists.keySeparatorChars,
+      maxGroupParents: config.lists.maxGroupParents,
+      maxAncestorLevels: config.lists.maxAncestorLevels,
+      markerAncestorLevels: config.lists.markerAncestorLevels,
+      maxGroups: config.lists.maxGroups,
+      maxGroupItems: config.lists.maxGroupItems,
+      maxListElements: config.lists.maxListElements,
+      markerMinSizeCssPx: config.lists.markerMinSizeCssPx,
+      markerMaxSizeCssPx: config.lists.markerMaxSizeCssPx,
+      markerMaxGapEm: config.lists.markerMaxGapEm,
+      markerRoomEm: config.lists.markerRoomEm,
+      shapeDepth: config.lists.shapeDepth,
+      minRepeatedItems: config.lists.minRepeatedItems,
+      itemTextMaxChars: config.lists.itemTextMaxChars,
+      clipMarginCssPx: config.lists.clipMarginCssPx,
+      clipMarkerRoomCssPx: config.lists.clipMarkerRoomCssPx,
+      sameRowMinOverlap: config.lists.sameRowMinOverlap,
+    },
+  };
+}
+
 /**
  * Runs `body` on a stabilised page and puts the page back afterwards.
  *
@@ -187,62 +250,7 @@ export async function withStablePage<T>(
 
   try {
     // The agent goes in first: it records focus and scroll positions before anything moves them.
-    const options: AgentOptions = {
-      settleFrames: config.focus.settleFrames,
-      settleTimeoutMs: config.focus.settleTimeoutMs,
-      fontsTimeoutMs: config.focus.fontsTimeoutMs,
-      clipMarginCssPx: config.focus.clipMarginCssPx,
-      obscuredGrid: config.focus.obscuredGrid,
-      coverGrid: config.focus.coverGrid,
-      opaqueCoverMinAlpha: config.focus.opaqueCoverMinAlpha,
-      invisibleCoverMaxOpacity: config.focus.invisibleCoverMaxOpacity,
-      icon: {
-        clipMarginCssPx: config.icon.clipMarginCssPx,
-        minControlSizeCssPx: config.icon.minControlSizeCssPx,
-        maxGraphicSizeCssPx: config.icon.maxGraphicSizeCssPx,
-        iconFontFamilyPattern: config.icon.iconFontFamilyPattern,
-        inactiveHintPattern: config.icon.inactiveHintPattern,
-        logoHintPattern: config.icon.logoHintPattern,
-        homeLinkNamePattern: config.icon.homeLinkNamePattern,
-        minPaintedSizeCssPx: config.icon.minPaintedSizeCssPx,
-        boxToleranceCssPx: config.icon.boxToleranceCssPx,
-        boundaryProbeInsetCssPx: config.icon.boundaryProbeInsetCssPx,
-        minVisibleTextCssPx: config.icon.minVisibleTextCssPx,
-        boundaryWrapperLevels: config.icon.boundaryWrapperLevels,
-        boundaryWrapperSlackCssPx: config.icon.boundaryWrapperSlackCssPx,
-        coverGrid: config.icon.coverGrid,
-      },
-      headings: {
-        maxBlocks: config.headings.maxBlocks,
-        maxTextChars: config.headings.maxTextChars,
-        minVisibleTextCssPx: config.headings.minVisibleTextCssPx,
-        minFontSizeCssPx: config.headings.minFontSizeCssPx,
-        regionSelector: config.headings.regionSelector,
-        clipMarginCssPx: config.headings.clipMarginCssPx,
-        clipAboveCssPx: config.headings.clipAboveCssPx,
-        clipBelowCssPx: config.headings.clipBelowCssPx,
-        sameLineMinOverlap: config.headings.sameLineMinOverlap,
-        mergeMaxGapEm: config.headings.mergeMaxGapEm,
-      },
-      lists: {
-        lineStartChars: config.lists.lineStartChars,
-        maxAncestorLevels: config.lists.maxAncestorLevels,
-        markerAncestorLevels: config.lists.markerAncestorLevels,
-        maxGroups: config.lists.maxGroups,
-        maxGroupItems: config.lists.maxGroupItems,
-        maxListElements: config.lists.maxListElements,
-        markerMinSizeCssPx: config.lists.markerMinSizeCssPx,
-        markerMaxSizeCssPx: config.lists.markerMaxSizeCssPx,
-        markerMaxGapEm: config.lists.markerMaxGapEm,
-        markerRoomEm: config.lists.markerRoomEm,
-        shapeDepth: config.lists.shapeDepth,
-        minRepeatedItems: config.lists.minRepeatedItems,
-        itemTextMaxChars: config.lists.itemTextMaxChars,
-        clipMarginCssPx: config.lists.clipMarginCssPx,
-        clipMarkerRoomCssPx: config.lists.clipMarkerRoomCssPx,
-        sameRowMinOverlap: config.lists.sameRowMinOverlap,
-      },
-    };
+    const options = agentOptions(config);
     await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);
     agentReady = true;
 

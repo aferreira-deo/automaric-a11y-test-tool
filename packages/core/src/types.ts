@@ -69,6 +69,12 @@ export interface Environment {
   devicePixelRatio: number;
   viewport: { width: number; height: number };
   colorScheme: 'light' | 'dark';
+  /**
+   * Present when the page went to another document while it was being read (a redirect by
+   * script or by `meta refresh` after it had loaded) and was read again there: the address the
+   * scan started on. `url` is the address of the document the findings are about.
+   */
+  navigatedFrom?: string;
 }
 
 /** One element that received focus during collection. All boxes are CSS pixels in page coordinates. */
@@ -376,6 +382,16 @@ export interface ListLine {
   /** Its first painted line, page coordinates. */
   box: Box;
   marker?: ListMarker;
+  /** The end of its text, white space collapsed: the last `lineEndChars` characters. Absent: `start` is all of it. */
+  end?: string;
+  /** Colour of the first characters of the line, as `TextStyle.color`: of a bullet that is a character of the text. */
+  startColor?: string;
+  /**
+   * For a line that holds a colon (`keySeparatorChars`): the style signatures of the text before
+   * the first one, in order of first use, one per line of this string. A name set in one style
+   * gives one signature.
+   */
+  keyStyle?: string;
 }
 
 /**
@@ -402,6 +418,8 @@ export interface ListBlock {
   heading: boolean;
   /** Text direction of its element is right to left. */
   rtl: boolean;
+  /** The pointer over its element is the hand of a link (`cursor: pointer`, its own or inherited): something that is clicked. */
+  clickable?: boolean;
   /**
    * Its element and the ancestors of that element in its document, innermost first, at most
    * `maxAncestorLevels` of them, as pairs of numbers: the position of the element among the
@@ -510,6 +528,12 @@ export interface ListSurvey {
   groups: ListGroup[];
   /** Series found, including those beyond `maxGroups`. */
   totalGroups: number;
+  /**
+   * Elements with `minRepeatedItems` children or more: how many were looked at for series of
+   * siblings of one shape (at most `maxGroupParents`, in document order), and how many there are.
+   */
+  parents: number;
+  totalParents: number;
   lists: ListElement[];
   /** `ul`, `ol` and `menu` of interest found, including those beyond `maxListElements`. */
   totalLists: number;
@@ -678,6 +702,11 @@ export interface FocusConfig {
   settleTimeoutMs: number;
   /** Longest wait for web fonts before the walk starts. */
   fontsTimeoutMs: number;
+  /**
+   * Longest wait for a document: for one that is still being parsed when the scan starts, and
+   * for the one the page went to while it was being read, before it is read again from the start.
+   */
+  navigationTimeoutMs: number;
   /** CIEDE2000 difference above which a pixel counts as changed. Around 1 is just noticeable. */
   diffDeltaE: number;
   /** Changed regions smaller than this many square CSS pixels are discarded as noise. */
@@ -1017,6 +1046,8 @@ export interface HeadingsConfig {
 export interface ListsConfig {
   /** Characters kept from the start of each line of text, to look for a bullet or a number in. */
   lineStartChars: number;
+  /** Characters kept from the end of each line of text, to tell a sentence from an item. */
+  lineEndChars: number;
   /** Ancestors recorded for each text block. Two lines are sibling items only when the element that holds both is among them. */
   maxAncestorLevels: number;
   /** Ancestors of a line whose `::before` and list-item marker are looked at. */
@@ -1025,6 +1056,12 @@ export interface ListsConfig {
   maxGroups: number;
   /** At most this many items of each such series are measured. */
   maxGroupItems: number;
+  /**
+   * At most this many elements with `minRepeatedItems` children or more are looked at for such
+   * series, in document order. Each costs a look at its place in the page and at the box and
+   * the shape of every child, which adds up on a page of tens of thousands of elements.
+   */
+  maxGroupParents: number;
   /** At most this many `ul`, `ol` and `menu` of interest are read from the page. */
   maxListElements: number;
   /** Elements whose accessibility role is marked in the page (lists, description lists) per document; beyond it the accessibility tree counts as not read. */
@@ -1068,11 +1105,38 @@ export interface ListsConfig {
   bulletPattern: string;
   /**
    * A line that opens like this may start with a bullet: a hyphen, an en dash, an asterisk, a
-   * middle dot, an angle. These also open asides, footnotes and quoted replies, so fewer than
-   * `weakMinItems` of them in a row are held back as `info`. The em dash and the horizontal bar
-   * are left out on purpose: they open the lines of a dialogue in French and other languages.
+   * middle dot, an angle. These also open asides, footnotes, the lines of a dialogue and quoted
+   * replies, so such lines are `likely` only when there are `weakMinItems` of them and they read
+   * as items (see `sentenceEndPattern`); otherwise they are held back as `info`. The em dash and
+   * the horizontal bar are left out on purpose: they open the lines of a dialogue and little else.
    */
   weakBulletPattern: string;
+  /** Among the weak bullets, the one that quotes a message in plain-text mail (">"): lines that open with it are `info`, however many. */
+  quotePrefixPattern: string;
+  /**
+   * Among the bullets, those that are also icons: arrows, triangles, pictograms, dingbats and
+   * emoji. A warning sign opens a message, an arrow a link, a triangle the title of a panel that
+   * opens. Lines that open with one are `likely` from `symbolMinItems`, and not when each is
+   * nothing but a link or something that is clicked.
+   */
+  symbolBulletPattern: string;
+  /**
+   * The text after a hyphen or an asterisk is a figure when it opens like this: a number and the
+   * sign of a unit (degree, percent, currency, minutes and seconds), or a currency sign and a number.
+   */
+  figureStartPattern: string;
+  /**
+   * A line that ends like this ends as a sentence does: a full stop, a question mark, an
+   * exclamation mark, an ellipsis, in any script, with or without a closing quotation mark or
+   * bracket. Lines after a weak bullet are items when none ends like this...
+   */
+  sentenceEndPattern: string;
+  /** ...or when every line but the last ends like this: the semicolon or the comma of an enumeration. */
+  itemSeparatorEndPattern: string;
+  /** A line that reads like this is an initial and a name, not an item with a letter before it: "A. Martin", "B. Nguyen, Lyon". */
+  initialNamePattern: string;
+  /** A bullet or a number is taken to stand alone in its box when the box holds no more characters than this. */
+  loneMarkerMaxChars: number;
   /** Generated text of `::before` that is one of these characters is a bullet, with or without anything after it. */
   pseudoBulletPattern: string;
   /** Generated text made of these characters only is an icon-font glyph (Private Use Areas). */
@@ -1089,13 +1153,20 @@ export interface ListsConfig {
   enclosedNumberPattern: string;
   /** Letters a sequence of letters starts with, in the scripts whose letters follow each other in Unicode. */
   firstLetters: string;
-  /** After a hyphen or an asterisk, text with at least this share of digits among letters and digits, or with a currency or percent sign, is a figure ("- 20 %"), not an item. */
+  /**
+   * Letters that number items in an order that is not the order of their code points, each
+   * sequence from its first letter: kana in gojūon and in iroha order, hangul.
+   */
+  letterSequences: string[];
+  /** After a hyphen or an asterisk, text with at least this share of digits among letters and digits is a figure ("- 15"), not an item; so is text that opens as `figureStartPattern` says ("- 20 %"). */
   numericMinDigitShare: number;
 
   /** Fewest lines with a bullet or a number for a list. Section 5.4 of the brief: two. */
   minItems: number;
   /** Fewest lines for a list when every bullet is one of `weakBulletPattern`; fewer are `info`. */
   weakMinItems: number;
+  /** Fewest lines for a list when every bullet is one of `symbolBulletPattern`; fewer are `info`. */
+  symbolMinItems: number;
   /** Fewest lines for a list numbered with single letters followed by a full stop ("A. Lovelace" is also a name); fewer are `info`. */
   letterMinItems: number;
   /**
@@ -1136,8 +1207,14 @@ export interface ListsConfig {
 
   /** Fewest pairs for a key-value layout. */
   keyValueMinPairs: number;
-  /** Longest name of a pair, in words. */
+  /**
+   * Longest name of a pair, in words. The names of a run of pairs also have to differ from each
+   * other and, where the page tells, to be set in one style each and all in the same one: "Bob:"
+   * that comes back is a speaker, a name in bold with a verb after it is an entry of a feed.
+   */
   keyMaxWords: number;
+  /** The characters that end a name on a line that reads name, colon, value: what the page reads the style of the name up to. */
+  keySeparatorChars: string;
   /**
    * A line that reads like this is a name, a colon and a value. The first group is the name. The
    * colon has to be followed by white space, which leaves out hours ("09:30") and addresses of pages.

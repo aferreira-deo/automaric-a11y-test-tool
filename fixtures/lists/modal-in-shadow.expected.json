@@ -1,0 +1,9 @@
+{
+  "description": "The only modal dialog of the page lives in the shadow tree of a component. It makes the rest of the page inert all the same: the bulleted lines outside it are not reported, the bulleted list inside it is likely.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#host >>> #nested", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

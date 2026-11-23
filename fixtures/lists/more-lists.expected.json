@@ -1,0 +1,18 @@
+{
+  "description": "Recall control for the rules that hold lookalikes back: each of these is still likely. Dashes before items that end as an enumeration does (semicolons), three lines of plain text that open with an arrow, links with a bullet before each outside navigation, capital letters before titles of several words, two series in one paragraph (bullets, then numbers: two findings on the same element, with different ids), a flat grid with each mark in a cell of its own, kana in gojūon and in iroha order, references numbered in square brackets.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#enumeration", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet", "lineBreaks"] },
+    { "selector": "#arrows", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#bullet-links", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#letter-titles", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#two-runs", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet", "lineBreaks"] },
+    { "selector": "#two-runs", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number", "lineBreaks"] },
+    { "selector": "#flat-grid", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#kana", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#iroha", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#references", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

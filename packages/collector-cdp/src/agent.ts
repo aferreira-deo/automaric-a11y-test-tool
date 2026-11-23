@@ -37,6 +37,9 @@ export interface AgentHeadingsOptions {
 /** Subset of ListsConfig the agent needs; documented there. */
 export interface AgentListsOptions {
   lineStartChars: number;
+  lineEndChars: number;
+  keySeparatorChars: string;
+  maxGroupParents: number;
   maxAncestorLevels: number;
   markerAncestorLevels: number;
   maxGroups: number;
@@ -65,6 +68,9 @@ export interface AgentListLine {
   start: string;
   box: AgentRect;
   marker?: AgentListMarker;
+  end: string;
+  startColor: string;
+  keyStyle?: string;
 }
 
 export interface AgentListBlock {
@@ -82,6 +88,7 @@ export interface AgentListBlock {
   inList: boolean;
   heading: boolean;
   rtl: boolean;
+  clickable?: boolean;
   chain: number[];
   segments: AgentListLine[];
 }
@@ -132,6 +139,8 @@ export interface AgentListSurvey {
   totalBlocks: number;
   groups: AgentListGroup[];
   totalGroups: number;
+  parents: number;
+  totalParents: number;
   lists: AgentListElement[];
   totalLists: number;
   exposedLists: number;
@@ -1810,43 +1819,50 @@ export function agentFactory(options: AgentOptions): Agent {
    * the accessibility tree as well (verified against Chrome: a list inside such a subtree has no
    * node in `Accessibility.getFullAXTree` until it is rendered). Text read from the DOM there
    * would look like text without any semantics. A reader gets that content rendered on scrolling
-   * to it, so it is rendered here, by a constructed style sheet that cleanup() removes.
+   * to it, so it is rendered here: the elements whose computed `content-visibility` is `auto`
+   * are tagged with an attribute, and a constructed style sheet in their document or shadow root
+   * makes the tagged ones `visible`. cleanup() removes both.
    *
-   * What the author hides with `content-visibility: hidden` must stay unread: those elements are
-   * recorded first, and the walk passes them over.
+   * Only those elements are touched. What the author hides with `content-visibility: hidden` or
+   * with `hidden="until-found"` (which computes to the same) stays hidden: it is not rendered,
+   * so it takes no room and paints nothing in a capture, and it stays unread, as those elements
+   * are recorded here and the walk passes them over. A rule for every element would open them
+   * (it did: a closed panel then pushed everything under it down the page).
    */
-  const RENDER_ALL_CSS = '*,*::before,*::after{content-visibility:visible!important}';
+  const RENDER_ATTRIBUTE = 'data-a11y-vision-render';
+  const RENDER_CSS = '[' + RENDER_ATTRIBUTE + ']{content-visibility:visible!important}';
   const contentHidden = new WeakSet<Element>();
+  const renderedElements: Element[] = [];
   let renderedAll = false;
 
   async function renderAll(): Promise<void> {
     if (renderedAll) return;
     renderedAll = true;
-    const roots: (Document | ShadowRoot)[] = [document];
-    let skipped = false;
+    const roots = new Set<Document | ShadowRoot>();
     eachElement(document, (element) => {
       const visibility = element.ownerDocument.defaultView?.getComputedStyle(element).contentVisibility;
       if (visibility === 'hidden') contentHidden.add(element);
-      else if (visibility === 'auto') skipped = true;
-      if (element.shadowRoot) roots.push(element.shadowRoot);
-      const doc = isFrame(element) ? frameDocument(element) : null;
-      if (doc) roots.push(doc);
+      else if (visibility === 'auto') {
+        renderedElements.push(element);
+        roots.add(element.getRootNode() as Document | ShadowRoot);
+      }
     });
     // Nothing is skipped: the page is left alone.
-    if (!skipped) return;
+    if (renderedElements.length === 0) return;
     for (const root of roots) {
       try {
         const doc = root.nodeType === 9 ? (root as Document) : root.ownerDocument;
         const view = doc?.defaultView as (Window & { CSSStyleSheet: typeof CSSStyleSheet }) | null | undefined;
         if (!view) continue;
         const sheet = new view.CSSStyleSheet();
-        sheet.replaceSync(RENDER_ALL_CSS);
+        sheet.replaceSync(RENDER_CSS);
         root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
         sheets.push({ root, sheet });
       } catch {
         // The content of that root stays as the browser renders it.
       }
     }
+    for (const element of renderedElements) element.setAttribute(RENDER_ATTRIBUTE, '');
     await settle();
   }
 
@@ -1855,16 +1871,38 @@ export function agentFactory(options: AgentOptions): Agent {
    * and the element is outside it. Chrome leaves such content out of the accessibility tree
    * (verified), as it does for `inert`. Asked of the topmost such elements only: the answer is
    * handed down to what they hold.
+   *
+   * Inside and outside are those of the composed tree: what a component of the dialog renders
+   * in its shadow tree is inside the dialog, and a dialog that lives in a shadow tree makes the
+   * rest of its document inert like any other.
    */
   function blockedByModal(element: Element): boolean {
-    let modals: Element[];
-    try {
-      modals = [...element.ownerDocument.querySelectorAll('dialog:modal')];
-    } catch {
-      return false;
-    }
-    if (modals.length === 0 || element === element.ownerDocument.documentElement) return false;
-    return !modals.some((modal) => modal.contains(element) || element.contains(modal));
+    const modals = (modalDialogs ??= findModals()).get(element.ownerDocument);
+    if (!modals || element === element.ownerDocument.documentElement) return false;
+    return !modals.some((modal) => composedContains(modal, element) || composedContains(element, modal));
+  }
+
+  /**
+   * The modal dialogs of each document, shadow trees included. Looked for once per survey, in
+   * one walk: asked of every element instead, a query over the whole document made the survey
+   * quadratic (17 s of a scan of 28 s on a page of 100 000 elements).
+   */
+  let modalDialogs: Map<Document, Element[]> | null = null;
+
+  function findModals(): Map<Document, Element[]> {
+    const found = new Map<Document, Element[]>();
+    eachElement(document, (element) => {
+      if (element.localName !== 'dialog') return;
+      try {
+        if (!element.matches(':modal')) return;
+      } catch {
+        return;
+      }
+      const known = found.get(element.ownerDocument);
+      if (known) known.push(element);
+      else found.set(element.ownerDocument, [element]);
+    });
+    return found;
   }
 
   function ownContexts(element: Element): AgentTextContext[] {
@@ -1921,6 +1959,8 @@ export function agentFactory(options: AgentOptions): Agent {
     const blocks: AgentTextBlock[] = [];
     surveyedBlocks = [];
     let total = 0;
+    // The page may have opened or closed a dialog since the last survey.
+    modalDialogs = findModals();
 
     const listLimits = options.lists;
     interface Graphic {
@@ -2185,7 +2225,29 @@ export function agentFactory(options: AgentOptions): Agent {
           .replace(/\s+/g, ' ')
           .trim();
         const marker = markerOf(pieces[0]!, line);
-        out.push({ start: text.slice(0, listLimits.lineStartChars), box: page(line), ...(marker ? { marker } : {}) });
+        // The styles of the text before the first colon: of the name, when the line is a name and a value.
+        let keyStyle: string | undefined;
+        const styles: string[] = [];
+        for (const piece of pieces) {
+          let at = -1;
+          for (const separator of listLimits.keySeparatorChars) {
+            const index = piece.text.indexOf(separator);
+            if (index >= 0 && (at < 0 || index < at)) at = index;
+          }
+          if (/\S/.test(at < 0 ? piece.text : piece.text.slice(0, at)) && !styles.includes(piece.look.signature)) styles.push(piece.look.signature);
+          if (at >= 0) {
+            keyStyle = styles.join('\n');
+            break;
+          }
+        }
+        out.push({
+          start: text.slice(0, listLimits.lineStartChars),
+          box: page(line),
+          ...(marker ? { marker } : {}),
+          end: text.slice(-listLimits.lineEndChars),
+          startColor: pieces[0]!.look.style.color,
+          ...(keyStyle !== undefined ? { keyStyle } : {}),
+        });
       });
       return out;
     }
@@ -2652,6 +2714,7 @@ export function agentFactory(options: AgentOptions): Agent {
         .trim();
       surveyedBlocks.push({ nodes: pieces.map((piece) => piece.node), element });
       if (forLists) {
+        const own = element.ownerDocument.defaultView?.getComputedStyle(element);
         listBlocks.push({
           selector: selectorOf(element),
           frame: frameOf(element),
@@ -2666,7 +2729,9 @@ export function agentFactory(options: AgentOptions): Agent {
           contexts: CONTEXT_ORDER.filter((context) => piecePlaces.every((own) => own.contexts.has(context))),
           inList: piecePlaces.every((own) => own.list !== null),
           heading: isHeading,
-          rtl: element.ownerDocument.defaultView?.getComputedStyle(element).direction === 'rtl',
+          rtl: own?.direction === 'rtl',
+          // Inherited: also the text of a block inside something that is clicked.
+          ...(own?.cursor === 'pointer' ? { clickable: true } : {}),
           chain: chainOf(element),
           segments: segmentsOf(entry, page),
         });
@@ -2791,7 +2856,11 @@ export function agentFactory(options: AgentOptions): Agent {
     const groups: AgentListGroup[] = [];
     let totalGroups = 0;
     groupParents.sort((a, b) => ords.get(a)!.ord - ords.get(b)!.ord);
-    for (const parent of groupParents) {
+    // Bounded: each parent costs a look at its place in the page and at the box and the shape of
+    // every child. The survey says how many were left out.
+    const totalParents = groupParents.length;
+    const readParents = groupParents.slice(0, listLimits.maxGroupParents);
+    for (const parent of readParents) {
       const place = placeOf(parent);
       if (place.list !== null || NOT_IN.some((context) => place.contexts.has(context)) || structural(parent)) continue;
       const kids: Element[] = [];
@@ -2835,7 +2904,7 @@ export function agentFactory(options: AgentOptions): Agent {
     listTargets = targets;
     return {
       survey: { blocks, total },
-      lists: { blocks: listBlocks, totalBlocks: total, groups, totalGroups, lists: listElements, totalLists, exposedLists },
+      lists: { blocks: listBlocks, totalBlocks: total, groups, totalGroups, parents: readParents.length, totalParents, lists: listElements, totalLists, exposedLists },
     };
   }
 
@@ -3166,6 +3235,8 @@ export function agentFactory(options: AgentOptions): Agent {
         root.adoptedStyleSheets = root.adoptedStyleSheets.filter((adopted) => adopted !== sheet);
       }
       sheets.length = 0;
+      for (const element of renderedElements) element.removeAttribute(RENDER_ATTRIBUTE);
+      renderedElements.length = 0;
     },
   };
 }

@@ -12,7 +12,7 @@ const HELP = {
   keyValue:
     'Names and values presented in pairs can be marked up as a description list (dl, dt, dd) or as a table, which tells assistive technology which value belongs to which name. Advisory: plain text that reads "name: value" on each line conveys the same in its order.',
   unstyled:
-    'Inventory. Safari does not expose a ul or ol as a list when none of its items shows a marker (list-style: none), unless the list has role="list" or is inside a navigation landmark. That is a decision of the browser and not a failure of the page (1.3.1 is met by the markup); it explains why VoiceOver does not announce a list here.',
+    'Inventory. As read from the source of WebKit, and not tested on a device here: Safari does not expose a ul or ol as a list when none of its items shows a marker (list-style: none), unless the list has role="list" or is inside a navigation landmark. That is a decision of the browser and not a failure of the page (1.3.1 is met by the markup); it may explain why VoiceOver does not announce a list here.',
   inventory: 'Inventory. Nothing to fix on the strength of this entry alone.',
 };
 
@@ -26,11 +26,18 @@ const MARKER_TEXT: Record<string, string> = {
 };
 
 const REASON_TEXT: Record<ListReason, string> = {
-  fewWeakItems: 'there are few of them and each opens with a hyphen, a dash or an asterisk, which also open asides, footnotes and quoted replies',
+  fewWeakItems: 'there are few of them and each opens with a hyphen, a dash or an asterisk, which also open asides and footnotes',
+  quotePrefix: 'each opens with the angle that quotes a message in plain-text mail',
+  weakSentences: 'each opens with a hyphen, a dash or an asterisk and at least one ends as a sentence does, as the lines of a dialogue do; items after such a mark are phrases, or the parts of an enumeration closed by semicolons or commas',
   fewGraphicItems: 'there are few of them and what stands before each is an image or a drawn shape, as before two links that share an icon',
+  fewSymbolItems: 'there are few of them and each opens with an arrow, a pictogram or an emoji, as two messages with the same sign do, or two links with the same arrow',
+  itemsAreControls: 'each opens with an arrow, a triangle or a pictogram and is nothing but a link or something that is clicked, as calls to action and the titles of an accordion are',
+  colouredMarkers: 'the characters the lines open with are in different colours, as the swatches of a legend are, while the bullets of a list look the same',
   mixedGlyphs: 'the lines open with different symbols, at least one of them used once, as symbols that label a line do',
   startsMidSequence: 'the numbers follow each other but do not start at the beginning of their sequence, as dates do, or a list that goes on from elsewhere',
   fewLetterItems: 'there are few of them and each opens with a single letter and a full stop, as initials of names do',
+  initialsAndNames: 'each reads as a capital letter, a full stop and one capitalised word, as an initial and a name do',
+  sameWordAfterNumber: 'every line goes on with the same word after its number, as dates and ranks do ("1. Mai", "2. Mai")',
   itemsHeadText: 'each of these lines has further blocks of text under it, as steps have, and as the titles of sections and panels have',
 };
 
@@ -86,7 +93,7 @@ function messageOf(candidate: ListCandidate, config: ListsConfig): { message: st
       };
     default:
       return {
-        message: `This ${String(candidate.values['element'])} is exposed as a list of ${candidate.items} item(s) by Chrome and shows no marker on any of them. It has no explicit role and is outside navigation, so Safari does not expose it as a list.`,
+        message: `This ${String(candidate.values['element'])} is exposed as a list of ${candidate.items} item(s) by Chrome and shows no marker on any of them. It has no explicit role and is outside navigation, where Safari is not expected to expose it as a list (read from the source of WebKit, not tested on a device here).`,
         help: HELP.unstyled,
       };
   }
@@ -118,11 +125,14 @@ export const listsCheck: Check = {
     const beyond = {
       blocks: survey.totalBlocks - survey.blocks.length,
       groups: survey.totalGroups - survey.groups.length,
+      parents: survey.totalParents - survey.parents,
       lists: survey.totalLists - survey.lists.length,
     };
     const captured = report.candidates.filter((candidate) => candidate.crop !== null).length;
     const flags: string[] = [];
-    if (beyond.blocks > 0 || beyond.groups > 0 || beyond.lists > 0 || report.omitted > 0 || report.omittedUnstyled > 0) flags.push('truncated');
+    if (beyond.blocks > 0 || beyond.groups > 0 || beyond.parents > 0 || beyond.lists > 0 || report.omitted > 0 || report.omittedUnstyled > 0 || report.merged > 0) {
+      flags.push('truncated');
+    }
     if (!survey.axComplete) flags.push('axIncomplete');
     const { width, height } = snapshot.environment.viewport;
     drafts.push({
@@ -148,6 +158,8 @@ export const listsCheck: Check = {
           keyValueLayouts: count('key-value'),
           listsWithoutMarkers: count('unstyled'),
           captures: captured,
+          ...(report.merged > 0 ? { sameElementNotListed: report.merged } : {}),
+          ...(beyond.parents > 0 ? { parentsNotRead: beyond.parents } : {}),
         },
       },
       message:
@@ -156,6 +168,10 @@ export const listsCheck: Check = {
         ` ${count('repeated')} series of blocks of one shape, ${count('key-value')} layout(s) of names and values, and ${count('unstyled')} real list(s) without markers.` +
         (report.omitted > 0 ? ` ${report.omitted} further finding(s) are not listed (limit of ${config.lists.maxCandidates}).` : '') +
         (report.omittedUnstyled > 0 ? ` ${report.omittedUnstyled} further list(s) without markers are not listed (limit of ${config.lists.maxUnstyledLists}).` : '') +
+        (report.merged > 0 ? ` ${report.merged} further finding(s) are not listed because one of the same rule on the same element is.` : '') +
+        (beyond.parents > 0
+          ? ` ${beyond.parents} more element(s) with ${config.lists.minRepeatedItems} children or more were not looked at for series of siblings of one shape (limit of ${config.lists.maxGroupParents}).`
+          : '') +
         (beyond.blocks > 0 ? ` ${beyond.blocks} more block(s) of text were not read (limit of ${config.headings.maxBlocks}).` : '') +
         (beyond.groups > 0 ? ` ${beyond.groups} more series of sibling elements were not read (limit of ${config.lists.maxGroups}).` : '') +
         (beyond.lists > 0 ? ` ${beyond.lists} more list element(s) were not read (limit of ${config.lists.maxListElements}).` : '') +

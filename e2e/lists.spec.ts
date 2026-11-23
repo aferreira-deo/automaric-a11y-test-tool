@@ -1,6 +1,8 @@
 import { A11yVision } from '@a11y-vision/playwright';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import type * as AgentModule from '../packages/collector-cdp/src/agent.js';
+import type * as PageModule from '../packages/collector-cdp/src/page.js';
 import { dataOf, startMockModel, verdict } from './support/mock-model.js';
 import type { MockModel } from './support/mock-model.js';
 
@@ -228,4 +230,143 @@ test('rendering that the browser skips is switched on for the scan only', async 
   // The real list was read as a list, so its lines are not reported; the hidden panel was not read.
   expect(findings.filter((finding) => finding.status === 'likely').map((finding) => finding.selector).sort()).toEqual(['#footer-list', '#top-list']);
   expect(await state()).toEqual(before);
+});
+
+test('content the author keeps closed is neither read nor rendered, next to content the browser skips', async ({ page }) => {
+  await page.goto('/lists/content-hidden.html');
+  const state = () =>
+    page.evaluate(() => {
+      const first = document.querySelector('#after > div')!.getBoundingClientRect();
+      return {
+        top: Math.round(first.top + window.scrollY),
+        closed: getComputedStyle(document.querySelector('.closed')!).contentVisibility,
+        untilFound: getComputedStyle(document.querySelector('[hidden="until-found"]')!).contentVisibility,
+        footer: getComputedStyle(document.querySelector('footer')!).contentVisibility,
+        tagged: document.querySelectorAll('[data-a11y-vision-render]').length,
+        adoptedSheets: document.adoptedStyleSheets.length,
+        html: document.documentElement.outerHTML.length,
+      };
+    });
+  const before = await state();
+  expect(before).toMatchObject({ closed: 'hidden', untilFound: 'hidden', footer: 'auto', tagged: 0, adoptedSheets: 0 });
+
+  // While the page is read, the closed panels stay closed: asked from the page itself, when the scan tags what it renders.
+  const duringScan: string[] = [];
+  await page.exposeFunction('reportClosed', (value: string) => void duringScan.push(value));
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      const closed = [document.querySelector('.closed')!, document.querySelector('[hidden="until-found"]')!];
+      const report = (window as unknown as { reportClosed: (value: string) => void }).reportClosed;
+      report(closed.map((element) => `${getComputedStyle(element).contentVisibility} ${element.getBoundingClientRect().height}`).join(', '));
+    }).observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['data-a11y-vision-render'] });
+  });
+
+  const { findings } = await lists(page).analyze();
+  const after = findings.find((finding) => finding.selector === '#after')!;
+  // The list under the panels is where the author put it: nothing above it was opened.
+  expect(Math.abs(after.box!.y - before.top)).toBeLessThan(8);
+  expect(findings.filter((finding) => finding.status === 'likely').map((finding) => finding.selector)).toEqual(['#after']);
+  // The footer was tagged for the scan; the panels were closed and empty then.
+  expect(duringScan.length).toBeGreaterThan(0);
+  expect(new Set(duringScan)).toEqual(new Set(['hidden 0, hidden 0']));
+  expect(await state()).toEqual(before);
+});
+
+test('two series in one block are two findings with two ids and two captures', async ({ page }) => {
+  await page.goto('/lists/more-lists.html');
+  const { result, crops } = await lists(page).analyzeWithEvidence();
+  const both = result.findings.filter((finding) => finding.selector === '#two-runs');
+  expect(both.map((finding) => finding.evidence.values?.['marker']).sort()).toEqual(['bullet', 'number']);
+  expect(both[0]!.id).not.toBe(both[1]!.id);
+  expect(both[0]!.evidence.crops[0]).not.toBe(both[1]!.evidence.crops[0]);
+  for (const finding of both) expect(crops[finding.evidence.crops[0]!]).toBeDefined();
+  expect(new Set(result.findings.map((finding) => finding.id)).size).toBe(result.findings.length);
+  // A mark in a cell of its own is shown with the text beside it.
+  expect(result.findings.find((finding) => finding.selector === '#flat-grid')?.evidence.values?.['firstItems']).toBe('✓ Unlimited projects | ✓ Priority support | ✓ Single sign-on');
+  // The same ids on a second run.
+  const again = await lists(page).analyze();
+  expect(again.findings.map((finding) => finding.id)).toEqual(result.findings.map((finding) => finding.id));
+});
+
+/**
+ * A page of `rows` blocks of three children each, inside a modal dialog when `modal` is set. The
+ * dialog is as high as its content and scrolls with the page, so that all of it is read.
+ */
+async function largePage(page: Page, rows: number, modal: boolean): Promise<void> {
+  await page.setContent('<!doctype html><html lang="en"><body style="font: 16px Arial"><main id="main"><p>A large page.</p></main><dialog id="dialog" style="position: absolute; top: 0; max-height: none; overflow: visible"><p>A dialog.</p></dialog></body></html>');
+  await page.evaluate(
+    ([count, open]) => {
+      const dialog = document.getElementById('dialog') as HTMLDialogElement;
+      const parts: string[] = [];
+      for (let index = 0; index < count; index++) parts.push(`<div><span>Row ${index}</span> <em>some</em> <span>text that goes on</span></div>`);
+      (open ? dialog : document.getElementById('main')!).insertAdjacentHTML('beforeend', parts.join(''));
+      if (open) dialog.showModal();
+    },
+    [rows, modal] as const,
+  );
+}
+
+test('the survey looks for modal dialogs once, however many elements the page has', async ({ page }) => {
+  // The agent is run in the world of the page here, so that the page can count what it asks the DOM.
+  const { agentFactory } = (await import(new URL('../packages/collector-cdp/dist/agent.js', import.meta.url).href)) as typeof AgentModule;
+  const { agentOptions } = (await import(new URL('../packages/collector-cdp/dist/page.js', import.meta.url).href)) as typeof PageModule;
+  const { defaultConfig } = await import('@a11y-vision/core');
+  const options = agentOptions({ ...defaultConfig, lists: { ...defaultConfig.lists, maxGroupParents: 200 } });
+  for (const modal of [false, true]) {
+    await largePage(page, 1500, modal);
+    const counts = await page.evaluate(
+      ([source, settings]) => {
+        let modalQueries = 0;
+        const counted = (owner: { prototype: object }, name: string): void => {
+          const proto = owner.prototype as Record<string, (this: unknown, selector: string) => unknown>;
+          const original = proto[name]!;
+          proto[name] = function (this: unknown, selector: string) {
+            if (String(selector).includes(':modal')) modalQueries++;
+            return original.call(this, selector);
+          };
+        };
+        for (const owner of [Document, Element, DocumentFragment]) {
+          counted(owner, 'querySelectorAll');
+          counted(owner, 'querySelector');
+        }
+        counted(Element, 'matches');
+        counted(Element, 'closest');
+        const factory = (0, eval)(`(${source})`) as (given: unknown) => { listSurvey: () => { blocks: unknown[]; parents: number; totalParents: number } };
+        const survey = factory(settings).listSurvey();
+        return { modalQueries, blocks: survey.blocks.length, elements: document.querySelectorAll('*').length, parents: survey.parents, totalParents: survey.totalParents };
+      },
+      [agentFactory.toString(), options] as const,
+    );
+    expect(counts.elements).toBeGreaterThan(6000);
+    expect(counts.blocks).toBeGreaterThan(500);
+    // One question per dialog element, and no query of the whole document per element: it was thousands.
+    expect(counts.modalQueries, `modal: ${modal}`).toBeLessThanOrEqual(2);
+    // The parents looked at for series of siblings are bounded, and the survey says so.
+    expect(counts.totalParents).toBeGreaterThan(1500);
+    expect(counts.parents).toBe(200);
+  }
+});
+
+test('the survey says how many parents were not looked at for series of siblings', async ({ page }) => {
+  await largePage(page, 300, false);
+  await page.evaluate(() => {
+    const cards = document.createElement('section');
+    cards.id = 'cards';
+    cards.style.cssText = 'display: flex; gap: 16px';
+    cards.innerHTML = '<div><p>Card one</p><p>Text of it.</p></div><div><p>Card two</p><p>Text of it.</p></div><div><p>Card three</p><p>Text of it.</p></div>';
+    document.getElementById('main')!.append(cards);
+  });
+  const surveyOf = async (maxGroupParents: number) => {
+    const { findings } = await lists(page).options({ lists: { maxGroupParents } }).analyze();
+    return { survey: findings.find((finding) => finding.rule === 'lists/survey')!, cards: findings.some((finding) => finding.selector === '#cards') };
+  };
+  const all = await surveyOf(5000);
+  expect(all.cards).toBe(true);
+  expect(all.survey.evidence.flags).not.toContain('truncated');
+  // The cards come after the limit: not looked at, and the survey says how many parents were not.
+  const bounded = await surveyOf(100);
+  expect(bounded.cards).toBe(false);
+  expect(bounded.survey.evidence.flags).toContain('truncated');
+  expect(bounded.survey.evidence.values?.['parentsNotRead']).toBe(202);
+  expect(bounded.survey.message).toContain('202 more element(s) with 3 children or more were not looked at');
 });

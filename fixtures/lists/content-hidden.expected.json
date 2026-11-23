@@ -1,0 +1,9 @@
+{
+  "description": "Panels closed by the author with content-visibility: hidden and with hidden=\"until-found\", on a page that also has a footer with content-visibility: auto. The footer is rendered for the scan, so its real list is read as a list; the closed panels are neither read nor rendered. Only the bulleted list after them is likely. e2e/lists.spec.ts checks that its box and its capture are those of the page as the author shows it.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#after", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}
