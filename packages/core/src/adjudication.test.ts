@@ -83,18 +83,27 @@ describe('headingStatusAfter', () => {
     expect(headingStatusAfter(before, verdict, config)).toBe(after);
   });
   it('lowers a likely on a no only when configured to', () => {
-    expect(resolveAdjudication().headingNoStatus).toBe('likely');
-    const lower = resolveConfig({ adjudication: { headingNoStatus: 'info' } });
+    expect(resolveAdjudication().headingDisagreeStatus).toBe('likely');
+    const lower = resolveConfig({ adjudication: { headingDisagreeStatus: 'info' } });
     expect(headingStatusAfter('likely', 'no', lower)).toBe('info');
     expect(headingStatusAfter('info', 'no', lower)).toBe('info');
     expect(headingStatusAfter('likely', 'yes', lower)).toBe('likely');
     expect(headingStatusAfter('info', 'yes', lower)).toBe('likely');
   });
+  it('reads the former names of the three options, and prefers the new ones', () => {
+    const old = resolveAdjudication({ headingNoStatus: 'info', listNoStatus: 'info', groupNoStatus: 'info' });
+    expect(old).toMatchObject({ headingDisagreeStatus: 'info', listDisagreeStatus: 'info', groupDisagreeStatus: 'info' });
+    expect(Object.keys(old).filter((key) => key.endsWith('NoStatus'))).toEqual([]);
+    expect(headingStatusAfter('likely', 'no', resolveConfig({ adjudication: { headingNoStatus: 'info' } }))).toBe('info');
+    const both = resolveAdjudication({ headingNoStatus: 'info', headingDisagreeStatus: 'likely', listNoStatus: 'likely', listDisagreeStatus: 'info' });
+    expect(both).toMatchObject({ headingDisagreeStatus: 'likely', listDisagreeStatus: 'info', groupDisagreeStatus: 'likely' });
+    expect(resolveAdjudication({ headingNoStatus: 'fail' as never }).headingDisagreeStatus).toBe('likely');
+  });
   it('cannot be configured to give a fail', () => {
-    expect(resolveAdjudication({ headingNoStatus: 'fail' as never }).headingNoStatus).toBe('likely');
+    expect(resolveAdjudication({ headingDisagreeStatus: 'fail' as never }).headingDisagreeStatus).toBe('likely');
     for (const before of ['likely', 'info'] as const) {
       for (const verdict of ['yes', 'no', 'unsure'] as const) {
-        expect(['likely', 'info']).toContain(headingStatusAfter(before, verdict, resolveConfig({ adjudication: { headingNoStatus: 'fail' as never } })));
+        expect(['likely', 'info']).toContain(headingStatusAfter(before, verdict, resolveConfig({ adjudication: { headingDisagreeStatus: 'fail' as never } })));
       }
     }
   });
@@ -173,7 +182,7 @@ describe('applyVerdicts', () => {
 
   it('moves candidates between likely and info when lowering is configured, and keeps what deterministic code found', () => {
     const { result, all, find } = setup();
-    const config = resolveConfig({ checks: ['headings'], adjudication: { headingNoStatus: 'info' } });
+    const config = resolveConfig({ checks: ['headings'], adjudication: { headingDisagreeStatus: 'info' } });
     const verdicts = new Map([
       [find(SELECTORS.strong).id, ai({ verdict: 'no', votes: ['no', 'no'] })],
       [find(SELECTORS.weak).id, ai({ verdict: 'yes' })],

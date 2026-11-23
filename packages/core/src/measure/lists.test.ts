@@ -672,6 +672,6 @@ describe('limits and invariants', () => {
   it('turns a configured fail into likely when the configuration is resolved', () => {
     expect(resolveConfig({ lists: { cardListStatus: 'fail' as never } }).lists.cardListStatus).toBe('likely');
     expect(resolveConfig({ lists: { cardListStatus: 'info' as never } }).lists.cardListStatus).toBe('advisory');
-    expect(resolveConfig({ adjudication: { listNoStatus: 'fail' as never } }).adjudication.listNoStatus).toBe('likely');
+    expect(resolveConfig({ adjudication: { listDisagreeStatus: 'fail' as never } }).adjudication.listDisagreeStatus).toBe('likely');
   });
 });

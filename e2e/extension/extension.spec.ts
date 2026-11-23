@@ -29,6 +29,7 @@ const chosen = [
   'headings/baseline',
   'headings/not-a-heading',
   'headings/not-a-heading-controls',
+  'headings/not-a-heading-negatives',
   'lists/glyph-lists',
   'grouping/choice-sets',
 ];
@@ -95,10 +96,15 @@ test('the page is put back after a scan and the debugger is detached', async ({ 
   const before = await pageState(page);
   expect(before.windowScroll[1]).toBe(120);
   await scan(panel, ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping']);
-  // Without the height of the viewport: Chrome's bar is still there for some time after the
-  // debugger is detached, unless it already showed before the scan (see `settled` below).
+  // At once, everything but the height of the viewport: Chrome's bar ("... is debugging this
+  // browser") is still there for some time after the debugger is detached, unless it already
+  // showed before the scan (see `settled` below).
   expect({ ...(await pageState(page)), height: 0 }).toEqual({ ...before, height: 0 });
   expect(await extension.attached(tabId)).toBe(false);
+  // And the height as well, once Chrome has taken its bar away, which it does about five seconds
+  // after the debugger is detached: the viewport is then the one the page had before the scan,
+  // to the pixel. An emulated size that the scan left behind would never come back to it.
+  await expect.poll(() => pageState(page), { timeout: 20_000, intervals: [250] }).toEqual(before);
 });
 
 test('the exports are the reports of the CLI, with the decisions in the JSON', async ({ panelFor }) => {

@@ -349,10 +349,39 @@ export interface TextBlock {
    * showing (the panel of a closed accordion). A running count; what is inside a heading is not
    * counted. The difference between two blocks says whether anything of that kind stands between
    * them. Absent in a survey that did not count: nothing is then concluded from it.
+   *
+   * Counted as well, since what cannot be looked into is taken for content: every image, sized or
+   * not (a lazy one has no size yet), a rule, a custom element whose shadow tree is closed, and
+   * any element that holds no text and nothing else that was counted and still takes room on the
+   * page (a block drawn with a background colour, an empty container with a height, an empty link
+   * laid over a card).
    */
   contentBefore?: number;
+  /**
+   * The part of `contentBefore` that is text in the page without showing: a closed panel, text
+   * that is clipped away or transparent. Running count, as `contentBefore`.
+   */
+  hiddenBefore?: number;
   /** Set on a heading the pointer shows as something to click (`cursor: pointer`): the title of an accordion made without a button. */
   clickable?: boolean;
+}
+
+/**
+ * A heading the accessibility tree exposes, with or without visible text. With text, its blocks
+ * are the `TextBlock`s whose `heading.selector` is its selector, in its frame.
+ */
+export interface SurveyedHeading {
+  selector: string;
+  /** Same convention as FocusStop.frame. */
+  frame: string;
+  level: number;
+  /** Border box of the heading element, page coordinates; null when it has none (`display: contents`). */
+  box: Box | null;
+  /** Blocks of `HeadingSurvey.blocks` that begin before the heading does. */
+  blocksBefore: number;
+  /** `TextBlock.contentBefore` and `hiddenBefore`, where the heading begins. */
+  contentBefore: number;
+  hiddenBefore: number;
 }
 
 export interface HeadingSurvey {
@@ -368,6 +397,15 @@ export interface HeadingSurvey {
   axComplete: boolean;
   /** `TextBlock.contentBefore` at the end of the page: what was counted in all. */
   otherContent?: number;
+  /** `TextBlock.hiddenBefore` at the end of the page. */
+  hiddenContent?: number;
+  /**
+   * Every heading the accessibility tree exposes, in document order, frames in place: also the
+   * ones without a block of visible text (a heading that holds only a picture, a visually hidden
+   * one). Absent in a survey that did not list them: the headings are then the ones the blocks
+   * name, and a heading without visible text is unknown.
+   */
+  headings?: SurveyedHeading[];
 }
 
 /**
@@ -1309,8 +1347,9 @@ export interface HeadingsConfig {
   maxNonHeadings: number;
   /**
    * Where one sentence ends and the next begins inside a text (pattern, Unicode flag, no capturing
-   * group; the text is split by it). By default: a full stop, a question or exclamation mark or
-   * an ellipsis, with any closing quotation mark or bracket after it, then white space, then a
+   * group; the text is split by it). By default: a full stop, a question or exclamation mark (the
+   * Arabic question mark included; a semicolon, the Arabic one included, ends nothing) or an
+   * ellipsis, with any closing quotation mark or bracket after it, then white space, then a
    * capital letter or a letter of a script without capitals, with any opening mark before it;
    * and an ideographic full stop or a full-width mark with text after it. The white space French
    * puts before `?`, `!` and `:` and inside guillemets plays no part: the mark is what is
@@ -1327,10 +1366,52 @@ export interface HeadingsConfig {
    * "U.S. Army" in one sentence, and makes "Build faster. Ship smarter." one.
    */
   sentenceMinWords: number;
-  /** A heading reads as running text from this many sentences (`severalSentences`)... */
+  /**
+   * A heading reads as running text from this many sentences (`severalSentences`)... Three: a
+   * headline in two clauses ("Budget: the government gives way. The unions keep the strike"), a
+   * title and its subtitle and a question in two parts are two, and are headings.
+   */
   runningTextMinSentences: number;
-  /** ...when it also has this many words: two short sentences are a title and its subtitle, or a slogan. */
+  /**
+   * ...when it also has this many words. Twenty-five: three short clauses ("Who we are. What we
+   * do. Why it matters to the people we serve") stay under it. Two sentences, however long, are
+   * running text only by `longHeadingMinWords`.
+   */
   runningTextMinWords: number;
+  /**
+   * A sentence ending like this is a question (pattern, Unicode flag; closing marks and white
+   * space after the question mark are allowed for). Text made only of questions is not running
+   * text by its sentences (`severalSentences`), however many they are: the heading of an entry in
+   * a list of questions often asks two or three. An empty pattern, or one that does not compile,
+   * finds no question.
+   */
+  questionEndPattern: string;
+  /**
+   * A heading is a number and nothing else (`numeric`: a price, a percentage, a figure, a date
+   * in digits) when it has at most this many words...
+   */
+  numberOnlyMaxWords: number;
+  /**
+   * ...and at least this share of its characters, white space apart, are not letters: digits,
+   * currency and percent signs, separators. "€49.00", "1 299,00 €", "50 %", "12/03/2026", "2024"
+   * and "12 mars 2026" (0.6) are; "Save 20% on your first order", "€9 / month" and "Top 5" are
+   * titles that hold a number.
+   */
+  numberOnlyMinShare: number;
+  /**
+   * A heading is rendered as body text (`bodyStyle`) only when its weight is less than this much
+   * above that of body text, everything else being equal. 100: a title at 500 over text at 400
+   * was set apart on purpose, however little it shows.
+   */
+  bodyStyleMaxWeightDelta: number;
+  /**
+   * A heading heads nothing (`headsNothing`) only when the box of the next heading begins under
+   * its own box, in its column, no further away than this many times its font size: about one
+   * line. Measured on the page, apart from what was counted between the two in the document.
+   * Headings side by side (a row of cards, the columns of a grid) and headings set further apart
+   * (something takes that room, whatever it is) are never said to head nothing.
+   */
+  headsNothingMaxGapEm: number;
   /**
    * A heading of this many words is long whatever its sentences (`long`). Twice `maxWords`, the
    * limit for a candidate: a legitimate heading that is one long question stays under it.
@@ -1346,7 +1427,9 @@ export interface HeadingsConfig {
   /**
    * Headings that follow each other with nothing between them, none of a lower level than the
    * one before it, are a run from this many (`headingRun`): the lines of an address, a tagline
-   * and a legal line each marked as a heading. Two are a title over its subtitle.
+   * and a legal line each marked as a heading. Two are a title over its subtitle. Counted: the
+   * headings that head nothing, and the one that closes the run when it is of the level of the
+   * one before it; a heading of a higher level that follows is the title of the next section.
    */
   headingRunMinLength: number;
   /**
@@ -1632,29 +1715,32 @@ export interface AdjudicationConfig {
   /** ...this far outside the box of the text, so that it covers none of it. */
   outlineGapCssPx: number;
   /**
-   * Open decision of the owner. Status of a heading candidate that deterministic code reported as
-   * `likely` and the model judged not to be a heading. The same option decides, the other way
-   * round, for a heading reported as not reading as one (`headings/heading-not-a-heading`) that
-   * the model judged to function as a heading: kept with the verdict recorded, or lowered to `info`.
+   * Open decision of the owner: what becomes of a finding when the model disagrees with it. For a
+   * heading candidate that deterministic code reported as `likely`, that is the verdict "no" (it
+   * is no heading). For a heading reported as not reading as one
+   * (`headings/heading-not-a-heading`), it is the verdict "yes" (it does function as a heading):
+   * kept as it is with the verdict recorded, or lowered to `info`. Named `headingNoStatus` before,
+   * which is still read (`DeprecatedAdjudicationOptions`).
    * - `likely` (default): the finding stays in the tester's list, with the verdict recorded in
    *   `ai` and shown in the report. The brief only says that a judged candidate is `likely` at
    *   most; it does not say a model may take one off the list.
    * - `info`: the finding is lowered. Fewer candidates to go through, at a price: a page whose
    *   text persuades the model, or an edited cache file, then hides the page's own findings.
    */
-  headingNoStatus: 'info' | 'likely';
+  headingDisagreeStatus: 'info' | 'likely';
   /**
    * The same open decision for the lists check: status of a series of lines with bullets or numbers
    * that deterministic code reported as `likely` and the model judged not to be a list. `likely`
-   * (default) keeps it with the verdict recorded; `info` lowers it.
+   * (default) keeps it with the verdict recorded; `info` lowers it. Named `listNoStatus` before.
    */
-  listNoStatus: 'info' | 'likely';
+  listDisagreeStatus: 'info' | 'likely';
   /**
    * The same open decision for the grouping check: status of a set of controls under a visible
    * text that deterministic code reported as `likely` and of which the model judged that the text
    * is not the label of the set. `likely` (default) keeps it with the verdict recorded; `info` lowers it.
+   * Named `groupNoStatus` before.
    */
-  groupNoStatus: 'info' | 'likely';
+  groupDisagreeStatus: 'info' | 'likely';
 }
 
 /**

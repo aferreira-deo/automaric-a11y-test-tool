@@ -21,7 +21,14 @@ export async function collectHeadings(page: StablePage, config: HeadingsConfig, 
 
   const read = await agent<AgentHeadingSurvey>('headingSurvey()');
   const blocks: TextBlock[] = read.blocks.map((block) => ({ ...block, crop: null }));
-  const survey: HeadingSurvey = { blocks, total: read.total, axComplete, ...(read.otherContent !== undefined ? { otherContent: read.otherContent } : {}) };
+  const survey: HeadingSurvey = {
+    blocks,
+    total: read.total,
+    axComplete,
+    ...(read.otherContent !== undefined ? { otherContent: read.otherContent } : {}),
+    ...(read.hiddenContent !== undefined ? { hiddenContent: read.hiddenContent } : {}),
+    ...(read.headings !== undefined ? { headings: read.headings } : {}),
+  };
 
   // Core decides what is reported; only that is captured: at most `maxCandidates` candidates,
   // `maxInversions` contradictions between levels and `maxNonHeadings` headings that do not read

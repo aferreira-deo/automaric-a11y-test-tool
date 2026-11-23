@@ -16,7 +16,7 @@ import {
   TOOL_NAME,
   TOOL_VERSION,
 } from '@a11y-vision/core';
-import type { AdjudicationConfig, Baseline, BaselineSummary, CheckId, ConfigInput, Png, RunConfig, ScanResult } from '@a11y-vision/core';
+import type { AdjudicationInput, Baseline, BaselineSummary, CheckId, ConfigInput, Png, RunConfig, ScanResult } from '@a11y-vision/core';
 import { A11yVision } from '@a11y-vision/playwright';
 import { countRun, toHtmlReport, toHtmlRunReport, toJsonReport, toJsonRunReport, toSarifReport } from '@a11y-vision/reporters';
 import type { Run, RunCounts } from '@a11y-vision/reporters';
@@ -131,9 +131,15 @@ asked, one line on stderr names the model and the host it is on.
       --ai-allow-remote     Allow an endpoint that is not on this machine: text
                             and captures of the page are sent to it. It has to
                             be an https URL
-      --ai-lower-on-no      Lower a "likely" heading, list or group candidate to
-                            "info" when the model says it is not one. Off by default:
-                            the finding stays listed, with the verdict shown
+      --ai-lower-on-disagree
+                            Lower a finding to "info" when the model disagrees
+                            with it: a "likely" heading, list or group candidate
+                            the model says is not one, and a heading reported as
+                            not reading as one that the model says does function
+                            as a heading. Off by default: the finding stays
+                            listed, with the verdict shown. A verdict never
+                            raises a status
+      --ai-lower-on-no      Deprecated name of --ai-lower-on-disagree, still read
       --ai-text-only        Send no captures (for a model without vision)
       --ai-cache <file>     Where verdicts are kept between runs
                             (default: ${DEFAULT_CACHE_FILE})
@@ -356,6 +362,8 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         'ai-key-env': { type: 'string' },
         'ai-label': { type: 'string' },
         'ai-allow-remote': { type: 'boolean' },
+        'ai-lower-on-disagree': { type: 'boolean' },
+        // Deprecated name of the option above.
         'ai-lower-on-no': { type: 'boolean' },
         'ai-text-only': { type: 'boolean' },
         'ai-cache': { type: 'string' },
@@ -444,7 +452,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
 
   // The model: the config file, then the environment, then the options. Nothing here has a default
   // endpoint or model, so with none of the three no provider is configured.
-  const adjudication: Partial<AdjudicationConfig> = { ...fromFile.adjudication };
+  const adjudication: AdjudicationInput = { ...fromFile.adjudication };
   // A variable that is set to nothing is not set.
   const fromEnv = (name: string): string | undefined => (env[name]?.trim() ? env[name] : undefined);
   const baseUrl = values['ai-base-url'] ?? fromEnv(ENV_BASE_URL);
@@ -456,10 +464,10 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   if (values['ai-label'] !== undefined) adjudication.providerLabel = values['ai-label'];
   if (values['ai-allow-remote']) adjudication.allowRemote = true;
   if (values['ai-text-only']) adjudication.sendImages = false;
-  if (values['ai-lower-on-no']) {
-    adjudication.headingNoStatus = 'info';
-    adjudication.listNoStatus = 'info';
-    adjudication.groupNoStatus = 'info';
+  if (values['ai-lower-on-disagree'] || values['ai-lower-on-no']) {
+    adjudication.headingDisagreeStatus = 'info';
+    adjudication.listDisagreeStatus = 'info';
+    adjudication.groupDisagreeStatus = 'info';
   }
   if (values['no-ai']) adjudication.provider = 'none';
   // Asked for here or in the environment: that selects the adapter, whatever the file says. From

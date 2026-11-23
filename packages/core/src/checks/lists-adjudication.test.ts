@@ -134,7 +134,7 @@ describe('what is asked about lists', () => {
 describe('what a verdict changes for lists', () => {
   it('moves a status between info and likely and nowhere else', () => {
     const config = resolveConfig();
-    const lowering = resolveConfig({ adjudication: { listNoStatus: 'info' } });
+    const lowering = resolveConfig({ adjudication: { listDisagreeStatus: 'info' } });
     expect(listStatusAfter('info', 'yes', config)).toBe('likely');
     expect(listStatusAfter('likely', 'yes', config)).toBe('likely');
     expect(listStatusAfter('likely', 'no', config)).toBe('likely');
@@ -168,7 +168,7 @@ describe('what a verdict changes for lists', () => {
     const kept = judged('no');
     expect(statusOf(kept.after)).toEqual(statusOf(kept.before));
     expect(kept.after.find((finding) => finding.selector === '#strong')!.message).toContain('It stays likely');
-    const lowered = judged('no', { adjudication: { listNoStatus: 'info' } });
+    const lowered = judged('no', { adjudication: { listDisagreeStatus: 'info' } });
     expect(statusOf(lowered.after)).toEqual({ ...statusOf(lowered.before), '#strong': 'info' });
     expect(lowered.after.find((finding) => finding.selector === '#strong')).toMatchObject({ rule: 'lists/glyph-list-candidate', ai: { statusBefore: 'likely' } });
   });
@@ -178,7 +178,7 @@ describe('what a verdict changes for lists', () => {
   });
   it('keeps ids, selectors and evidence, and never makes a fail', () => {
     for (const verdict of ['yes', 'no', 'unsure'] as const) {
-      const { before, after } = judged(verdict, { adjudication: { listNoStatus: 'info' } });
+      const { before, after } = judged(verdict, { adjudication: { listDisagreeStatus: 'info' } });
       expect(after.map((finding) => finding.id).sort()).toEqual(before.map((finding) => finding.id).sort());
       for (const finding of after) {
         const was = before.find((entry) => entry.id === finding.id)!;

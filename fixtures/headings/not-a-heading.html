@@ -40,16 +40,23 @@
       </div>
       <p>Body text under the div with the role heading.</p>
 
-      <!-- Several sentences, and rendered exactly as body text is: two kinds of measurement agree. -->
+      <!-- Three sentences, and rendered exactly as body text is: two kinds of measurement agree. -->
       <h3 id="plain-sentences" class="as-text">
-        The office is closed on public holidays. Requests sent on those days are read the next morning.
+        The office is closed on public holidays. Requests sent on those days are read the next morning. Urgent matters
+        are handled by the person on duty, whose number is on the door.
       </h3>
       <p>Body text under the heading that looks like a paragraph.</p>
 
+      <!-- Two sentences in fewer than forty words are not running text by any measure: rendered as body text, that is info and no more. -->
+      <h3 id="plain-two-sentences" class="as-text">
+        The office is closed on public holidays. Requests sent on those days are read the next morning.
+      </h3>
+      <p>Body text under the two sentences.</p>
+
       <!-- French punctuation: a space before the question and exclamation marks, guillemets. Followed by a heading at once. -->
       <h3 id="french">
-        Vous avez une question sur votre dossier ? Notre équipe vous répond « sous deux jours ouvrés » ! Écrivez-nous
-        dès maintenant.
+        Vous avez une question sur votre dossier ou sur une décision que nous avons prise ? Notre équipe vous répond
+        « sous deux jours ouvrés » ! Écrivez-nous dès maintenant à l'adresse indiquée en bas de page.
       </h3>
       <h3 id="after-french">Nous contacter</h3>
       <p>Body text under a real heading.</p>
@@ -87,6 +94,16 @@
       <h3 id="quotation">“They found problems that three earlier audits had missed.”</h3>
       <h3 id="after-quotation">What our clients say</h3>
       <p>Body text under a real heading.</p>
+
+      <!-- A paragraph inside the button of a heading, with its panel closed: a control is advisory at most, and its style says nothing. -->
+      <h3 id="button-paragraph" style="margin: 0">
+        <button type="button" aria-expanded="false" aria-controls="button-panel" style="font: inherit; font-weight: 400; font-size: 16px; color: inherit; background: none; border: 0; padding: 0; text-align: left">
+          We collect bulky waste twice a year in every district of the town. You have to book a date on this site at
+          least two weeks before the collection. Items left on the pavement without a booking are not taken away and
+          may lead to a fine.
+        </button>
+      </h3>
+      <div id="button-panel" hidden>Body text of the closed panel.</div>
 
       <!-- A short heading rendered exactly as body text is, followed by content: info. -->
       <h3 id="plain-short" class="as-text">Opening hours</h3>

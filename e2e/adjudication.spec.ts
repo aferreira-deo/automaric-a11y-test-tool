@@ -205,7 +205,7 @@ test('the CLI has a model judge the heading candidates, keeps ids and evidence, 
   expect((await readFile(cachedHtml, 'utf8')).match(/read from the cache \(no model was asked in this run\)/g)).toHaveLength(7);
 
   // Lowering on a no is there for who wants it, behind an option; the verdicts are the cached ones.
-  const lowered = await cli(testInfo, [...args, '--ai-lower-on-no'], { [KEY_ENV]: KEY });
+  const lowered = await cli(testInfo, [...args, '--ai-lower-on-disagree'], { [KEY_ENV]: KEY });
   expect(lowered.code).toBe(0);
   expect(mock.requests).toHaveLength(14);
   const loweredReport = parse(lowered.stdout);
@@ -214,6 +214,11 @@ test('the CLI has a model judge the heading candidates, keeps ids and evidence, 
   expect(candidates(loweredReport).find((finding) => finding.selector === '#question')!.message).toContain('Lowered from likely to info');
   expect(loweredReport.incomplete[0]!.nodes).toHaveLength(5);
   expect(lowered.stderr).toContain('2 status change(s)');
+  // The former name of the option does the same.
+  const formerName = await cli(testInfo, [...args, '--ai-lower-on-no'], { [KEY_ENV]: KEY });
+  expect(formerName.code).toBe(0);
+  expect(mock.requests).toHaveLength(14);
+  expect(candidates(parse(formerName.stdout)).map((finding) => [finding.selector, finding.status])).toEqual(candidates(loweredReport).map((finding) => [finding.selector, finding.status]));
 
   // Without the cache, it is.
   const uncached = await cli(testInfo, [...args, '--no-ai-cache'], { [KEY_ENV]: KEY });
@@ -420,9 +425,10 @@ test('--ai-text-only sends no capture, and --help lists the model options', asyn
   expect(candidates(parse(stdout)).every((finding) => finding.ai?.inputs === 'text')).toBe(true);
 
   const help = await cli(testInfo, ['--help']);
-  for (const option of ['--ai-base-url', '--ai-model', '--ai-key-env', '--ai-allow-remote', '--ai-lower-on-no', '--ai-text-only', '--ai-cache', '--no-ai-cache', '--no-ai', '--config', 'A11Y_VISION_AI_BASE_URL']) {
+  for (const option of ['--ai-base-url', '--ai-model', '--ai-key-env', '--ai-allow-remote', '--ai-lower-on-disagree', '--ai-text-only', '--ai-cache', '--no-ai-cache', '--no-ai', '--config', 'A11Y_VISION_AI_BASE_URL']) {
     expect(help.stdout).toContain(option);
   }
+  expect(help.stdout).toContain('--ai-lower-on-no      Deprecated name of --ai-lower-on-disagree');
 });
 
 test('the Playwright API: a yes raises a candidate that was held back, and only where a judgement counts', async ({ page }) => {

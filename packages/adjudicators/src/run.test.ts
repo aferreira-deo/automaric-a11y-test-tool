@@ -164,7 +164,7 @@ describe('verdicts and statuses', () => {
     expect(statuses(kept.findings)).toEqual(DETERMINISTIC);
     expect(kept.find(SELECTORS.strong)).toMatchObject({ status: 'likely', rule: 'headings/unmarked-heading', ai: { verdict: 'no', votes: ['no', 'no'] } });
     expect(kept.stats.changed).toBe(0);
-    const lowered = await run({ input: { adjudication: { headingNoStatus: 'info' } } });
+    const lowered = await run({ input: { adjudication: { headingDisagreeStatus: 'info' } } });
     expect(lowered.find(SELECTORS.strong)).toMatchObject({ status: 'info', rule: 'headings/heading-candidate', ai: { verdict: 'no' } });
     expect(lowered.find(SELECTORS.strong).message).toContain('Lowered from likely to info');
     expect(lowered.find(SELECTORS.weak).status).toBe('info');
@@ -561,7 +561,7 @@ describe('the cache', () => {
     expect(html).toContain('<span class="verdict">Model: no</span>');
 
     // Even with lowering switched on, a forged entry is at least visible as one that no model gave in this run.
-    const lowered = await run({ cache: newCache(stored), input: { adjudication: { headingNoStatus: 'info' } } });
+    const lowered = await run({ cache: newCache(stored), input: { adjudication: { headingDisagreeStatus: 'info' } } });
     expect(lowered.find(SELECTORS.strong)).toMatchObject({ status: 'info', ai: { fromCache: true, statusBefore: 'likely' } });
   });
 

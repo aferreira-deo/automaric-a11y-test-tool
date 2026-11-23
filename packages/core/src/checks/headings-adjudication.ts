@@ -58,14 +58,14 @@ function note(ai: AiEvidence, before: Finding['status'], after: Finding['status'
  * Status of a heading candidate after a verdict. It moves between `info` and `likely` and
  * nowhere else: whether text functions as a heading stays a matter for a tester.
  * - `yes`: `likely`, whether it was `likely` or `info`.
- * - `no`: a `likely` stays `likely` with the verdict recorded, unless `headingNoStatus` is `info`,
+ * - `no`: a `likely` stays `likely` with the verdict recorded, unless `headingDisagreeStatus` is `info`,
  *   which lowers it; an `info` stays `info`.
  * - `unsure`, which includes every failure: unchanged.
  */
 export function headingStatusAfter(before: Finding['status'], verdict: AiEvidence['verdict'], config: Config): 'likely' | 'info' {
   const start = before === 'likely' ? 'likely' : 'info';
   if (verdict === 'yes') return 'likely';
-  if (verdict === 'no') return start === 'likely' && config.adjudication.headingNoStatus !== 'info' ? 'likely' : 'info';
+  if (verdict === 'no') return start === 'likely' && config.adjudication.headingDisagreeStatus !== 'info' ? 'likely' : 'info';
   return start;
 }
 
@@ -91,8 +91,10 @@ export const NOT_HEADING_QUESTION =
   'Answer "yes" if it names or introduces the content placed after it, as a heading does, however long it is and however it is styled. ' +
   'Answer "no" if it is something else that was given heading markup: a paragraph of running text, a slogan or a tagline, a legal line, a line of an address, ' +
   'a quotation, a date, a price or a figure, a label, or text with nothing after it that it could be the heading of. ' +
+  'A heading that is a button or a link names what it opens, and what it opens may be in the page without showing: ' +
+  'the context says whether content stands between the target and the next heading, and whether some of it is hidden. ' +
   'Answer "unsure" if what you are given does not let you decide.';
-export const NOT_HEADING_QUESTION_VERSION = 'headings-not-heading-1';
+export const NOT_HEADING_QUESTION_VERSION = 'headings-not-heading-2';
 
 function notHeadingNote(ai: AiEvidence, before: Finding['status'], after: Finding['status']): string {
   const basis = (ai.inputs === 'text' ? ', from the text alone (no capture was sent)' : '') + (ai.fromCache === true ? ', read from the cache' : '');
@@ -119,13 +121,13 @@ function notHeadingNote(ai: AiEvidence, before: Finding['status'], after: Findin
  * status or keeps it, and never raises it:
  * - `no` (it does not function as a heading): unchanged, with the verdict recorded. What made
  *   the finding `advisory` or `info` and not `likely` is a measurement, which a model does not redo.
- * - `yes` (it does): unchanged with the verdict recorded, unless `headingNoStatus` is `info`,
+ * - `yes` (it does): unchanged with the verdict recorded, unless `headingDisagreeStatus` is `info`,
  *   which lowers it to `info`: the same decision of the owner as for a candidate a model speaks against.
  * - `unsure`, which includes every failure: unchanged.
  */
 export function notHeadingStatusAfter(before: Finding['status'], verdict: AiEvidence['verdict'], config: Config): 'likely' | 'advisory' | 'info' {
   const start = before === 'likely' || before === 'advisory' ? before : 'info';
-  return verdict === 'yes' && config.adjudication.headingNoStatus === 'info' ? 'info' : start;
+  return verdict === 'yes' && config.adjudication.headingDisagreeStatus === 'info' ? 'info' : start;
 }
 
 export function applyNotHeadingVerdict(finding: Finding, ai: AiEvidence, config: Config): Finding {
@@ -136,7 +138,8 @@ export function applyNotHeadingVerdict(finding: Finding, ai: AiEvidence, config:
 /**
  * What to ask about the heading candidates of a snapshot: one request for each candidate a
  * judgement could change (`adjudicate`), in the order of the candidates; then one for each
- * exposed heading reported as not reading as one, in their order.
+ * exposed heading reported as not reading as one above `info`, in their order: an `info` finding
+ * is not asked about, since no verdict lowers it and none may raise it.
  *
  * A candidate without a capture is still asked about, from its context alone, when
  * `judgeWithoutImage` is set: the text, its style against body text and the text after it carry

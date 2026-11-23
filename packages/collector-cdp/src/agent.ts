@@ -282,13 +282,27 @@ export interface AgentTextBlock {
   heading: { level: number; selector: string } | null;
   sameColourAsBackground?: boolean;
   contentBefore?: number;
+  hiddenBefore?: number;
   clickable?: boolean;
+}
+
+/** As `SurveyedHeading` of core. */
+export interface AgentSurveyedHeading {
+  selector: string;
+  frame: string;
+  level: number;
+  box: AgentRect | null;
+  blocksBefore: number;
+  contentBefore: number;
+  hiddenBefore: number;
 }
 
 export interface AgentHeadingSurvey {
   blocks: AgentTextBlock[];
   total: number;
   otherContent?: number;
+  hiddenContent?: number;
+  headings?: AgentSurveyedHeading[];
 }
 
 export interface AgentHeadingPrepared {
@@ -2226,8 +2240,21 @@ export function agentFactory(options: AgentOptions): Agent {
      * control, a frame that cannot be looked into, an empty element that paints a picture, and text
      * that is in the page without showing (a closed panel). What is inside a heading is the heading
      * itself and is not counted.
+     *
+     * What cannot be looked into is taken for content, since the count is there to say that
+     * nothing stands between two headings: an image whatever its size (a lazy one has none yet),
+     * a picture by the image it holds, a rule, a custom element without an open shadow tree, and
+     * any element in which the walk found no text, no heading and nothing it counted and which
+     * still takes room on the page (a block drawn with a background colour, an empty container
+     * with a height, an empty link laid over a card).
      */
     let otherContent = 0;
+    /** Headings: the part of `otherContent` that is text in the page without showing. */
+    let hiddenContent = 0;
+    /** Headings: numbers the texts and the headings the walk meets, in the order it meets them. */
+    let walkSeq = 0;
+    /** Headings: every heading the accessibility tree exposes that the walk came to, with or without text. */
+    const headingEntries: { element: Element; seq: number; other: number; hidden: number }[] = [];
     const OTHER_CONTENT = ['svg', 'math', 'select', 'textarea', 'input', 'canvas', 'video', 'audio', 'object', 'embed', 'img', 'picture', 'meter', 'progress'];
     // Both number the elements of the page in document order, to say what comes before what.
     const withOrds = forLists || forGrouping;
@@ -2561,8 +2588,10 @@ export function agentFactory(options: AgentOptions): Agent {
       before?: Graphic;
       /** Grouping: how many elements the walk had numbered when it met this text. */
       at?: number;
-      /** Headings: `otherContent` when the walk met this text. */
+      /** Headings: `otherContent` and `hiddenContent` when the walk met this text, and its number in the walk. */
       other?: number;
+      hidden?: number;
+      seq?: number;
     }
     interface Pending {
       pieces: Piece[];
@@ -2816,8 +2845,10 @@ export function agentFactory(options: AgentOptions): Agent {
     }
 
     /** Headings: counts an element, or the parent of a text, as content that is no visible text, unless it is inside a heading. */
-    function noteOther(element: Element | null): void {
-      if (element && placeOf(element).heading === null) otherContent++;
+    function noteOther(element: Element | null, hidden = false): void {
+      if (!element || placeOf(element).heading !== null) return;
+      otherContent++;
+      if (hidden) hiddenContent++;
     }
 
     function visit(node: Node): void {
@@ -2825,13 +2856,17 @@ export function agentFactory(options: AgentOptions): Agent {
         const piece = pieceOf(node as Text);
         if (!piece) {
           // Text that is there and does not show: clipped, transparent, of no size.
-          if (forHeadings && /\S/.test((node as Text).data)) noteOther(node.parentElement ?? hostOf(node.parentNode));
+          if (forHeadings && /\S/.test((node as Text).data)) noteOther(node.parentElement ?? hostOf(node.parentNode), true);
           return;
         }
         if (lastGraphic) piece.before = lastGraphic;
         lastGraphic = null;
         if (forGrouping) piece.at = ordElements.length;
-        if (forHeadings) piece.other = otherContent;
+        if (forHeadings) {
+          piece.other = otherContent;
+          piece.hidden = hiddenContent;
+          piece.seq = walkSeq++;
+        }
         open ??= [[]];
         open[open.length - 1]!.push(piece);
         return;
@@ -2842,8 +2877,13 @@ export function agentFactory(options: AgentOptions): Agent {
       if (TEXT_SKIPPED.includes(name)) {
         if (forLists && (name === 'img' || name === 'svg')) noteGraphic(element);
         if (forHeadings && OTHER_CONTENT.includes(name) && !(name === 'input' && (element as HTMLInputElement).type === 'hidden')) {
-          const rect = element.getBoundingClientRect();
-          if (rect.width >= limits.minVisibleTextCssPx && rect.height >= limits.minVisibleTextCssPx && element.checkVisibility(VISIBLE)) noteOther(element);
+          // A picture has the box of the image it holds: its own is empty when it is displayed as
+          // `contents`, and has no height in a wrapper whose font size is 0.
+          const shown = name === 'picture' ? (element.querySelector('img') ?? element) : element;
+          const rect = shown.getBoundingClientRect();
+          // An image counts whatever its size: one that is loaded later has none yet.
+          const sized = shown.localName === 'img' || (rect.width >= limits.minVisibleTextCssPx && rect.height >= limits.minVisibleTextCssPx);
+          if (sized && shown.checkVisibility(VISIBLE)) noteOther(element);
         }
         // Grouping: a native control is numbered like any element, although nothing is read inside it.
         if (forGrouping && controlMarks.has(element)) {
@@ -2863,7 +2903,7 @@ export function agentFactory(options: AgentOptions): Agent {
       const display = computed.display;
       if (display === 'none' || contentHidden.has(element)) {
         // Content that is in the page and not displayed: the panel of a closed accordion or tab.
-        if (forHeadings && /\S/.test(element.textContent ?? '')) noteOther(element);
+        if (forHeadings && /\S/.test(element.textContent ?? '')) noteOther(element, true);
         return;
       }
       if (name === 'br') {
@@ -2892,18 +2932,20 @@ export function agentFactory(options: AgentOptions): Agent {
       }
       const inline = display === 'inline' || display === 'contents' || display.startsWith('ruby');
       if (!inline) flush();
-      // An empty element that paints a picture: an icon set as a background, a mask or generated content.
-      if (forHeadings && !element.firstElementChild && !element.shadowRoot && !/\S/.test(element.textContent ?? '')) {
-        const rect = element.getBoundingClientRect();
-        if (rect.width >= limits.minVisibleTextCssPx && rect.height >= limits.minVisibleTextCssPx && element.checkVisibility(VISIBLE)) {
-          const generatedContent = (pseudo: string): boolean => {
-            const content = view.getComputedStyle(element, pseudo).content;
-            return !!content && content !== 'none' && content !== 'normal' && content !== '""';
-          };
-          if (computed.backgroundImage !== 'none' || computed.maskImage !== 'none' || generatedContent('::before') || generatedContent('::after')) noteOther(element);
-        }
-      }
+      if (forHeadings && headingMarks.has(element)) headingEntries.push({ element, seq: walkSeq++, other: otherContent, hidden: hiddenContent });
+      const metBefore = walkSeq;
+      const countedBefore = otherContent;
       for (const child of composedChildren(element)) visit(child);
+      // An element in which the walk found nothing: no text, no heading, nothing it counted. It is
+      // content all the same when it takes room on the page (a block drawn with a background
+      // colour, an icon, a rule, an empty container with a height, an empty link laid over a
+      // card) or when it is a custom element whose shadow tree, if it has one, is closed to the page.
+      if (forHeadings && walkSeq === metBefore && otherContent === countedBefore) {
+        const rect = element.getBoundingClientRect();
+        const takesRoom = rect.width >= limits.minVisibleTextCssPx && rect.height >= limits.minVisibleTextCssPx;
+        const opaque = name === 'hr' || (name.includes('-') && !element.shadowRoot);
+        if ((takesRoom || opaque) && element.checkVisibility(VISIBLE)) noteOther(element);
+      }
       if (!inline) flush();
       if (slot) {
         slot.end = ordElements.length - 1;
@@ -3268,6 +3310,7 @@ export function agentFactory(options: AgentOptions): Agent {
         heading: isHeading ? { level: headingMarks.get(headingElement) ?? 0, selector: selectorOf(headingElement) } : null,
         ...(pieces.every((piece) => piece.look.blends) ? { sameColourAsBackground: true } : {}),
         contentBefore: first.other ?? 0,
+        hiddenBefore: first.hidden ?? 0,
         // Inherited: also a heading inside something that is clicked.
         ...(isHeading && element.ownerDocument.defaultView?.getComputedStyle(element).cursor === 'pointer' ? { clickable: true } : {}),
       });
@@ -3376,7 +3419,26 @@ export function agentFactory(options: AgentOptions): Agent {
         grouping: { controls, totalControls: shownControls.length, groups, blocks: groupingBlocks, totalBlocks: total, unread },
       };
     }
-    if (!forLists) return { survey: { blocks, total, otherContent }, lists: null };
+    if (!forLists) {
+      // Every exposed heading, in the order of the walk, with where it begins among the blocks.
+      const starts = blocksToRead.map((entry) => entry.pieces[0]!.seq ?? 0);
+      let at = 0;
+      const headings: AgentSurveyedHeading[] = headingEntries.map(({ element, seq, other, hidden }) => {
+        while (at < starts.length && starts[at]! < seq) at++;
+        const rect = plainRect(element.getBoundingClientRect());
+        const offset = offsetOf(element);
+        return {
+          selector: selectorOf(element),
+          frame: frameOf(element),
+          level: headingMarks.get(element) ?? 0,
+          box: rect.width > 0 && rect.height > 0 ? toPage({ ...rect, x: rect.x + offset.x, y: rect.y + offset.y }) : null,
+          blocksBefore: at,
+          contentBefore: other,
+          hiddenBefore: hidden,
+        };
+      });
+      return { survey: { blocks, total, otherContent, hiddenContent, headings }, lists: null };
+    }
 
     // Series of sibling elements of one shape. Looked for now, when every block of text is known.
     const STRUCTURE_TAGS = ['table', 'thead', 'tbody', 'tfoot', 'tr', 'colgroup', 'dl', 'select', 'datalist', 'optgroup', 'ruby'];

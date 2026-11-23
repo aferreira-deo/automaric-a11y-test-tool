@@ -160,17 +160,17 @@ test('a page where only headings that do not read as one are found exits 0, and 
   const sarif = testInfo.outputPath('out', 'report.sarif');
   const crops = testInfo.outputPath('out', 'crops');
   const { code, stdout } = await cli('scan', `${baseURL}/headings/not-a-heading.html`, '--checks', 'headings', '--html', html, '--sarif', sarif, '--crops', crops);
-  // Eight are `likely`: a judgement is never a failure, so the exit code stays 0.
+  // Five are `likely`: a judgement is never a failure, so the exit code stays 0.
   expect(code).toBe(0);
   const report = JSON.parse(stdout) as Report;
   expect(report.violations).toEqual([]);
   expect(report.incomplete).toEqual([expect.objectContaining({ id: 'headings/heading-not-a-heading', tags: ['wcag131'] })]);
   const found = report.a11yVision.findings.filter((finding) => finding.rule === 'headings/heading-not-a-heading');
-  expect(found.filter((finding) => finding.status === 'likely')).toHaveLength(8);
-  expect(found.filter((finding) => finding.status === 'advisory')).toHaveLength(6);
-  expect(found.filter((finding) => finding.status === 'info')).toHaveLength(2);
+  expect(found.filter((finding) => finding.status === 'likely')).toHaveLength(5);
+  expect(found.filter((finding) => finding.status === 'advisory')).toHaveLength(10);
+  expect(found.filter((finding) => finding.status === 'info')).toHaveLength(3);
   expect(report.a11yVision.findings.some((finding) => finding.rule !== 'headings/heading-not-a-heading' && finding.rule !== 'headings/survey')).toBe(false);
-  expect((await readdir(`${crops}/headings`)).length).toBe(16);
+  expect((await readdir(`${crops}/headings`)).length).toBe(18);
   const page = await readFile(html, 'utf8');
   expect(page).toContain('<figcaption>In context</figcaption>');
   expect(page).toContain('headings/heading-not-a-heading');

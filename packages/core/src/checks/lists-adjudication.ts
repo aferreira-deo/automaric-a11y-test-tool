@@ -48,14 +48,14 @@ function note(ai: AiEvidence, before: Finding['status'], after: Finding['status'
  * Status of a series of lines with bullets or numbers after a verdict. It moves between `info`
  * and `likely` and nowhere else: whether content is presented as a list stays a matter for a tester.
  * - `yes`: `likely`, whether it was `likely` or `info`.
- * - `no`: a `likely` stays `likely` with the verdict recorded, unless `listNoStatus` is `info`,
+ * - `no`: a `likely` stays `likely` with the verdict recorded, unless `listDisagreeStatus` is `info`,
  *   which lowers it; an `info` stays `info`.
  * - `unsure`, which includes every failure: unchanged.
  */
 export function listStatusAfter(before: Finding['status'], verdict: AiEvidence['verdict'], config: Config): 'likely' | 'info' {
   const start = before === 'likely' ? 'likely' : 'info';
   if (verdict === 'yes') return 'likely';
-  if (verdict === 'no') return start === 'likely' && config.adjudication.listNoStatus !== 'info' ? 'likely' : 'info';
+  if (verdict === 'no') return start === 'likely' && config.adjudication.listDisagreeStatus !== 'info' ? 'likely' : 'info';
   return start;
 }
 

@@ -197,7 +197,7 @@ test.describe('with a model', () => {
   test('a "no" lowers a likely only when the configuration says so', async ({ page }) => {
     await page.goto('/lists/near-threshold.html');
     mock.respond(() => verdict('no'));
-    const { result } = await judged(page, { listNoStatus: 'info' });
+    const { result } = await judged(page, { listDisagreeStatus: 'info' });
     expect(new Set(Object.values(statusOf(result.findings)))).toEqual(new Set(['info']));
     expect(result.findings.find((finding) => finding.selector === '#two-bullets')).toMatchObject({ rule: 'lists/glyph-list-candidate', ai: { statusBefore: 'likely' } });
   });

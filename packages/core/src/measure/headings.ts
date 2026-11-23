@@ -212,27 +212,49 @@ export interface HeadingReport {
 
 export const NOT_A_HEADING_RULE = 'headings/heading-not-a-heading';
 /** Version of what a `NonHeading` is and of what its `context` holds; part of the key of cached verdicts. */
-export const NON_HEADINGS_GENERATOR_VERSION = '1';
+export const NON_HEADINGS_GENERATOR_VERSION = '2';
 
 /**
- * What says that an exposed heading may not be one. Three kinds, which do not depend on each other.
+ * What says that an exposed heading may not be one. Three kinds, which do not depend on each
+ * other (`NON_HEADING_SIGNALS` says which signal is of which kind).
  * From the text:
  * - `severalSentences`: at least `runningTextMinSentences` sentences in at least
- *   `runningTextMinWords` words: running text.
+ *   `runningTextMinWords` words, and not only questions: running text.
  * - `long`: at least `longHeadingMinWords` words.
  * - `quotation`: it opens and closes with quotation marks, has at least `quotationMinWords`
  *   words and is not a link or a button.
- * - `numeric`: a price, a figure, a date in digits (`isNumericText`).
+ * - `numeric`: a number and nothing else: a price, a percentage, a figure, a date in digits
+ *   (`isNumberOnlyText`).
  * From how it is rendered:
  * - `bodyStyle`: every part of it has the size, weight, family and colour of body text, without
- *   capitals or italics: nothing shows that it is a heading.
+ *   capitals or italics: nothing shows that it is a heading. Never said of a heading that is a
+ *   link or a button: its style is that of the control.
  * From what follows it:
  * - `headsNothing`: no text and no other content stands between it and the next heading, which
- *   is of its level or above; or nothing at all follows it on the page.
+ *   is of its level or above, has visible text and begins right under it on the page
+ *   (`headsNothingMaxGapEm`); or nothing at all follows it on the page.
  * - `headingRun`: it heads nothing and is one of at least `headingRunMinLength` headings that
  *   follow each other that way.
  */
 export type NonHeadingSignal = 'severalSentences' | 'long' | 'quotation' | 'numeric' | 'bodyStyle' | 'headsNothing' | 'headingRun';
+
+/** What a signal measures: the text, how it is rendered, or where it stands. */
+export type NonHeadingSignalKind = 'text' | 'rendering' | 'position';
+
+/**
+ * The kind of each signal, and whether it is strong: on its own a strong signal is worth a
+ * finding (`advisory`), a weak one is not. `nonHeadingStatus` derives every status from this
+ * table and from nothing else.
+ */
+export const NON_HEADING_SIGNALS: Readonly<Record<NonHeadingSignal, { kind: NonHeadingSignalKind; strong: boolean }>> = {
+  severalSentences: { kind: 'text', strong: true },
+  long: { kind: 'text', strong: true },
+  quotation: { kind: 'text', strong: false },
+  numeric: { kind: 'text', strong: false },
+  bodyStyle: { kind: 'rendering', strong: false },
+  headsNothing: { kind: 'position', strong: false },
+  headingRun: { kind: 'position', strong: true },
+};
 
 /** A heading of the accessibility tree whose text does not read as a heading. */
 export interface NonHeading {
@@ -249,9 +271,10 @@ export interface NonHeading {
   /** Its visible text, the blocks joined with a space; each block is cut to `maxTextChars`. */
   text: string;
   /**
-   * Never `fail`. `likely` when signals of two kinds agree, or the text is both long and several
-   * sentences; `advisory` and `info` as `nonHeadingStatus` says. `info` at most when the
-   * accessibility tree could not be read in full.
+   * Never `fail`. `likely` only when signals of two different kinds agree and one of them is
+   * strong; `advisory` and `info` as `nonHeadingStatus` says. `advisory` at most for a heading
+   * that is a link or a button, and `info` at most when the accessibility tree could not be read
+   * in full.
    */
   status: 'likely' | 'advisory' | 'info';
   signals: NonHeadingSignal[];
@@ -259,7 +282,13 @@ export interface NonHeading {
   sentences: number;
   /** Style of most of its text. */
   style: TextStyle;
-  /** Headings that follow each other with nothing between them, this one included; 1 when it is in no run. */
+  /** All of its text is a link or a button, or the pointer shows it as something to click. */
+  control: boolean;
+  /**
+   * Headings that follow each other with nothing between them, this one included: the ones that
+   * head nothing, and the one that closes the run when it is of the level of the one before it.
+   * 1 when it is in no run.
+   */
   runLength: number;
   /** The text block after it, cut to `contextAfterMaxChars`; null when there is none. */
   followedBy: string | null;
@@ -269,9 +298,16 @@ export interface NonHeading {
   crop: string | null;
   cropTarget: Box | null;
   covered: boolean;
-  /** Whether a model's judgement could change the status: false when the accessibility tree could not be read. */
+  /**
+   * Whether a model's judgement could change the status: false when the accessibility tree could
+   * not be read, and for a finding that is `info`, which no verdict lowers and none may raise.
+   */
   adjudicate: boolean;
-  /** Compact context for a model. Text of the page under test: untrusted, and sent only when a provider is configured. */
+  /**
+   * Compact context for a model: what was read and measured, without what was concluded from it
+   * (the signals are left out, so that the model is not led). Text of the page under test:
+   * untrusted, and sent only when a provider is configured.
+   */
   context: { [key: string]: JsonValue };
 }
 
@@ -752,34 +788,83 @@ export function countSentences(text: string, config: WordsConfig & Pick<Headings
   return sentences === 0 && carried > 0 ? 1 : sentences;
 }
 
+/** The parts of a text between the places where a sentence ends and another begins; the whole text when the pattern does not compile. */
+function sentenceParts(text: string, config: Pick<HeadingsConfig, 'sentenceBreakPattern'>): string[] {
+  try {
+    // A capturing group in a configured pattern puts what it matched, or undefined, among the parts.
+    return text.split(new RegExp(config.sentenceBreakPattern, 'u')).filter((part): part is string => typeof part === 'string');
+  } catch {
+    return [text];
+  }
+}
+
+/**
+ * Whether a text is made only of questions: each of its parts that holds a word ends as
+ * `questionEndPattern` says. The heading of an entry in a list of questions often asks two or
+ * three, and is a heading. False when the pattern is empty or does not compile.
+ */
+export function onlyQuestions(text: string, config: WordsConfig & Pick<HeadingsConfig, 'sentenceBreakPattern' | 'questionEndPattern'>): boolean {
+  if (!config.questionEndPattern) return false;
+  let question: RegExp;
+  try {
+    question = new RegExp(config.questionEndPattern, 'u');
+  } catch {
+    return false;
+  }
+  const parts = sentenceParts(text, config).filter((part) => wordsOf(part, config) > 0);
+  return parts.length > 0 && parts.every((part) => question.test(part.trim()));
+}
+
+/**
+ * A number and nothing else: a price, a percentage, a figure, a date in digits. It holds a digit,
+ * has at most `numberOnlyMaxWords` words, and at least `numberOnlyMinShare` of its characters,
+ * white space apart, are not letters. A title that holds a number, a price or a percentage
+ * ("Save 20% on your first order", "Livraison offerte dès 50 € d'achat") is not.
+ */
+export function isNumberOnlyText(text: string, config: WordsConfig & Pick<HeadingsConfig, 'numberOnlyMaxWords' | 'numberOnlyMinShare'>): boolean {
+  if ((text.match(DIGIT)?.length ?? 0) === 0) return false;
+  if (wordsOf(text, config) > config.numberOnlyMaxWords) return false;
+  const shown = [...text.replace(/\s/gu, '')].length;
+  const letters = text.match(LETTER)?.length ?? 0;
+  return shown > 0 && (shown - letters) / shown >= config.numberOnlyMinShare;
+}
+
 const STATUS_ORDER = { likely: 0, advisory: 1, info: 2 } as const;
 
 /**
  * The status the signals of a heading give, or null when they are not worth a finding. Never `fail`.
  *
- * The signals are of three kinds that are measured apart: what the text is (`severalSentences`,
- * `long`, `quotation`, `numeric`), how it is rendered (`bodyStyle`) and what follows it
- * (`headsNothing`, `headingRun`).
- * - `likely`: running text by one measure, confirmed by another kind (it looks like body text,
- *   or heads nothing) or by the other measures of text (long and several sentences, or a
- *   quotation); or a run of headings that look like body text.
- * - `advisory`: running text by one measure and nothing else; a run of headings; or a heading
- *   that heads nothing and is also set as body text, a number or a quotation.
- * - `info`: set as body text, and nothing else.
- * - Not reported: a heading that only heads nothing (the title of a card, the last title of a
- *   column), a number that heads something (a year over its events, a date over an entry), and
- *   a quotation that heads something (the title of an interview or of an opinion piece).
+ * Derived from `NON_HEADING_SIGNALS`, which gives each signal a kind (what the text is, how it
+ * is rendered, what follows it) and says whether it is strong. Two signals of one kind never
+ * confirm each other, whatever they are: they are one measurement taken twice.
+ * - `likely`: a strong signal, and signals of at least two different kinds.
+ * - `advisory`: a strong signal and one kind only; or no strong signal, and a heading that heads
+ *   nothing with a weak signal of another kind (set as body text, a number, a quotation).
+ * - `info`: set as body text, and nothing else that counts.
+ * - Not reported: everything else. A heading that only heads nothing (the title of a card, the
+ *   last title of a column), a number that heads something (a year over its events), a
+ *   quotation that heads something.
+ *
+ * A quotation takes their strength from the measures of running text: the sentences and the
+ * length are those of the person quoted, and the quoted words of someone are the usual title of
+ * an interview or of a testimony. A quoted title over content is therefore not reported, however
+ * long it is; one that heads nothing is `advisory`.
  */
 export function nonHeadingStatus(signals: readonly NonHeadingSignal[]): 'likely' | 'advisory' | 'info' | null {
-  const has = (signal: NonHeadingSignal): boolean => signals.includes(signal);
-  const running = has('severalSentences') || has('long');
-  if (has('severalSentences') && has('long')) return 'likely';
-  if (running && (has('bodyStyle') || has('headsNothing') || has('quotation'))) return 'likely';
-  if (has('headingRun') && has('bodyStyle')) return 'likely';
-  if (running || has('headingRun')) return 'advisory';
-  if (has('headsNothing') && (has('bodyStyle') || has('numeric') || has('quotation'))) return 'advisory';
-  if (has('bodyStyle')) return 'info';
+  const kinds = new Set(signals.map((signal) => NON_HEADING_SIGNALS[signal].kind));
+  const quoted = signals.includes('quotation');
+  const strong = signals.some((signal) => NON_HEADING_SIGNALS[signal].strong && !(quoted && NON_HEADING_SIGNALS[signal].kind === 'text'));
+  if (strong) return kinds.size >= 2 ? 'likely' : 'advisory';
+  if (kinds.size >= 2 && kinds.has('position')) return 'advisory';
+  if (kinds.has('rendering')) return 'info';
   return null;
+}
+
+function union(boxes: Box[]): Box | null {
+  if (boxes.length === 0) return null;
+  const x = Math.min(...boxes.map((box) => box.x));
+  const y = Math.min(...boxes.map((box) => box.y));
+  return { x, y, width: Math.max(...boxes.map(right)) - x, height: Math.max(...boxes.map(bottom)) - y };
 }
 
 /**
@@ -788,58 +873,140 @@ export function nonHeadingStatus(signals: readonly NonHeadingSignal[]): 'likely'
  * `headingReport` keeps `maxNonHeadings`. Pure.
  *
  * A heading whose text is all a link or a button, or that the pointer shows as clickable, is
- * never said to head nothing: it names what it opens (a teaser, the question of an accordion).
- * Headings hidden from assistive technology are not exposed, and headings without visible text
- * have no block: neither is looked at.
+ * never said to head nothing nor to be set as body text: it names what it opens (a teaser, the
+ * question of an accordion) and has the style of the control. It is `advisory` at most.
+ * Headings hidden from assistive technology are not exposed and are not looked at. Headings
+ * without visible text (a picture, a visually hidden title) are never reported; where the survey
+ * lists them (`HeadingSurvey.headings`) they are headings like the others for what follows: the
+ * heading before one of them is not said to head nothing, since what such a heading holds, and
+ * whether it reads as a subsection, cannot be told from text.
  */
 export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null, config: HeadingsConfig): NonHeading[] {
   const { blocks } = survey;
   interface Exposed {
+    /** -1 for a heading without visible text. */
     first: number;
     last: number;
     members: number[];
     level: number;
     selector: string;
     frame: string;
+    /** Box of the heading element, where the survey gives it. */
+    box: Box | null;
+    /** Where it begins among the blocks; for a heading without text, what was counted when it began. */
+    blocksBefore: number;
+    contentBefore: number | undefined;
+    hiddenBefore: number | undefined;
   }
+  const keyOf = (frame: string, selector: string): string => `${frame}\u0000${selector}`;
   const known = new Map<string, Exposed>();
-  const exposed: Exposed[] = [];
+  const withText: Exposed[] = [];
   blocks.forEach((block, index) => {
     if (!block.heading) return;
-    const key = `${block.frame}\u0000${block.heading.selector}`;
+    const key = keyOf(block.frame, block.heading.selector);
     const existing = known.get(key);
     if (existing) {
       existing.members.push(index);
       existing.last = index;
       return;
     }
-    const heading: Exposed = { first: index, last: index, members: [index], level: block.heading.level, selector: block.heading.selector, frame: block.frame };
+    const heading: Exposed = {
+      first: index,
+      last: index,
+      members: [index],
+      level: block.heading.level,
+      selector: block.heading.selector,
+      frame: block.frame,
+      box: null,
+      blocksBefore: index,
+      contentBefore: block.contentBefore,
+      hiddenBefore: block.hiddenBefore,
+    };
     known.set(key, heading);
-    exposed.push(heading);
+    withText.push(heading);
   });
-  if (exposed.length === 0) return [];
+  if (withText.length === 0) return [];
 
-  // Nothing between two headings: the second starts at the block after the first, in the same
-  // document, and nothing else was counted on the way. Without the count, nothing is concluded.
+  // The headings in document order, the ones without visible text in their place among the others.
+  const textless: Exposed[] = [];
+  for (const listed of survey.headings ?? []) {
+    const existing = known.get(keyOf(listed.frame, listed.selector));
+    if (existing) {
+      existing.box = listed.box;
+      continue;
+    }
+    textless.push({
+      first: -1,
+      last: -1,
+      members: [],
+      level: listed.level,
+      selector: listed.selector,
+      frame: listed.frame,
+      box: listed.box,
+      blocksBefore: listed.blocksBefore,
+      contentBefore: listed.contentBefore,
+      hiddenBefore: listed.hiddenBefore,
+    });
+  }
+  const exposed: Exposed[] = [];
+  let pending = 0;
+  for (const heading of withText) {
+    while (pending < textless.length && textless[pending]!.blocksBefore <= heading.first) exposed.push(textless[pending++]!);
+    exposed.push(heading);
+  }
+  exposed.push(...textless.slice(pending));
+
+  const tolerance = config.boxToleranceCssPx;
+  const boxOf = (heading: Exposed): Box | null => heading.box ?? union(heading.members.map((index) => blocks[index]!.box));
+  const mainBlock = (heading: Exposed): TextBlock => heading.members.map((index) => blocks[index]!).reduce((best, block) => (block.chars > best.chars ? block : best));
+  /**
+   * On the page: the second begins under the first, in its column, about one line away at most.
+   * Headings side by side, and headings with room between them, are not next to each other,
+   * whatever the document holds between them.
+   */
+  const stackedClose = (a: Exposed, b: Exposed): boolean => {
+    const above = boxOf(a);
+    const below = boxOf(b);
+    if (!above || !below) return false;
+    const gap = below.y - bottom(above);
+    return gap >= -tolerance && gap <= config.headsNothingMaxGapEm * mainBlock(a).style.size && overlapsHorizontally(above, below, tolerance);
+  };
+  // Nothing between two headings: both have visible text, the second starts at the block after
+  // the first, in the same document, nothing else was counted on the way, and the page shows
+  // them one right under the other. Without the count, nothing is concluded.
   const nothingBetween = (a: Exposed, b: Exposed): boolean => {
+    if (a.members.length === 0 || b.members.length === 0) return false;
     if (b.first !== a.last + 1 || a.frame !== b.frame) return false;
     const from = blocks[a.last]!.contentBefore;
     const to = blocks[b.first]!.contentBefore;
-    return from !== undefined && to !== undefined && to === from;
+    return from !== undefined && to !== undefined && to === from && stackedClose(a, b);
   };
   const linked = exposed.map((heading, position): boolean => {
     const next = exposed[position + 1];
     return next !== undefined && next.level <= heading.level && nothingBetween(heading, next);
   });
-  const endsPage = (heading: Exposed): boolean => {
+  const endsPage = (heading: Exposed, position: number): boolean => {
     const from = blocks[heading.last]!.contentBefore;
-    return heading.last === blocks.length - 1 && survey.total === blocks.length && from !== undefined && survey.otherContent !== undefined && survey.otherContent === from;
+    return (
+      position === exposed.length - 1 &&
+      heading.last === blocks.length - 1 &&
+      survey.total === blocks.length &&
+      from !== undefined &&
+      survey.otherContent !== undefined &&
+      survey.otherContent === from
+    );
   };
+  // A run: the headings that head nothing, one after the other, and the heading that closes
+  // them when it is of the level of the last of them. A heading of a higher level that follows
+  // is the title of the next section, and no member.
   const runLength = exposed.map(() => 1);
   for (let start = 0; start < exposed.length; ) {
     let end = start;
     while (linked[end]) end++;
-    for (let position = start; position <= end; position++) runLength[position] = end - start + 1;
+    const closes = end > start && exposed[end] !== undefined && exposed[end]!.level === exposed[end - 1]!.level;
+    const length = end - start + (closes ? 1 : 0);
+    for (let position = start; position < end; position++) runLength[position] = length;
+    if (closes) runLength[end] = length;
     start = end + 1;
   }
 
@@ -848,7 +1015,7 @@ export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null
     baseline !== null &&
     !baseline.lowText &&
     style.size <= baseline.size + sizeTolerance &&
-    style.weight - baseline.weight < config.minWeightDelta &&
+    style.weight - baseline.weight < config.bodyStyleMaxWeightDelta &&
     style.transform !== 'uppercase' &&
     !style.italic &&
     style.color === baseline.color &&
@@ -864,13 +1031,15 @@ export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null
 
   const found: NonHeading[] = [];
   exposed.forEach((heading, position) => {
+    // Without visible text there is nothing to read: never reported.
+    if (heading.members.length === 0) return;
     const members = heading.members.map((index) => blocks[index]!);
     // Not exposed where it is hidden from assistive technology, whatever marked it.
     if (members.some((block) => block.contexts.includes('ariaHidden'))) return;
     const first = members[0]!;
     const text = members.map((block) => block.text).join(' ').trim();
     if (!LETTER_OR_DIGIT.test(text)) return;
-    const main = members.reduce((best, block) => (block.chars > best.chars ? block : best), first);
+    const main = mainBlock(heading);
     const wasCut = members.some((block) => block.text.length >= config.maxTextChars);
     const counted = wordsOf(text, config);
     // The text of a block is cut to `maxTextChars`; its count of words is that of all of it.
@@ -878,20 +1047,28 @@ export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null
     const sentences = countSentences(text, config);
     const control = members.every((block) => block.contexts.includes('link') || block.contexts.includes('button') || block.clickable === true);
     const next = exposed[position + 1];
-    const headsNothing = !control && (linked[position]! || endsPage(heading));
+    const headsNothing = !control && (linked[position]! || endsPage(heading, position));
 
     const signals: NonHeadingSignal[] = [];
-    if (sentences >= config.runningTextMinSentences && words >= config.runningTextMinWords) signals.push('severalSentences');
-    if (words >= config.longHeadingMinWords) signals.push('long');
+    const long = words >= config.longHeadingMinWords;
+    // The header of an accordion and the title of a teaser often hold a question in several
+    // parts or a title and its deck: on a heading that is a control, sentences count only with length.
+    if (sentences >= config.runningTextMinSentences && words >= config.runningTextMinWords && !onlyQuestions(text, config) && (!control || long)) signals.push('severalSentences');
+    if (long) signals.push('long');
     // The quoted words of someone are the usual title of an opinion piece or an interview: on a
     // title that is a link, quotation marks say nothing.
     if (!control && quoteStart !== null && quoteEnd !== null && quoteStart.test(text) && quoteEnd.test(text) && words >= config.quotationMinWords) signals.push('quotation');
-    if (isNumericText(text, config)) signals.push('numeric');
-    if (members.every((block) => plain(block.style))) signals.push('bodyStyle');
+    if (isNumberOnlyText(text, config)) signals.push('numeric');
+    // The text of a button or of a link is set as the control is, often as body text: that says
+    // nothing about the heading that wraps it.
+    if (!control && members.every((block) => plain(block.style))) signals.push('bodyStyle');
     if (headsNothing) signals.push('headsNothing');
     if (headsNothing && runLength[position]! >= config.headingRunMinLength) signals.push('headingRun');
-    const measured = nonHeadingStatus(signals);
-    if (measured === null) return;
+    const derived = nonHeadingStatus(signals);
+    if (derived === null) return;
+    // A heading that is a control is left with the signals of its text, which are of one kind:
+    // `advisory` at most. Said again here, so that it holds whatever the table of signals becomes.
+    const measured = control && derived === 'likely' ? 'advisory' : derived;
     // Without the whole accessibility tree, which text is a heading and what its level is are not
     // known for certain: recorded, and nothing more.
     const status = survey.axComplete ? measured : 'info';
@@ -900,6 +1077,17 @@ export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null
     const after = blocks[heading.last + 1]?.frame === heading.frame ? blocks[heading.last + 1]! : null;
     const followedBy = after ? cut(after.text, config.contextAfterMaxChars) : null;
     const nextHeadingLevel = linked[position]! && next ? next.level : null;
+
+    // For a model: what stands between this heading and the next one, or the end of the page.
+    // Said as it was read, whatever was concluded from it. Null where it is not known.
+    const here = blocks[heading.last]!;
+    const sameDocument = next === undefined || next.frame === heading.frame;
+    const untilBlocks = next === undefined ? survey.total : next.blocksBefore;
+    const untilContent = next === undefined ? survey.otherContent : next.contentBefore;
+    const untilHidden = next === undefined ? survey.hiddenContent : next.hiddenBefore;
+    const textBetween = untilBlocks > heading.last + 1;
+    const otherBetween = here.contentBefore !== undefined && untilContent !== undefined ? untilContent > here.contentBefore : null;
+    const hiddenBetween = here.hiddenBefore !== undefined && untilHidden !== undefined ? untilHidden > here.hiddenBefore : null;
     found.push({
       block: heading.first,
       findingId: fingerprint({ rule: NOT_A_HEADING_RULE, wcag: HEADINGS_SC, frame: heading.frame, selector: heading.selector }),
@@ -913,28 +1101,36 @@ export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null
       words,
       sentences,
       style: { ...main.style },
+      control,
       runLength: runLength[position]!,
       followedBy,
       nextHeadingLevel,
       crop: first.crop,
       cropTarget: first.crop && first.cropTarget ? { ...first.cropTarget } : null,
       covered: first.covered === true,
-      adjudicate: survey.axComplete,
+      adjudicate: survey.axComplete && status !== 'info',
       context: {
         text,
         level: heading.level,
         tag: first.tag,
         style: { ...main.style },
         bodyStyle: baseline ? { size: baseline.size, weight: baseline.weight, family: baseline.family, color: baseline.color } : null,
-        signals: [...signals],
         words,
         sentences,
         headingsInRun: runLength[position]!,
         contexts: [...first.contexts],
+        // All of it is a link or a button, or is clicked: it may open what it names.
+        control,
         region: first.region,
         textBefore: before ? cut(before.text, config.contextBeforeMaxChars) : null,
         textAfter: followedBy,
-        nextHeadingLevel,
+        // The next heading of the document, whatever stands before it; null when there is none.
+        nextHeadingLevel: next && sameDocument ? next.level : null,
+        // Whether anything stands between this heading and the next one (or the end of the page):
+        // visible text, or other content. And whether some of it is in the page without showing,
+        // as the closed panel of an accordion is.
+        contentBetween: !sameDocument ? null : textBetween ? true : otherBetween,
+        hiddenContentBetween: sameDocument ? hiddenBetween : null,
       },
     });
   });

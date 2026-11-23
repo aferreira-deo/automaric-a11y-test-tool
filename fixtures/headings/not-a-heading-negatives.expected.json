@@ -1,0 +1,8 @@
+{
+  "description": "More precision controls for headings/heading-not-a-heading, from a review: none is reported by that rule at any status. The headers of an accordion that wrap buttons set as body text, with two questions or three sentences in one header and the panels closed; titles in the size of body text at a medium weight; a page of questions, each heading two or three questions, in English, French and Arabic; headlines in two or three clauses; the quoted words of someone in two and in three sentences as the title of an article; promotional headings with a percent sign or a currency, each followed at once by a heading; cards whose only content is a title under an empty link laid over the card; a row of headings over a row of texts in a grid; cards side by side that hold only a number; a number followed by a heading that holds only a picture, and by a visually hidden heading; numbers as headings close to each other with, before the next one, a rule, a lazy image without a size, a picture with display contents, a picture in a wrapper of font size 0, a closed shadow root, bars drawn with a background colour, an empty container with a height, a background on a parent.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

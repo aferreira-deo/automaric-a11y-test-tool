@@ -172,7 +172,7 @@ describe('what is asked about groups', () => {
 describe('what a verdict changes for groups', () => {
   it('moves a status between info and likely and nowhere else', () => {
     const keep = resolveConfig();
-    const lowering = resolveConfig({ adjudication: { groupNoStatus: 'info' } });
+    const lowering = resolveConfig({ adjudication: { groupDisagreeStatus: 'info' } });
     expect(groupStatusAfter('likely', 'yes', keep)).toBe('likely');
     expect(groupStatusAfter('info', 'yes', keep)).toBe('likely');
     expect(groupStatusAfter('likely', 'no', keep)).toBe('likely');
@@ -181,10 +181,10 @@ describe('what a verdict changes for groups', () => {
     expect(groupStatusAfter('likely', 'unsure', lowering)).toBe('likely');
     expect(groupStatusAfter('info', 'unsure', keep)).toBe('info');
   });
-  it('takes info or likely for groupNoStatus and nothing else', () => {
-    expect(resolveAdjudication().groupNoStatus).toBe('likely');
-    expect(resolveAdjudication({ groupNoStatus: 'info' }).groupNoStatus).toBe('info');
-    expect(resolveAdjudication({ groupNoStatus: 'fail' as never }).groupNoStatus).toBe('likely');
+  it('takes info or likely for groupDisagreeStatus and nothing else', () => {
+    expect(resolveAdjudication().groupDisagreeStatus).toBe('likely');
+    expect(resolveAdjudication({ groupDisagreeStatus: 'info' }).groupDisagreeStatus).toBe('info');
+    expect(resolveAdjudication({ groupDisagreeStatus: 'fail' as never }).groupDisagreeStatus).toBe('likely');
   });
   const judged = (verdict: AiEvidence['verdict'], input: ConfigInput = {}) => {
     const { config, findings, asked } = scan(input);
@@ -206,14 +206,14 @@ describe('what a verdict changes for groups', () => {
     const kept = judged('no');
     expect(statusOf(kept.after)).toEqual(statusOf(kept.before));
     expect(kept.after.find((finding) => finding.selector === '#strong')).toMatchObject({ status: 'likely', ai: { verdict: 'no', statusBefore: 'likely' } });
-    const lowered = judged('no', { adjudication: { groupNoStatus: 'info' } });
+    const lowered = judged('no', { adjudication: { groupDisagreeStatus: 'info' } });
     expect(lowered.after.find((finding) => finding.selector === '#strong')).toMatchObject({ status: 'info', rule: 'grouping/group-candidate', ai: { statusBefore: 'likely' } });
     // The split field and the set under a heading are not a model's to move.
     expect(statusOf(lowered.after)).toMatchObject({ '#heading': 'advisory', '#row': 'likely' });
   });
   it('changes nothing on unsure, and never gives a fail', () => {
     for (const verdict of ['yes', 'no', 'unsure'] as const) {
-      const { before, after } = judged(verdict, { adjudication: { groupNoStatus: 'fail' as never } });
+      const { before, after } = judged(verdict, { adjudication: { groupDisagreeStatus: 'fail' as never } });
       if (verdict === 'unsure') expect(statusOf(after)).toEqual(statusOf(before));
       for (const finding of after) expect(finding.status).not.toBe('fail');
     }

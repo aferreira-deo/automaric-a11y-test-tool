@@ -296,7 +296,7 @@ test.describe('with a model', () => {
     const kept = await judged(page);
     expect(new Set(Object.values(statusOf(kept.result.findings)))).toEqual(new Set(['likely']));
     expect(kept.result.findings.find((finding) => finding.selector === '#q-car')).toMatchObject({ ai: { verdict: 'no', statusBefore: 'likely' } });
-    const lowered = await judged(page, { groupNoStatus: 'info' });
+    const lowered = await judged(page, { groupDisagreeStatus: 'info' });
     expect(new Set(Object.values(statusOf(lowered.result.findings)))).toEqual(new Set(['info']));
     expect(lowered.result.findings.find((finding) => finding.selector === '#q-car')).toMatchObject({ rule: 'grouping/group-candidate', ai: { statusBefore: 'likely' } });
   });

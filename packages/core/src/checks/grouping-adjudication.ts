@@ -50,14 +50,14 @@ function note(ai: AiEvidence, before: Finding['status'], after: Finding['status'
  * nowhere else: section 3E of the brief allows no `fail` for grouping, and a verdict that depends
  * on a model is never one.
  * - `yes`: `likely`, whether it was `likely` or `info`.
- * - `no`: a `likely` stays `likely` with the verdict recorded, unless `groupNoStatus` is `info`,
+ * - `no`: a `likely` stays `likely` with the verdict recorded, unless `groupDisagreeStatus` is `info`,
  *   which lowers it; an `info` stays `info`.
  * - `unsure`, which includes every failure: unchanged.
  */
 export function groupStatusAfter(before: Finding['status'], verdict: AiEvidence['verdict'], config: Config): 'likely' | 'info' {
   const start = before === 'likely' ? 'likely' : 'info';
   if (verdict === 'yes') return 'likely';
-  if (verdict === 'no') return start === 'likely' && config.adjudication.groupNoStatus !== 'info' ? 'likely' : 'info';
+  if (verdict === 'no') return start === 'likely' && config.adjudication.groupDisagreeStatus !== 'info' ? 'likely' : 'info';
   return start;
 }
 

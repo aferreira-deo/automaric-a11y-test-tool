@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: not-a-heading-negatives</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 720px; }
+      h1, h2, h3, h4 { margin: 24px 0 8px; font-weight: 700; line-height: 1.2; }
+      h1 { font-size: 32px; }
+      h2 { font-size: 24px; }
+      h3 { font-size: 18px; }
+      p { margin: 0 0 16px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      /* The accordion of a common framework: the header has no margin, the button is set as body text. */
+      .accordion-item { border: 1px solid #767676; }
+      .accordion-header { margin: 0; }
+      .accordion-button { display: flex; width: 100%; padding: 16px 20px; border: 0; background: #fff; font-family: inherit; font-size: 1rem; font-weight: 400; color: #1a1a1a; text-align: left; }
+      .collapse { display: none; }
+      /* Titles in the size of body text, at a medium weight. */
+      .medium { font-size: 16px; font-weight: 500; }
+      /* Cards whose whole surface is a link laid over them. */
+      .stretched-card { position: relative; border: 1px solid #767676; margin: 4px 0; padding: 4px; }
+      .stretched-card h3 { margin: 0; }
+      .stretched { position: absolute; inset: 0; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .grid h3 { margin: 0; }
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .cards article { border: 1px solid #767676; padding: 12px; }
+      .cards h3 { margin: 0; }
+      /* Headings close to each other, so that only what stands between them says that they head something. */
+      .tight h3 { margin: 4px 0; }
+      .tight hr { margin: 0; }
+      .bars { display: flex; gap: 4px; align-items: flex-end; }
+      .bars div { width: 24px; background: #0b57d0; }
+      .slot { height: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">Help centre</h1>
+      <p>
+        Body text that goes on for a while so that it is the most common style of the page by far. It has a second
+        sentence and a third one, so that one paragraph alone holds enough characters to say what body text looks
+        like on a page that has little else.
+      </p>
+
+      <!-- An accordion: each header wraps a button set as body text, the panels are closed. Two questions in one header, in English and in French. -->
+      <div class="accordion">
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="accordion-1"><button class="accordion-button" type="button" aria-expanded="false" aria-controls="collapse-1">What happens if I miss a payment on my loan? Do I need to contact you before the due date?</button></h2>
+          <div id="collapse-1" class="collapse"><p>Body text of the first panel.</p></div>
+        </div>
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="accordion-2"><button class="accordion-button" type="button" aria-expanded="false" aria-controls="collapse-2">How do I reset my password?</button></h2>
+          <div id="collapse-2" class="collapse"><p>Body text of the second panel.</p></div>
+        </div>
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="accordion-3"><button class="accordion-button" type="button" aria-expanded="false" aria-controls="collapse-3">Puis-je modifier mon offre plus tard ? Vais-je perdre les données que j'ai déjà envoyées sur la plateforme ?</button></h2>
+          <div id="collapse-3" class="collapse"><p>Body text of the third panel.</p></div>
+        </div>
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="accordion-4"><button class="accordion-button" type="button" aria-expanded="false" aria-controls="collapse-4">You moved to another country last year. You kept your account with us. You now want to know which rules apply to you and what you have to send us</button></h2>
+          <div id="collapse-4" class="collapse"><p>Body text of the fourth panel.</p></div>
+        </div>
+      </div>
+
+      <!-- Titles in the size of body text at a medium weight, one of them two questions. -->
+      <h3 id="medium-1" class="medium">What happens if I miss a payment on my loan? Do I need to contact you before the due date?</h3>
+      <p>Body text under the first medium title.</p>
+      <h3 id="medium-2" class="medium">How do I reset my password?</h3>
+      <p>Body text under the second medium title.</p>
+
+      <!-- A page of questions, each heading two questions over its answer. -->
+      <h2 id="faq">Frequent questions</h2>
+      <h3 id="faq-1">Can I change my plan later on? Will I lose the data that I have already uploaded to you?</h3>
+      <p>Body text that answers the first question.</p>
+      <h3 id="faq-2">Is there a free trial? How long does it last and do I need a credit card for it?</h3>
+      <p>Body text that answers the second question.</p>
+      <h3 id="faq-3">Que se passe-t-il si je rate un paiement ? Dois-je vous contacter avant la date d'échéance prévue ?</h3>
+      <p>Body text that answers the third question.</p>
+      <h3 id="faq-4">Who can open an account with you? Do I have to live in the country to be able to do so?</h3>
+      <p>Body text that answers the fourth question.</p>
+      <h3 id="faq-5">Where is my order now? When will it be delivered? Whom do I call if it does not come on that day?</h3>
+      <p>Body text that answers the fifth question.</p>
+      <h3 id="faq-6" dir="rtl" lang="ar">ما هي سياسة الإرجاع؟ هل يمكنني استرداد أموالي بعد ثلاثين يوما من تاريخ الشراء في المتجر؟</h3>
+      <p>Body text that answers the sixth question.</p>
+
+      <!-- Headlines in two or three clauses, each over its article. -->
+      <h2 id="headline-1" lang="fr">Budget 2027 : le gouvernement recule. Les syndicats maintiennent la grève de jeudi dans les transports publics</h2>
+      <p>Body text of the first article.</p>
+      <h2 id="headline-2">Mr. Smith goes to Washington. A review of the classic film and its place in American cinema</h2>
+      <p>Body text of the second article.</p>
+      <h2 id="headline-3">Who we are. What we do. Why it matters to the people and the communities that we serve</h2>
+      <p>Body text of the third article.</p>
+
+      <!-- The quoted words of someone, in two sentences, as the title of an article over its byline; and a longer one in three sentences. -->
+      <article lang="fr">
+        <h2 id="quoted-title">« On a tout perdu. Il ne nous reste plus rien, même pas les photos de famille »</h2>
+        <p>Par Jeanne Martin. Publié le 12 mars 2026.</p>
+        <p>Body text of the article.</p>
+        <h2 id="quoted-long">« Nous avons attendu les secours pendant trois jours. Personne n'est venu nous chercher avant la fin de la semaine. Il a fallu marcher jusqu'au village voisin pour trouver de l'eau »</h2>
+        <p>Body text of the second article.</p>
+      </article>
+
+      <!-- Promotional headings with a percent sign or a currency, each followed at once by another heading. -->
+      <h2 id="promo-1">Save 20% on your first order</h2>
+      <h2 id="after-promo-1">Our commitments</h2>
+      <p>Body text under the commitments.</p>
+      <h2 id="promo-2" lang="fr">Livraison offerte dès 50 € d'achat</h2>
+      <h2 id="after-promo-2" lang="fr">Nos engagements</h2>
+      <p>Body text under the commitments, again.</p>
+      <h2 id="promo-3" lang="fr">Top 5 des destinations à moins de 100 $ cet été</h2>
+      <h2 id="after-promo-3">Another title</h2>
+      <p>Body text under the other title.</p>
+
+      <!-- Cards whose title is all they show: an empty link with a name is laid over each. -->
+      <h2 id="stretched-title" lang="fr">À lire aussi</h2>
+      <article class="stretched-card" lang="fr"><h3 id="stretched-1">Covid-19 : ce que l'on sait du nouveau variant. Les réponses à vos questions sur la vaccination</h3><a class="stretched" href="/news/1" aria-label="Lire"></a></article>
+      <article class="stretched-card" lang="fr"><h3 id="stretched-2">Retraites : la réforme est adoptée. Ce qui change pour vous dès le premier janvier de l'année prochaine</h3><a class="stretched" href="/news/2" aria-label="Lire"></a></article>
+      <article class="stretched-card" lang="fr"><h3 id="stretched-3">Football : les Bleus s'imposent. Le résumé du match et les réactions des joueurs après la rencontre</h3><a class="stretched" href="/news/3" aria-label="Lire"></a></article>
+
+      <!-- A row of headings over a row of texts, in a grid: side by side, each heads the text under it. In the style of body text but for a medium weight. -->
+      <h2 id="grid-title">How we work</h2>
+      <div class="grid">
+        <h3 id="grid-1" class="medium">Design</h3>
+        <h3 id="grid-2" class="medium">Build</h3>
+        <h3 id="grid-3" class="medium">Ship</h3>
+        <p>We design it.</p>
+        <p>We build it.</p>
+        <p>We ship it.</p>
+      </div>
+
+      <!-- Cards side by side that hold a title and nothing else, and wrap to a second row. -->
+      <h2 id="cards-title">Our offices</h2>
+      <div class="cards">
+        <article><h3 id="card-1">2019</h3></article>
+        <article><h3 id="card-2">2020</h3></article>
+        <article><h3 id="card-3">2021</h3></article>
+        <article><h3 id="card-4">2022</h3></article>
+        <article><h3 id="card-5">2023</h3></article>
+        <article><h3 id="card-6">2024</h3></article>
+      </div>
+      <p>Body text after the cards.</p>
+
+      <!-- A heading followed by a heading that holds only a picture, and by one that is visually hidden: each is a heading of its own, with content the survey cannot read. -->
+      <h3 id="before-image-heading">€49.00</h3>
+      <h3 id="image-heading"><img alt="Our partners" width="200" height="40" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /></h3>
+      <h3 id="after-image-heading">What is included</h3>
+      <p>Body text under a real heading.</p>
+      <h3 id="before-hidden-heading">12/03/2026</h3>
+      <h3 id="hidden-heading" class="sr-only">Share this page</h3>
+      <h3 id="after-hidden-heading">What happened</h3>
+      <p>Body text under a real heading.</p>
+
+      <!-- Numbers as headings, close to each other, each with something that is no text before the next one. -->
+      <div class="tight">
+        <h3 id="over-rule">2011</h3>
+        <hr />
+        <h3 id="over-lazy-image">2012</h3>
+        <img loading="lazy" data-src="/pictures/2012.png" alt="" />
+        <h3 id="over-contents-picture">2013</h3>
+        <picture style="display: contents"><source srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /><img alt="The office in 2013" width="20" height="12" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /></picture>
+        <h3 id="over-wrapped-picture">2014</h3>
+        <div style="font-size: 0"><picture><img alt="The office in 2014" width="20" height="12" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /></picture></div>
+        <h3 id="over-closed-root">2015</h3>
+        <closed-chart></closed-chart>
+        <h3 id="over-bars">2016</h3>
+        <div class="bars"><div style="height: 6px"></div><div style="height: 12px"></div><div style="height: 9px"></div></div>
+        <h3 id="over-sized-container">2017</h3>
+        <div class="slot" id="slot"></div>
+        <h3 id="over-background">2018</h3>
+        <div style="background-image: linear-gradient(#0b57d0, #0b57d0); height: 12px"><div></div></div>
+        <h3 id="after-all">What came next</h3>
+      </div>
+      <p>Body text under the last heading.</p>
+    </main>
+    <script>
+      customElements.define(
+        'closed-chart',
+        class extends HTMLElement {
+          connectedCallback() {
+            const root = this.attachShadow({ mode: 'closed' });
+            root.innerHTML = '<span style="font-size: 8px">Text inside a closed root</span>';
+          }
+        },
+      );
+    </script>
+  </body>
+</html>

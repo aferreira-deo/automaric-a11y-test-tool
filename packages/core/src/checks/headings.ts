@@ -197,7 +197,7 @@ function signalText(found: NonHeading, signal: NonHeadingSignal, baseline: BodyB
     case 'quotation':
       return 'it opens and closes with quotation marks';
     case 'numeric':
-      return 'it is a number: a price, a figure or a date';
+      return 'it is a number and nothing else: a price, a figure or a date';
     case 'bodyStyle':
       return `it is set as body text is (${px(found.style.size)} at weight ${found.style.weight}${baseline ? `, against ${px(baseline.size)} at weight ${baseline.weight}` : ''}, in its family and colour)`;
     case 'headsNothing':
@@ -215,6 +215,7 @@ function nonHeadingFinding(found: NonHeading, baseline: BodyBaseline | null, axC
   if (HEX_COLOR.test(found.style.color)) colors['text'] = found.style.color;
   if (baseline && HEX_COLOR.test(baseline.color)) colors['bodyText'] = baseline.color;
   const flags: string[] = [...found.signals];
+  if (found.control) flags.push('control');
   if (!found.crop) flags.push(found.covered ? 'covered' : 'notCaptured');
   if (!axComplete) flags.push('axIncomplete');
   const values: Record<string, string | number | boolean> = {
@@ -239,7 +240,7 @@ function nonHeadingFinding(found: NonHeading, baseline: BodyBaseline | null, axC
     found.status === 'likely'
       ? `${subject} does not read as a heading: ${why.join('; ')}. Confirm that it does not function as a heading for what follows it.`
       : found.status === 'advisory'
-        ? `${subject} may not function as a heading: ${why.join('; ')}. One kind of measurement says so and no other confirms it: check what it heads.`
+        ? `${subject} may not function as a heading: ${why.join('; ')}. That is not enough to say that it is not a heading: check what it heads.`
         : `${subject}: ${why.join('; ')}. Recorded as info: ${axComplete ? 'on its own that does not say that it is not a heading' : 'the accessibility tree could not be read in full, so which text is a heading is not known for certain'}.`;
   return {
     check: 'headings',

@@ -136,10 +136,15 @@ export const defaultConfig: Config = {
     extremeInversionMinLevelGap: 2,
     maxNonHeadings: 50,
     sentenceBreakPattern:
-      '(?<=(?:(?<!(?:^|[\\s.\\p{Ps}\\p{Pi}"\'])\\p{Lu}\\p{L}{0,2})\\.|[!?\\u2026])(?:\\s?[\\p{Pe}\\p{Pf}"\'])*)\\s+(?=(?:[\\p{Ps}\\p{Pi}"\'\\u00bf\\u00a1]\\s?)*[\\p{Lu}\\p{Lo}])|(?<=[\\u3002\\uff01\\uff1f\\uff0e][\\p{Pe}\\p{Pf}]*)(?=[^\\s\\p{Pe}\\p{Pf}\\u3002\\uff01\\uff1f\\uff0e])',
+      '(?<=(?:(?<!(?:^|[\\s.\\p{Ps}\\p{Pi}"\'])\\p{Lu}\\p{L}{0,2})\\.|[!?\\u061f\\u2026])(?:\\s?[\\p{Pe}\\p{Pf}"\'])*)\\s+(?=(?:[\\p{Ps}\\p{Pi}"\'\\u00bf\\u00a1]\\s?)*[\\p{Lu}\\p{Lo}])|(?<=[\\u3002\\uff01\\uff1f\\uff0e][\\p{Pe}\\p{Pf}]*)(?=[^\\s\\p{Pe}\\p{Pf}\\u3002\\uff01\\uff1f\\uff0e])',
     sentenceMinWords: 3,
-    runningTextMinSentences: 2,
-    runningTextMinWords: 15,
+    runningTextMinSentences: 3,
+    runningTextMinWords: 25,
+    questionEndPattern: '[?\\uff1f\\u061f][\\s\\p{Pe}\\p{Pf}"\']*$',
+    numberOnlyMaxWords: 3,
+    numberOnlyMinShare: 0.6,
+    bodyStyleMaxWeightDelta: 100,
+    headsNothingMaxGapEm: 1.5,
     longHeadingMinWords: 40,
     quotationMinWords: 8,
     quoteEndPattern: '["\\u00bb\\u203a\\u201d\\u300d\\u300f]\\s?[.!?\\u2026]?$',
@@ -289,9 +294,9 @@ export const defaultConfig: Config = {
     outlineColor: '#ff00ff',
     outlineWidthCssPx: 2,
     outlineGapCssPx: 3,
-    headingNoStatus: 'likely',
-    listNoStatus: 'likely',
-    groupNoStatus: 'likely',
+    headingDisagreeStatus: 'likely',
+    listDisagreeStatus: 'likely',
+    groupDisagreeStatus: 'likely',
   },
   baseline: {
     stripFragment: true,
@@ -327,6 +332,23 @@ export const defaultConfig: Config = {
   },
 };
 
+/**
+ * Deprecated names of three options of the adjudicator layer, still read: `headingNoStatus`,
+ * `listNoStatus` and `groupNoStatus` are `headingDisagreeStatus`, `listDisagreeStatus` and
+ * `groupDisagreeStatus`. The old names said "no", and for a heading reported as not reading as
+ * one the verdict that speaks against the finding is "yes". Where both names are given, the new
+ * one is used.
+ */
+export interface DeprecatedAdjudicationOptions {
+  /** @deprecated Use `headingDisagreeStatus`. */
+  headingNoStatus?: 'info' | 'likely';
+  /** @deprecated Use `listDisagreeStatus`. */
+  listNoStatus?: 'info' | 'likely';
+  /** @deprecated Use `groupDisagreeStatus`. */
+  groupNoStatus?: 'info' | 'likely';
+}
+export type AdjudicationInput = Partial<AdjudicationConfig> & DeprecatedAdjudicationOptions;
+
 export type ConfigInput = {
   checks?: CheckId[];
   focus?: Partial<FocusConfig>;
@@ -334,7 +356,7 @@ export type ConfigInput = {
   headings?: Partial<HeadingsConfig>;
   lists?: Partial<ListsConfig>;
   grouping?: Partial<GroupingConfig>;
-  adjudication?: Partial<AdjudicationConfig>;
+  adjudication?: AdjudicationInput;
   baseline?: Partial<BaselineConfig>;
   run?: Partial<RunConfig>;
   selector?: Partial<SelectorConfig>;
@@ -399,11 +421,13 @@ function duration(value: unknown, min: number, fallback: number): number {
 /**
  * Settings of the adjudicator layer, with anything that is not a usable value put back to its
  * default: a configuration can come from a JSON file. Whatever is configured, a status that
- * depends on a model is `likely` at most (`headingNoStatus`, `listNoStatus` and `groupNoStatus` take `info` or `likely` only).
+ * depends on a model is `likely` at most (`headingDisagreeStatus`, `listDisagreeStatus` and `groupDisagreeStatus` take `info` or `likely` only).
+ * Their former names (`DeprecatedAdjudicationOptions`) are read where the new one is not given.
  */
-export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): AdjudicationConfig {
+export function resolveAdjudication(input: AdjudicationInput = {}): AdjudicationConfig {
   const base = defaultConfig.adjudication;
-  const merged = { ...base, ...input };
+  const { headingNoStatus, listNoStatus, groupNoStatus, ...current } = input;
+  const merged = { ...base, ...current };
   const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
   return {
     provider: oneOf(merged.provider, ['none', 'openai-compatible'], base.provider),
@@ -436,9 +460,9 @@ export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): Ad
     outlineColor: /^#[0-9a-f]{6}$/i.test(text(merged.outlineColor)) ? text(merged.outlineColor) : base.outlineColor,
     outlineWidthCssPx: atLeast(merged.outlineWidthCssPx, 0, base.outlineWidthCssPx, false),
     outlineGapCssPx: atLeast(merged.outlineGapCssPx, 0, base.outlineGapCssPx, false),
-    headingNoStatus: oneOf(merged.headingNoStatus, ['info', 'likely'], base.headingNoStatus),
-    listNoStatus: oneOf(merged.listNoStatus, ['info', 'likely'], base.listNoStatus),
-    groupNoStatus: oneOf(merged.groupNoStatus, ['info', 'likely'], base.groupNoStatus),
+    headingDisagreeStatus: oneOf(current.headingDisagreeStatus ?? headingNoStatus, ['info', 'likely'], base.headingDisagreeStatus),
+    listDisagreeStatus: oneOf(current.listDisagreeStatus ?? listNoStatus, ['info', 'likely'], base.listDisagreeStatus),
+    groupDisagreeStatus: oneOf(current.groupDisagreeStatus ?? groupNoStatus, ['info', 'likely'], base.groupDisagreeStatus),
   };
 }
 

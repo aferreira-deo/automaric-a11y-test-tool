@@ -4,7 +4,7 @@ import { verifyEndpoint } from '@a11y-vision/adjudicators/node';
 import { collectSnapshot } from '@a11y-vision/collector-cdp';
 import type { CdpSession } from '@a11y-vision/collector-cdp';
 import { buildResult, resolveConfig } from '@a11y-vision/core';
-import type { AdjudicationConfig, CheckId, ConfigInput, Png, ScanResult, Snapshot } from '@a11y-vision/core';
+import type { AdjudicationInput, CheckId, ConfigInput, Png, ScanResult, Snapshot } from '@a11y-vision/core';
 import type { Page } from 'playwright-core';
 import { loadVerdictCache, saveVerdictCache } from './cache-file.js';
 
@@ -57,7 +57,7 @@ export class A11yVision {
    * on this machine also needs `allowRemote: true` and an https URL. The key, if the endpoint
    * wants one, is read from the environment variable named in `apiKeyEnv`.
    */
-  withAdjudication(settings: Partial<AdjudicationConfig>, runtime: AdjudicationRuntime = {}): this {
+  withAdjudication(settings: AdjudicationInput, runtime: AdjudicationRuntime = {}): this {
     const adjudication = { ...this.#config.adjudication, ...settings };
     // Asked for by this call: a provider is selected unless the settings name one themselves.
     if (adjudication.provider === undefined) adjudication.provider = 'openai-compatible';
@@ -137,4 +137,4 @@ export class A11yVision {
 
 export { loadVerdictCache, saveVerdictCache } from './cache-file.js';
 export type { Adjudicator, AdjudicationStats, VerdictCache } from '@a11y-vision/adjudicators';
-export type { AdjudicationConfig, CheckId, ConfigInput, Finding, ScanResult, Status } from '@a11y-vision/core';
+export type { AdjudicationConfig, AdjudicationInput, CheckId, ConfigInput, Finding, ScanResult, Status } from '@a11y-vision/core';
