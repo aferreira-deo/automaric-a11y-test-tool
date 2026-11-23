@@ -351,8 +351,188 @@ export interface HeadingSurvey {
   axComplete: boolean;
 }
 
+/**
+ * What stands before a line of text where a bullet or a number would, when it is not a character
+ * of the text itself.
+ * - `pseudo-text`: generated content of `::before` that is text (`text`).
+ * - `pseudo-counter`: generated content of `::before` that uses a CSS counter.
+ * - `pseudo-shape`: a `::before` without text that paints a small box (a dot, a square, an image).
+ * - `image`: a small `img` or inline `svg`, or an empty element that shows an icon-font glyph.
+ * - `shape`: a small empty element that paints a box.
+ * - `list-item`: the element is displayed as a list item with a visible marker, outside a list.
+ */
+export interface ListMarker {
+  kind: 'pseudo-text' | 'pseudo-counter' | 'pseudo-shape' | 'image' | 'shape' | 'list-item';
+  /** The generated text, for `pseudo-text`; empty otherwise. */
+  text: string;
+  /** Two markers with the same key look the same: the same content, image or shape. */
+  key: string;
+}
+
+/** One line of a block: the text between two forced line breaks, or all of it. */
+export interface ListLine {
+  /** The start of its text, white space collapsed, cut to `lineStartChars`. */
+  start: string;
+  /** Its first painted line, page coordinates. */
+  box: Box;
+  marker?: ListMarker;
+}
+
+/**
+ * A block of visible text as the lists check needs it: read as `TextBlock` is, with the lines
+ * that forced line breaks cut it into and its place among the elements of the page.
+ */
+export interface ListBlock {
+  selector: string;
+  /** Same convention as FocusStop.frame. */
+  frame: string;
+  tag: string;
+  text: string;
+  chars: number;
+  words: number;
+  box: Box;
+  /** Painted lines. */
+  lines: number;
+  firstLine: Box;
+  style: TextStyle;
+  contexts: TextContext[];
+  /** All of its text is inside an element the accessibility tree exposes as a list or a description list. */
+  inList: boolean;
+  /** The accessibility tree exposes it as a heading. */
+  heading: boolean;
+  /** Text direction of its element is right to left. */
+  rtl: boolean;
+  /**
+   * Its element and the ancestors of that element in its document, innermost first, at most
+   * `maxAncestorLevels` of them, as pairs of numbers: the position of the element among the
+   * elements of the page in document order, and the position of the last element inside it.
+   * An element holds another when the position of the other lies between its two numbers.
+   */
+  chain: number[];
+  /** At least one: the block itself when it has no forced line break. */
+  segments: ListLine[];
+}
+
+/** One of several sibling elements of one shape. */
+export interface ListGroupItem {
+  /** Border box, page coordinates. */
+  box: Box;
+  /** Position of the element and of the last element inside it (see `ListBlock.chain`). */
+  ord: number;
+  end: number;
+  /** Blocks of visible text that have text inside it. */
+  blocks: number;
+  /** Characters of visible text inside it, white space apart. */
+  chars: number;
+  /** Links inside it, itself included. */
+  links: number;
+  /** Characters of its visible text that are inside a link, and inside a button. */
+  linkChars: number;
+  buttonChars: number;
+  /** Form fields inside it. */
+  controls: number;
+  /** Images and other graphics inside it. */
+  graphics: number;
+  /** Lists and tables inside it. */
+  lists: number;
+  /**
+   * The first heading inside it that the accessibility tree exposes: `link` when that heading is
+   * or holds a link (the title of a teaser or of a search result), `plain` when it is not (the
+   * heading of a section), `none` when there is no heading.
+   */
+  heading: 'none' | 'plain' | 'link';
+  /** The start of its text, cut to `itemTextMaxChars`. */
+  text: string;
+}
+
+/**
+ * Consecutive sibling elements with the same DOM shape, outside list semantics, tables, grids
+ * and composite widgets. Whether they are laid out as a series is worked out in core, from `items`.
+ */
+export interface ListGroup {
+  /** Their parent; the first of them when the parent holds more than one such series. */
+  selector: string;
+  frame: string;
+  /** Position of the parent and of the last element inside it. */
+  ord: number;
+  end: number;
+  /** How many siblings the series has; `items` holds at most `maxGroupItems` of them. */
+  count: number;
+  /** Characters of visible text that the parent holds itself, outside any child element: separators between links, or the prose the links are part of. */
+  looseChars: number;
+  items: ListGroupItem[];
+  /** Inside `nav` or a navigation role. */
+  navigation: boolean;
+  /** Handle for the capture. */
+  target: number;
+}
+
+/**
+ * A `ul`, `ol` or `menu` that is of interest.
+ * - `presentational`: its role was removed with `role="presentation"` or `role="none"` and the
+ *   accessibility tree does not expose it as a list.
+ * - `unstyled`: it is exposed as a list, has no explicit role, shows no marker on any item and
+ *   is outside navigation: the lists Safari does not expose as lists (see the README).
+ */
+export interface ListElement {
+  kind: 'presentational' | 'unstyled';
+  selector: string;
+  frame: string;
+  tag: string;
+  box: Box;
+  /** Position of the element among the elements of the page. */
+  ord: number;
+  /** Visible `li` children. */
+  items: number;
+  /** Those that show a marker: displayed as list items, with a list style, in a colour that paints, with room for it. */
+  markers: number;
+  /** All of those markers are inside the box of their item (`list-style-position: inside`). */
+  markersInside: boolean;
+  /** Handle for the capture. */
+  target: number;
+}
+
+/** The capture of something the lists check reports. */
+export interface ListCapture {
+  /** Crop id, or null when it could not be captured. */
+  crop: string | null;
+  /** Where the reported content is inside the capture, CSS pixels from its top-left corner. */
+  cropTarget?: Box;
+  /** Other content lay over it (a banner, a dialog). */
+  covered?: boolean;
+}
+
+export interface ListSurvey {
+  /** Visible text blocks in document order, frames in place. */
+  blocks: ListBlock[];
+  /** Blocks found, including those beyond `headings.maxBlocks`. */
+  totalBlocks: number;
+  groups: ListGroup[];
+  /** Series found, including those beyond `maxGroups`. */
+  totalGroups: number;
+  lists: ListElement[];
+  /** `ul`, `ol` and `menu` of interest found, including those beyond `maxListElements`. */
+  totalLists: number;
+  /** Elements the accessibility tree exposes as a list or a description list, with visible content. */
+  exposedLists: number;
+  /**
+   * False when the accessibility tree of a document the survey looked into could not be read:
+   * what has list semantics is then not known, and nothing is reported above `info`.
+   */
+  axComplete: boolean;
+  /**
+   * Selectors of the elements that hold what is reported, by their position (`ListBlock.chain`).
+   * Filled by the collector for the elements core names (`ListCandidate.container`).
+   */
+  containers: Record<string, string>;
+  /** Captures, by `ListCandidate.key`. */
+  captures: Record<string, ListCapture>;
+}
+
 export interface Snapshot {
   environment: Environment;
+  /** Present when the lists check was collected. */
+  lists?: ListSurvey;
   /** Present when the headings check was collected. */
   headings?: HeadingSurvey;
   /** Present when the focus-indicator check was collected. */
@@ -834,6 +1014,139 @@ export interface HeadingsConfig {
   extremeInversionMinLevelGap: number;
 }
 
+export interface ListsConfig {
+  /** Characters kept from the start of each line of text, to look for a bullet or a number in. */
+  lineStartChars: number;
+  /** Ancestors recorded for each text block. Two lines are sibling items only when the element that holds both is among them. */
+  maxAncestorLevels: number;
+  /** Ancestors of a line whose `::before` and list-item marker are looked at. */
+  markerAncestorLevels: number;
+  /** At most this many series of sibling elements of one shape are read from the page, in document order. */
+  maxGroups: number;
+  /** At most this many items of each such series are measured. */
+  maxGroupItems: number;
+  /** At most this many `ul`, `ol` and `menu` of interest are read from the page. */
+  maxListElements: number;
+  /** Elements whose accessibility role is marked in the page (lists, description lists) per document; beyond it the accessibility tree counts as not read. */
+  maxAxMarks: number;
+  /** At most this many findings above the inventory are reported: likely first, then advisory, then info, each in document order. */
+  maxCandidates: number;
+  /** At most this many real lists without markers are listed (`lists/list-style-none`). */
+  maxUnstyledLists: number;
+  /** At most this many captures are taken, in the order of the findings. */
+  maxCaptures: number;
+  /** Blocks of text named for one capture: beyond it, the capture shows the first ones. */
+  maxTargetBlocks: number;
+  /** Margin captured around what is reported. */
+  clipMarginCssPx: number;
+  /** Captured on top of that before and after lines of text, where a bullet that is not a character of the text stands. */
+  clipMarkerRoomCssPx: number;
+  /** Items quoted in a message and kept as evidence, and characters of each. */
+  messageItems: number;
+  itemTextMaxChars: number;
+  /** Items given to a model as context. */
+  contextMaxItems: number;
+
+  /** An image, an icon or a drawn shape is a bullet from this size... */
+  markerMinSizeCssPx: number;
+  /** ...up to this size, on both sides. Larger, it is a picture beside text. */
+  markerMaxSizeCssPx: number;
+  /** A graphic is at the start of a line when it is on that line and no further before the text than this many times the font size. */
+  markerMaxGapEm: number;
+  /**
+   * A marker outside its list item shows only when there is room for it before the item: this many
+   * times the font size between the content of the item and whatever clips it, or the edge of the page.
+   */
+  markerRoomEm: number;
+  /** Depth to which the tags of two sibling elements are compared to say they have one shape. */
+  shapeDepth: number;
+
+  /**
+   * A line that opens like this (pattern, Unicode flag) starts with a bullet: a character whose
+   * only common use at the start of a line is that. No letters, no words of any language.
+   */
+  bulletPattern: string;
+  /**
+   * A line that opens like this may start with a bullet: a hyphen, an en dash, an asterisk, a
+   * middle dot, an angle. These also open asides, footnotes and quoted replies, so fewer than
+   * `weakMinItems` of them in a row are held back as `info`. The em dash and the horizontal bar
+   * are left out on purpose: they open the lines of a dialogue in French and other languages.
+   */
+  weakBulletPattern: string;
+  /** Generated text of `::before` that is one of these characters is a bullet, with or without anything after it. */
+  pseudoBulletPattern: string;
+  /** Generated text made of these characters only is an icon-font glyph (Private Use Areas). */
+  iconGlyphPattern: string;
+  /** A line that opens like this is numbered with digits of any script: "1.", "2)", "(3)", "1.2.", "4/". The first group is the number. */
+  numberPattern: string;
+  /** Numbered with one letter of any script: "a)", "(b)", "C.". The first group is the letter, the second what closes it. */
+  letterPattern: string;
+  /** Numbered with a roman numeral: "ii.", "(IV)". The first group is the numeral. */
+  romanPattern: string;
+  /** Numbered with Chinese or Japanese numerals: "一、", "二．". The first group is the numeral. */
+  ideographicNumberPattern: string;
+  /** Numbered with an enclosed number: "①", "⑵". The first group is the character. */
+  enclosedNumberPattern: string;
+  /** Letters a sequence of letters starts with, in the scripts whose letters follow each other in Unicode. */
+  firstLetters: string;
+  /** After a hyphen or an asterisk, text with at least this share of digits among letters and digits, or with a currency or percent sign, is a figure ("- 20 %"), not an item. */
+  numericMinDigitShare: number;
+
+  /** Fewest lines with a bullet or a number for a list. Section 5.4 of the brief: two. */
+  minItems: number;
+  /** Fewest lines for a list when every bullet is one of `weakBulletPattern`; fewer are `info`. */
+  weakMinItems: number;
+  /** Fewest lines for a list numbered with single letters followed by a full stop ("A. Lovelace" is also a name); fewer are `info`. */
+  letterMinItems: number;
+  /**
+   * Fewest lines for a list when the bullet is an image or a drawn shape and not a character:
+   * two links with the same icon before each are common outside lists; fewer are `info`.
+   */
+  graphicMinItems: number;
+  /**
+   * Lines with a bullet that each have at least this many blocks of text (the line included) head
+   * a block of content each, as the title of a section or of a panel does with an icon before it:
+   * `info`. Numbered lines are held back from two blocks (`itemsHeadText`).
+   */
+  headedItemMinBlocks: number;
+  /** Slack when the start edges of lines or boxes are compared for alignment. */
+  alignToleranceCssPx: number;
+  /** Two boxes are on one row when they overlap vertically by this share of the lower of the two. */
+  sameRowMinOverlap: number;
+
+  /** Fewest sibling elements of one shape for a series. Section 5.4 of the brief: three. */
+  minRepeatedItems: number;
+  /** Gaps between the items of a series are constant when they differ by no more than this... */
+  gapToleranceCssPx: number;
+  /** ...or by no more than this share of the largest gap. */
+  gapToleranceShare: number;
+  /**
+   * Links are a group of their own when their parent holds no more text of its own than this many
+   * characters per link: a separator. With more, they are links inside a sentence.
+   */
+  linkSeparatorMaxChars: number;
+  /** A series whose items hold more text than this (median, characters apart from white space) is prose in sections, not a series of items. */
+  repeatedItemMaxChars: number;
+  /**
+   * Open decision (section 10.2 of the brief): status of a series of blocks of one shape whose
+   * items are more than a link each: card grids and search results. `advisory` or `likely`;
+   * never `fail`. Rows of links (navigation, breadcrumbs, tag clouds, pagination) are always `advisory`.
+   */
+  cardListStatus: 'advisory' | 'likely';
+
+  /** Fewest pairs for a key-value layout. */
+  keyValueMinPairs: number;
+  /** Longest name of a pair, in words. */
+  keyMaxWords: number;
+  /**
+   * A line that reads like this is a name, a colon and a value. The first group is the name. The
+   * colon has to be followed by white space, which leaves out hours ("09:30") and addresses of pages.
+   */
+  keyValueLinePattern: string;
+  /** A name that ends like this needs no style of its own to be told from its value. */
+  keyEndPattern: string;
+}
+
 /**
  * The adjudicator layer (section 6 of the brief): a model judges candidates that deterministic
  * code found. Nothing is sent anywhere while `provider` is `none`, which is the default.
@@ -935,6 +1248,12 @@ export interface AdjudicationConfig {
    *   text persuades the model, or an edited cache file, then hides the page's own findings.
    */
   headingNoStatus: 'info' | 'likely';
+  /**
+   * The same open decision for the lists check: status of a series of lines with bullets or numbers
+   * that deterministic code reported as `likely` and the model judged not to be a list. `likely`
+   * (default) keeps it with the verdict recorded; `info` lowers it.
+   */
+  listNoStatus: 'info' | 'likely';
 }
 
 export interface Config {
@@ -947,6 +1266,8 @@ export interface Config {
   focus: FocusConfig;
   icon: IconConfig;
   headings: HeadingsConfig;
+  /** The lists check reads text blocks as the headings check does, with the settings of `headings` for that part. */
+  lists: ListsConfig;
   adjudication: AdjudicationConfig;
 }
 

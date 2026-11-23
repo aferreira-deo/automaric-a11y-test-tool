@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: glyph-controls</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section, table, pre, form, nav, details { margin: 0 0 24px; }
+      h2 { font-size: 22px; margin: 0 0 8px; }
+      .plain { list-style: none; padding: 0; }
+      .cards { display: flex; gap: 16px; }
+      .cards > div { width: 180px; border: 1px solid #767676; padding: 8px; }
+      .badge { color: #a30000; font-weight: 700; }
+      .menu a { display: flex; gap: 8px; align-items: center; color: #00539b; }
+      .menu svg { width: 16px; height: 16px; flex: none; }
+      .crumbs a { color: #00539b; }
+      .crumbs a + a::before { content: "\203A"; margin: 0 8px; color: #1a1a1a; }
+      .toolbar { display: flex; gap: 24px; }
+      .toolbar a { color: #00539b; }
+      .toolbar a::before { content: "\2022"; margin-right: 6px; }
+      label { display: block; }
+      .panel { margin: 0 0 16px; }
+      .panel-title { display: flex; gap: 8px; align-items: center; font-weight: 700; }
+      .panel a { display: block; color: #00539b; }
+      .dot { width: 10px; height: 10px; background: #a30000; flex: none; }
+      .contact > div { display: flex; gap: 8px; align-items: center; }
+      /* Three icons cut out of one sprite: the same image, at three positions. */
+      .sprite { width: 16px; height: 16px; flex: none; background: linear-gradient(90deg, #00539b 33%, #0a6b2d 33% 66%, #a30000 66%) 0 0 / 48px 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Nothing on this page is a list that lacks list semantics. Some of it has the semantics, and the rest only starts like an item: one line, a dialogue, a poem, an address, code, a table, headings, options of a question, prices, dates, footnotes.</p>
+
+      <ul id="real-ul" class="plain"><li>• Wholemeal flour</li><li>• Fresh yeast</li><li>• Olive oil</li></ul>
+      <ol id="real-ol" class="plain"><li>1. Mix the flour.</li><li>2. Add the yeast.</li><li>3. Knead.</li></ol>
+      <div id="role-list" role="list"><div role="listitem">– Farine</div><div role="listitem">– Levure</div><div role="listitem">– Sel</div></div>
+      <dl id="real-dl"><dt>• Flour</dt><dd>500 g</dd><dt>• Yeast</dt><dd>20 g</dd></dl>
+
+      <p id="single">• One line that starts with a bullet, and no second one.</p>
+      <p>Plain text between two blocks.</p>
+
+      <p id="dialogue" lang="fr">— Vous partez déjà ?<br>— Il le faut bien, répondit-elle.<br>— Alors à demain.</p>
+
+      <p id="poem">The fog comes<br>on little cat feet.<br>It sits looking<br>over harbor and city</p>
+
+      <p id="address">Service des impôts<br>12 rue de la République<br>69002 Lyon<br>France</p>
+
+      <pre id="code"><code>- name: build
+- name: test
+- name: deploy</code></pre>
+
+      <table id="ranking">
+        <tr><th>Rank</th><th>Team</th></tr>
+        <tr><td>1.</td><td>Lyon</td></tr>
+        <tr><td>2.</td><td>Paris</td></tr>
+        <tr><td>3.</td><td>Lille</td></tr>
+      </table>
+
+      <section id="numbered-headings">
+        <section><h2>1. Scope</h2><p>This document covers the public pages of the site and nothing behind the login. The paragraph goes on for several sentences, as the text of a section of a document does, so that it is plainly prose under a heading and not an item of a series. It says what was looked at, what was left out and why, and where the reader can find the details that were too long to give here. A last sentence brings it well past the length of a card or of a search result.</p></section>
+        <section><h2>2. Method</h2><p>Each page was tested with a keyboard, a screen reader and the tool described here. The paragraph goes on for several sentences, as the text of a section of a document does, so that it is plainly prose under a heading and not an item of a series. It says what was looked at, what was left out and why, and where the reader can find the details that were too long to give here. A last sentence brings it well past the length of a card or of a search result.</p></section>
+        <section><h2>3. Results</h2><p>The results are given page by page, with the most serious problems first. The paragraph goes on for several sentences, as the text of a section of a document does, so that it is plainly prose under a heading and not an item of a series. It says what was looked at, what was left out and why, and where the reader can find the details that were too long to give here. A last sentence brings it well past the length of a card or of a search result.</p></section>
+      </section>
+
+      <form id="quiz">
+        <p>Which city is the capital of Italy?</p>
+        <label><input type="radio" name="capital"> a) Milan</label>
+        <label><input type="radio" name="capital"> b) Rome</label>
+        <label><input type="radio" name="capital"> c) Turin</label>
+      </form>
+
+      <div class="cards" id="prices">
+        <div><div class="badge">- 20 %</div><div>Rain jacket</div></div>
+        <div><div class="badge">- 30 %</div><div>Walking boots</div></div>
+        <div><div class="badge">- 15 %</div><div>Wool socks</div></div>
+      </div>
+      <p>Dates of the month, each on its own line, in German.</p>
+
+      <section id="dates" lang="de">
+        <div>12. Mai 2026</div>
+        <div>13. Mai 2026</div>
+        <div>14. Mai 2026</div>
+      </section>
+      <p>Two footnotes.</p>
+
+      <section id="footnotes">
+        <div>* Prices include tax.</div>
+        <div>* Delivery is extra.</div>
+      </section>
+      <p>Initials before two names.</p>
+
+      <section id="initials">
+        <div>A. Lovelace</div>
+        <div>B. Liskov</div>
+      </section>
+      <p>A bulleted list hidden from assistive technology.</p>
+
+      <section id="hidden" aria-hidden="true">
+        <div>• Decorative line one</div>
+        <div>• Decorative line two</div>
+      </section>
+
+      <nav class="menu" id="menu" aria-label="Account">
+        <a href="/profile"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#00539b"/></svg><span>Profile</span></a>
+        <a href="/orders"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="#00539b"/></svg><span>Orders</span></a>
+        <a href="/settings"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 14L8 2l6 12z" fill="#00539b"/></svg><span>Settings</span></a>
+      </nav>
+
+      <div class="crumbs" id="crumbs"><a href="/">Home</a><a href="/shop">Shop</a><a href="/shop/boots">Boots</a></div>
+
+      <div class="toolbar" id="toolbar"><a href="/a">Delivery</a><a href="/b">Returns</a><a href="/c">Contact</a></div>
+
+      <aside id="panels" aria-label="More">
+        <div class="panel"><div class="panel-title"><i class="dot"></i><span>Most read</span></div><a href="/r/1">Opening hours over the holidays</a><a href="/r/2">The new timetable of the library</a></div>
+        <div class="panel"><div class="panel-title"><i class="dot"></i><span>Most shared</span></div><a href="/s/1">Roadworks in the high street</a><a href="/s/2">The market moves to the square</a></div>
+      </aside>
+
+      <p id="byline">Written by <a href="/people/ada">Ada Lovelace</a> for the sections <a href="/news">News</a> and <a href="/events">Events</a>, and last changed on Monday.</p>
+
+      <div class="contact" id="contact">
+        <div><i class="sprite" style="background-position: 0 0"></i><span>04 72 10 30 30</span></div>
+        <div><i class="sprite" style="background-position: -16px 0"></i><span>contact@example.org</span></div>
+        <div><i class="sprite" style="background-position: -32px 0"></i><span>1 place de la Comédie, Lyon</span></div>
+      </div>
+
+      <details id="first-details"><summary>Delivery times</summary><p>Two to four working days.</p></details>
+      <details><summary>Returns</summary><p>Within thirty days.</p></details>
+      <details><summary>Payment</summary><p>By card or by transfer.</p></details>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

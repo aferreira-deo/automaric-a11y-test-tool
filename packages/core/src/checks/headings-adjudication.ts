@@ -15,7 +15,8 @@ export const HEADING_QUESTION =
   'Answer "unsure" if what you are given does not let you decide.';
 export const HEADING_QUESTION_VERSION = 'headings-1';
 
-const PROBLEM_TEXT: Record<AiProblem, string> = {
+/** Why a model gave no vote, in words, for the message of a finding. Shared by the checks that are adjudicated. */
+export const PROBLEM_TEXT: Record<AiProblem, string> = {
   timeout: 'the model did not answer in time',
   network: 'the model endpoint could not be reached',
   http: 'the model endpoint answered with an error',

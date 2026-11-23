@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: presentational-list</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      ul, ol { margin: 0 0 24px; }
+      .none { list-style: none; padding: 0; }
+      .inside { list-style-position: inside; padding: 0; }
+      .clipped { padding: 0; margin-left: 0; overflow: hidden; }
+      .blocks > li { display: block; }
+      .transparent > li::marker { color: transparent; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Lists whose role was removed with role="presentation" or role="none". Where the bullets or numbers still show, the page presents a list that assistive technology is not told about.</p>
+
+      <ul id="bullets" role="presentation"><li>Wholemeal flour</li><li>Fresh yeast</li><li>Olive oil</li></ul>
+      <ol id="numbers" role="none"><li>Mix the flour and the salt.</li><li>Add the yeast.</li></ol>
+      <ul id="inside" class="inside" role="presentation"><li>Markers inside the item box</li><li>They need no room beside it</li></ul>
+      <p>The role is removed and so are the markers: nothing shows that this was a list.</p>
+
+      <ul id="no-markers" class="none" role="presentation"><li>Home</li><li>Products</li><li>Contact</li></ul>
+      <ul id="blocks" class="blocks" role="presentation"><li>Items displayed as blocks</li><li>They have no marker box</li></ul>
+      <ul id="transparent" class="transparent" role="presentation"><li>Markers in a transparent colour</li><li>They paint nothing</li></ul>
+      <ul id="clipped" class="clipped" role="presentation"><li>Markers outside a box that clips them</li><li>They are cut off</li></ul>
+      <p>A presentational role on an element with a global ARIA attribute or a tabindex is ignored by the browser: these two are still lists.</p>
+
+      <ul id="named" role="presentation" aria-label="Ingredients"><li>Flour</li><li>Yeast</li></ul>
+      <ul id="focusable" role="none" tabindex="0"><li>Flour</li><li>Yeast</li></ul>
+      <p>A list with its role, for comparison.</p>
+
+      <ul id="plain"><li>Flour</li><li>Yeast</li></ul>
+      <ul id="single" role="presentation"><li>One item alone, with its bullet</li></ul>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

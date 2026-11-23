@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: shadow-and-iframe</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      iframe { border: 3px solid #595959; padding: 10px; display: block; margin: 0 0 16px; }
+      #tilted { transform: rotate(2deg) scale(0.9); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>A bulleted list without list semantics inside an open shadow root, one inside a same-origin iframe that has a border and padding, and one inside an iframe that is rotated and scaled, which is not looked into.</p>
+      <div id="host"></div>
+      <iframe id="frame" src="shadow-and-iframe-child.html" title="Child document" width="480" height="150"></iframe>
+      <iframe id="tilted" src="shadow-and-iframe-child.html" title="Rotated child document" width="480" height="150"></iframe>
+    </main>
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+        '<style>p { margin: 0 0 16px; } section { margin: 0 0 16px; }</style>' +
+        '<section id="list"><div>• First item in the shadow tree</div><div>• Second item in the shadow tree</div></section>' +
+        '<ul id="real"><li>A real list in the shadow tree</li><li>With two items</li></ul>';
+    </script>
+  </body>
+</html>

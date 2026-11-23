@@ -1,6 +1,7 @@
 import { focusIndicatorCheck } from './checks/focus-indicator.js';
 import { headingsCheck } from './checks/headings.js';
 import { iconContrastCheck } from './checks/icon-contrast.js';
+import { listsCheck } from './checks/lists.js';
 import { noopCheck } from './checks/noop.js';
 import { fingerprint } from './fingerprint.js';
 import { TOOL_NAME, TOOL_VERSION } from './meta.js';
@@ -11,6 +12,7 @@ const registry = new Map<CheckId, Check>([
   [focusIndicatorCheck.id, focusIndicatorCheck],
   [iconContrastCheck.id, iconContrastCheck],
   [headingsCheck.id, headingsCheck],
+  [listsCheck.id, listsCheck],
 ]);
 
 export function registeredChecks(): CheckId[] {

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: well-marked-app</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      a { color: #00539b; }
+      header { display: flex; gap: 32px; align-items: center; padding: 12px 32px; border-bottom: 1px solid #767676; }
+      header ul, .crumbs, .tags, .pages, footer ul, .tiles, .products, .feed { list-style: none; margin: 0; padding: 0; }
+      header ul, .crumbs, .tags, .pages { display: flex; gap: 16px; }
+      .crumbs li + li::before { content: "/"; margin-right: 16px; }
+      main { max-width: 960px; padding: 24px 32px; }
+      h1 { font-size: 28px; margin: 0 0 16px; }
+      h2 { font-size: 22px; margin: 32px 0 12px; }
+      h3 { font-size: 18px; margin: 0 0 4px; }
+      p { margin: 0 0 16px; }
+      .tiles, .products { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+      .tiles li, .products li { border: 1px solid #767676; padding: 12px; }
+      .figure { font-size: 28px; font-weight: 700; }
+      .products img { display: block; width: 100%; height: 48px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #767676; padding: 4px 8px; text-align: left; }
+      [role="tablist"] { display: flex; gap: 4px; }
+      [role="tab"] { border: 1px solid #767676; background: #fff; padding: 6px 12px; font: inherit; }
+      fieldset { border: 1px solid #767676; margin: 0 0 16px; }
+      label { display: block; margin: 0 0 8px; }
+      .feed li { border-bottom: 1px solid #c4c4c4; padding: 8px 0; }
+      .feed b { margin-right: 8px; }
+      footer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 24px 32px; background: #f2f2f2; }
+      pre { background: #f2f2f2; padding: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/">Outdoor shop</a>
+      <nav aria-label="Main"><ul><li><a href="/shop">Shop</a></li><li><a href="/orders">Orders</a></li><li><a href="/account">Account</a></li><li><a href="/help">Help</a></li></ul></nav>
+    </header>
+    <main>
+      <nav aria-label="Breadcrumb"><ol class="crumbs"><li><a href="/">Home</a></li><li><a href="/account">Account</a></li><li aria-current="page">Dashboard</li></ol></nav>
+      <h1>Dashboard</h1>
+      <p>A page of the kind an application has, with everything that is a list marked up as one: a menu, a breadcrumb, figures, products, tags, pagination, a feed. Tables, tabs and a form are what they are. Nothing here is a list that lacks its semantics.</p>
+
+      <h2>This month</h2>
+      <ul class="tiles" id="tiles">
+        <li><div>Orders</div><div class="figure">128</div></li>
+        <li><div>Revenue</div><div class="figure">9 420 €</div></li>
+        <li><div>Returns</div><div class="figure">6</div></li>
+        <li><div>New customers</div><div class="figure">41</div></li>
+      </ul>
+
+      <h2>Last orders</h2>
+      <table>
+        <thead><tr><th scope="col">No.</th><th scope="col">Customer</th><th scope="col">Total</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          <tr><td>1.</td><td>A. Martin</td><td>89,00 €</td><td>Sent</td></tr>
+          <tr><td>2.</td><td>B. Dupont</td><td>129,00 €</td><td>Paid</td></tr>
+          <tr><td>3.</td><td>C. Bernard</td><td>12,00 €</td><td>Sent</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Products</h2>
+      <div role="tablist" aria-label="Product views"><button role="tab" aria-selected="true" type="button">Best sellers</button><button role="tab" aria-selected="false" type="button">New</button><button role="tab" aria-selected="false" type="button">Low stock</button></div>
+      <ul class="products" id="products">
+        <li><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='48'%3E%3Crect width='200' height='48' fill='%23c9d8e6'/%3E%3C/svg%3E" alt=""><h3><a href="/p/1">Rain jacket</a></h3><p>89,00 €</p></li>
+        <li><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='48'%3E%3Crect width='200' height='48' fill='%23e6d8c9'/%3E%3C/svg%3E" alt=""><h3><a href="/p/2">Walking boots</a></h3><p>129,00 €</p></li>
+        <li><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='48'%3E%3Crect width='200' height='48' fill='%23d8e6c9'/%3E%3C/svg%3E" alt=""><h3><a href="/p/3">Wool socks</a></h3><p>12,00 €</p></li>
+        <li><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='48'%3E%3Crect width='200' height='48' fill='%23e6c9d8'/%3E%3C/svg%3E" alt=""><h3><a href="/p/4">Gloves</a></h3><p>24,00 €</p></li>
+      </ul>
+      <ul class="tags" id="tags" role="list"><li><a href="/t/1">hiking</a></li><li><a href="/t/2">rain</a></li><li><a href="/t/3">winter</a></li></ul>
+      <nav aria-label="Pages"><ul class="pages"><li><a href="?p=1" aria-current="page">1</a></li><li><a href="?p=2">2</a></li><li><a href="?p=3">3</a></li></ul></nav>
+
+      <h2>Settings</h2>
+      <form>
+        <fieldset>
+          <legend>Notifications</legend>
+          <label><input type="checkbox" checked> 1. When an order is placed</label>
+          <label><input type="checkbox"> 2. When an order is returned</label>
+          <label><input type="checkbox"> 3. Once a week, as a summary</label>
+        </fieldset>
+        <label for="shop-name">Name of the shop</label>
+        <input id="shop-name" type="text" value="Outdoor shop">
+      </form>
+
+      <h2>Activity</h2>
+      <ul class="feed" id="feed" role="list">
+        <li><b>Amélie</b><span>10:32</span><div>Sent order 128 to the carrier.</div></li>
+        <li><b>Karim</b><span>10:35</span><div>Answered a question about returns.</div></li>
+        <li><b>Amélie</b><span>10:36</span><div>Marked order 127 as delivered.</div></li>
+      </ul>
+
+      <h2>Deployment</h2>
+      <pre><code>steps:
+  - name: build
+  - name: test
+  - name: deploy</code></pre>
+      <ol>
+        <li>Build the site.</li>
+        <li>Run the tests.</li>
+        <li>Publish.</li>
+      </ol>
+    </main>
+    <footer>
+      <div><h2>Help</h2><ul id="footer-help"><li><a href="/delivery">Delivery</a></li><li><a href="/returns">Returns</a></li></ul></div>
+      <div><h2>About</h2><ul id="footer-about"><li><a href="/story">Our story</a></li><li><a href="/jobs">Jobs</a></li></ul></div>
+      <div><h2>Legal</h2><ul id="footer-legal"><li><a href="/terms">Terms</a></li><li><a href="/privacy">Privacy</a></li></ul></div>
+    </footer>
+  </body>
+</html>

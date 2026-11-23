@@ -1,0 +1,14 @@
+{
+  "description": "Names and values in pairs outside dl and table: advisory. Rows of a name and a value side by side in two styles (with and without a wrapper per pair, the second in French), lines separated by br that each read name, colon, value, and blocks that do the same with the French space before the colon. Not reported as pairs: a description list, a table, two pairs only, a form, a timetable with hours, sentences that contain a colon, titles of articles that hold a colon and are links. The feed of messages and those titles are series of blocks of one shape (advisory), not pairs. Nothing is fail or likely.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#rows", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/key-value", "flags": ["sideBySide"] },
+    { "selector": "#flat", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/key-value", "flags": ["sideBySide"] },
+    { "selector": "#colon-lines", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/key-value", "flags": ["colonLines", "lineBreaks"] },
+    { "selector": "#colon-blocks", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/key-value", "flags": ["colonLines"] },
+    { "selector": "#feed", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["cards"] },
+    { "selector": "#titles", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

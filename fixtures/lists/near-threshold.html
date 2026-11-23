@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: near-threshold</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .row img { flex: none; }
+      .steps > div { margin: 0 0 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Pairs of cases on either side of a limit. Two bullets make a list and one does not; three dashes make one and two are held back; numbers have to start at the beginning of their sequence; three letters, not two; an image is a bullet up to 24 CSS pixels, and it takes three of them.</p>
+
+      <section id="two-bullets">
+        <div>• First of two</div>
+        <div>• Second of two</div>
+      </section>
+      <p>One bullet, then text without one.</p>
+
+      <section id="one-bullet">
+        <div>• Only one</div>
+        <div>A line without a bullet</div>
+      </section>
+      <p>Three lines that start with a hyphen.</p>
+
+      <section id="three-dashes">
+        <div>- bread</div>
+        <div>- butter</div>
+        <div>- jam</div>
+      </section>
+      <p>Two lines that start with a hyphen.</p>
+
+      <section id="two-dashes">
+        <div>- bread</div>
+        <div>- butter</div>
+      </section>
+      <p>Numbers that start at 1, and numbers that start at 4.</p>
+
+      <section id="from-one">
+        <div>1) Open the box</div>
+        <div>2) Remove the film</div>
+      </section>
+      <p>A list that goes on from an earlier page.</p>
+
+      <section id="from-four">
+        <div>4) Plug in the cable</div>
+        <div>5) Press the button</div>
+      </section>
+      <p>Numbers that do not follow each other.</p>
+
+      <section id="not-sequential">
+        <div>3. Rue des Lilas</div>
+        <div>17. Rue des Lilas</div>
+        <div>42. Rue des Lilas</div>
+      </section>
+      <p>Three letters, then two.</p>
+
+      <section id="three-letters">
+        <div>a. Paper</div>
+        <div>b. Glass</div>
+        <div>c. Metal</div>
+      </section>
+      <p>Roman numerals.</p>
+
+      <section id="roman">
+        <div>i. Preface</div>
+        <div>ii. Foreword</div>
+        <div>iii. Introduction</div>
+      </section>
+      <p>The same image before each line, 24 pixels, then 40 pixels.</p>
+
+      <section id="image-24">
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="24" height="24"><span>Small image, first line</span></div>
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="24" height="24"><span>Small image, second line</span></div>
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="24" height="24"><span>Small image, third line</span></div>
+      </section>
+      <p>The same image before two lines only.</p>
+
+      <section id="image-pair">
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="24" height="24"><span>Edit this page</span></div>
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="24" height="24"><span>Print this page</span></div>
+      </section>
+      <p>Too large to be a bullet: a picture beside a name.</p>
+
+      <section id="image-40">
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="40" height="40"><span>Large image, first line</span></div>
+        <div class="row"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%2300539b'/%3E%3C/svg%3E" alt="" width="40" height="40"><span>Large image, second line</span></div>
+      </section>
+      <p>Numbered blocks that each head a paragraph: steps, or the titles of sections.</p>
+
+      <section id="steps" class="steps">
+        <div><div>1. Register</div><p>Create an account with your e-mail address and choose a password of twelve characters or more.</p></div>
+        <div><div>2. Confirm</div><p>Open the message we send you and follow the link in it within twenty-four hours.</p></div>
+        <div><div>3. Sign in</div><p>Come back to this page and sign in with the address and the password you chose.</p></div>
+      </section>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

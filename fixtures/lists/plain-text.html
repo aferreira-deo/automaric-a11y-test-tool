@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: plain-text</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p, address, pre, blockquote { margin: 0 0 16px; }
+      h2 { font-size: 22px; margin: 24px 0 8px; }
+      address { font-style: normal; }
+      .verse > div { margin: 0; }
+      .sig > div { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h2>Texte courant</h2>
+      <p>Ce texte est en français. Il contient des tirets – comme ceux-ci – au milieu des phrases, des deux-points : en voici un, et des nombres comme 1. ou 2. qui ne commencent aucune ligne. Rien de tout cela n’est une liste.</p>
+      <p>– Une seule ligne qui commence par un tiret, comme une incise ou une réplique isolée.</p>
+      <p>Le paragraphe suivant est un dialogue, avec des tirets cadratins en début de réplique.</p>
+      <p>— Tu viens demain ?<br>— Je ne sais pas encore.<br>— Préviens-moi.</p>
+
+      <h2>Adresses</h2>
+      <address>Mairie de Lyon<br>1 place de la Comédie<br>69001 Lyon<br>Téléphone : 04 72 10 30 30</address>
+      <div class="sig"><div>Jeanne Moreau</div><div>Directrice de la communication</div><div>Ville de Lyon</div></div>
+
+      <h2>Poème</h2>
+      <p>Demain, dès l’aube, à l’heure où blanchit la campagne,<br>Je partirai. Vois-tu, je sais que tu m’attends.<br>J’irai par la forêt, j’irai par la montagne.<br>Je ne puis demeurer loin de toi plus longtemps.</p>
+      <div class="verse"><div>Sous le pont Mirabeau coule la Seine</div><div>Et nos amours</div><div>Faut-il qu’il m’en souvienne</div><div>La joie venait toujours après la peine</div></div>
+
+      <h2>Code</h2>
+      <pre><code>1. premier
+2. deuxième
+- un
+- deux
+* trois</code></pre>
+      <p><code>- option</code> et <code>* joker</code> sont des exemples dans une phrase.</p>
+
+      <h2>Autres écritures</h2>
+      <p lang="ar" dir="rtl">هذا نص عربي عادي من عدة جمل. لا يبدأ أي سطر فيه برقم أو بعلامة. وهو ليس قائمة.</p>
+      <p lang="ja">これは普通の日本語の文章です。箇条書きではありません。<br>二行目も普通の文です。<br>三行目も同じです。</p>
+      <p lang="ru">Это обычный русский текст. В нём нет списков.<br>А. С. Пушкин родился в 1799 году.<br>Л. Н. Толстой родился в 1828 году.</p>
+      <p lang="el">Αυτό είναι ένα απλό ελληνικό κείμενο, χωρίς καμία λίστα.</p>
+
+      <h2>Citations et notes</h2>
+      <blockquote>« La simplicité est la sophistication suprême. »</blockquote>
+      <p>1 Les prix s’entendent toutes taxes comprises.<br>2 La livraison est en sus.</p>
+      <p>2026 a été une année chargée.<br>2027 le sera davantage.</p>
+      <p>Dernier paragraphe de texte courant.</p>
+    </main>
+  </body>
+</html>

@@ -33,7 +33,7 @@ Options:
       --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
                         available: ${registeredChecks().join(', ')})
       --config <file>   JSON file with settings (checks, focus, icon, headings,
-                        adjudication); the options given here win over it
+                        lists, adjudication); the options given here win over it
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -52,9 +52,9 @@ asked, one line on stderr names the model and the host it is on.
       --ai-allow-remote     Allow an endpoint that is not on this machine: text
                             and captures of the page are sent to it. It has to
                             be an https URL
-      --ai-lower-on-no      Lower a "likely" heading candidate to "info" when the
-                            model says it is not a heading. Off by default: the
-                            finding stays listed, with the verdict shown
+      --ai-lower-on-no      Lower a "likely" heading or list candidate to "info"
+                            when the model says it is not one. Off by default:
+                            the finding stays listed, with the verdict shown
       --ai-text-only        Send no captures (for a model without vision)
       --ai-cache <file>     Where verdicts are kept between runs
                             (default: ${DEFAULT_CACHE_FILE})
@@ -89,7 +89,7 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`The config file ${file} has to hold a JSON object.`);
   const input = value as Record<string, unknown>;
-  for (const section of ['focus', 'icon', 'headings', 'adjudication']) {
+  for (const section of ['focus', 'icon', 'headings', 'lists', 'adjudication']) {
     const part = input[section];
     if (part !== undefined && (part === null || typeof part !== 'object' || Array.isArray(part))) {
       throw new Error(`"${section}" in the config file ${file} has to be an object.`);
@@ -188,7 +188,10 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   if (values['ai-label'] !== undefined) adjudication.providerLabel = values['ai-label'];
   if (values['ai-allow-remote']) adjudication.allowRemote = true;
   if (values['ai-text-only']) adjudication.sendImages = false;
-  if (values['ai-lower-on-no']) adjudication.headingNoStatus = 'info';
+  if (values['ai-lower-on-no']) {
+    adjudication.headingNoStatus = 'info';
+    adjudication.listNoStatus = 'info';
+  }
   if (values['no-ai']) adjudication.provider = 'none';
   // Asked for here or in the environment: that selects the adapter, whatever the file says. From
   // the file alone, an endpoint or a model selects it unless the file names a provider itself.

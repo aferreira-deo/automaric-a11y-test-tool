@@ -1,0 +1,10 @@
+{
+  "description": "A bulleted list without semantics inside an open shadow root and a numbered one inside a same-origin iframe with a border and padding: both likely, with captures. The real lists next to them, exposed by the accessibility tree of each frame, are not reported. The same document in an iframe that is rotated and scaled is not looked into.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#host >>> #list", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "frame": "", "flags": ["bullet"] },
+    { "selector": "#list", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "frame": "#frame", "flags": ["number"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

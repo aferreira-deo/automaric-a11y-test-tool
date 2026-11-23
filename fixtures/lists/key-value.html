@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: key-value</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section, dl, table, form { margin: 0 0 24px; }
+      .pairs > div { display: flex; gap: 16px; }
+      .key { width: 160px; font-weight: 700; }
+      .flat { display: grid; grid-template-columns: 160px 1fr; column-gap: 16px; }
+      .flat .k { color: #595959; }
+      dl { display: grid; grid-template-columns: 160px 1fr; column-gap: 16px; }
+      dt { font-weight: 700; }
+      dd { margin: 0; }
+      td, th { padding: 2px 16px 2px 0; text-align: left; }
+      label { display: inline-block; width: 160px; font-weight: 700; }
+      form > div { margin: 0 0 8px; }
+      .feed > div { margin: 0 0 12px; }
+      .name { font-weight: 700; margin-right: 8px; }
+      .time { color: #595959; }
+      .titles a { display: block; color: #00539b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Names and values laid out in pairs, outside a description list and outside a table. They are reported as advisory. Under them, pairs that have their semantics, and layouts that only resemble pairs.</p>
+
+      <section class="pairs" id="rows">
+        <div><span class="key">Reference</span><span>FR-2026-00418</span></div>
+        <div><span class="key">Date of issue</span><span>12 March 2026</span></div>
+        <div><span class="key">Amount</span><span>248,00 €</span></div>
+        <div><span class="key">Status</span><span>Paid</span></div>
+      </section>
+      <p>The same without a wrapper around each pair, in French.</p>
+
+      <section class="flat" id="flat" lang="fr">
+        <span class="k">Référence</span><span>FR-2026-00418</span>
+        <span class="k">Date d’émission</span><span>12 mars 2026</span>
+        <span class="k">Montant</span><span>248,00 €</span>
+      </section>
+      <p>Lines that each give a name, a colon and a value.</p>
+
+      <p id="colon-lines">Weight: 1.2 kg<br>Width: 34 cm<br>Height: 21 cm<br>Depth: 2 cm</p>
+      <p>The same in blocks, with the name in bold and the French spacing before the colon.</p>
+
+      <section id="colon-blocks" lang="fr">
+        <div><b>Poids :</b> 1,2 kg</div>
+        <div><b>Largeur :</b> 34 cm</div>
+        <div><b>Hauteur :</b> 21 cm</div>
+      </section>
+      <p>Pairs with their semantics: a description list and a table.</p>
+
+      <dl id="real-dl"><dt>Reference</dt><dd>FR-2026-00418</dd><dt>Amount</dt><dd>248,00 €</dd><dt>Status</dt><dd>Paid</dd></dl>
+      <table id="table">
+        <tr><th scope="row">Reference</th><td>FR-2026-00418</td></tr>
+        <tr><th scope="row">Amount</th><td>248,00 €</td></tr>
+        <tr><th scope="row">Status</th><td>Paid</td></tr>
+      </table>
+      <p>Two pairs only, a form, a feed of messages, a timetable without a colon after the hour, and sentences with a colon in them.</p>
+
+      <section class="pairs" id="two-rows">
+        <div><span class="key">Reference</span><span>FR-2026-00418</span></div>
+        <div><span class="key">Amount</span><span>248,00 €</span></div>
+      </section>
+      <form id="form">
+        <div><label for="f1">Given name</label><input id="f1" type="text"></div>
+        <div><label for="f2">Family name</label><input id="f2" type="text"></div>
+        <div><label for="f3">E-mail address</label><input id="f3" type="email"></div>
+      </form>
+      <section class="feed" id="feed">
+        <div><div><span class="name">Amélie</span><span class="time">10:32</span></div><div>Has anyone seen the minutes of the last meeting?</div></div>
+        <div><div><span class="name">Karim</span><span class="time">10:35</span></div><div>They are in the shared folder, under March.</div></div>
+        <div><div><span class="name">Amélie</span><span class="time">10:36</span></div><div>Found them, thank you.</div></div>
+      </section>
+      <section class="titles" id="titles">
+        <a href="/1">Accessibility: where to start</a>
+        <a href="/2">Lists: what a screen reader announces</a>
+        <a href="/3">Headings: levels and landmarks</a>
+      </section>
+      <p id="timetable">09:00 Doors open<br>09:30 Welcome<br>10:00 First talk</p>
+      <p id="sentences">There is one thing to remember: the office is closed on Mondays.<br>There is another: nobody answers the telephone at lunch time.<br>And a last one: appointments are made on line.</p>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

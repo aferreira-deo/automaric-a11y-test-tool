@@ -47,9 +47,9 @@ export class A11yVision {
   }
 
   /**
-   * Has a model judge the candidates that deterministic code found (at present: heading
-   * candidates). Without this call, and without `adjudication` in `options`, no model is asked
-   * and nothing is sent anywhere.
+   * Has a model judge the candidates that deterministic code found (at present: heading candidates
+   * and series of lines with bullets or numbers). Without this call, and without `adjudication` in
+   * `options`, no model is asked and nothing is sent anywhere.
    *
    *   scanner.withAdjudication({ baseUrl: 'http://127.0.0.1:<port>/v1', model: '<model>' })
    *

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: content-visibility</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; padding: 32px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      .tall { height: 2400px; }
+      /* Off screen, the browser does not render what is in here, and leaves it out of the accessibility tree. */
+      footer { content-visibility: auto; contain-intrinsic-size: auto 300px; padding: 24px 32px; background: #f2f2f2; }
+      .closed { content-visibility: hidden; height: 40px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>The footer of this page is far below the window and has content-visibility: auto, so the browser skips it until it is scrolled to. It holds a real list and a bulleted list without semantics. A panel with content-visibility: hidden holds another bulleted list that nobody can see.</p>
+      <section id="top-list">
+        <div>• Wholemeal flour</div>
+        <div>• Fresh yeast</div>
+      </section>
+      <div class="tall"><p>A long stretch of page between the top and the footer.</p></div>
+      <div class="closed"><section id="hidden-list"><div>• Hidden line one</div><div>• Hidden line two</div></section></div>
+    </main>
+    <footer>
+      <ul id="real-list"><li>• Delivery</li><li>• Returns</li><li>• Payment</li></ul>
+      <section id="footer-list">
+        <div>• Terms of sale</div>
+        <div>• Privacy</div>
+        <div>• Contact</div>
+      </section>
+      <p>Closing paragraph of the footer.</p>
+    </footer>
+  </body>
+</html>

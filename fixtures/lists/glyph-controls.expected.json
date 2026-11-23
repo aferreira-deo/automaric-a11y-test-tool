@@ -1,0 +1,18 @@
+{
+  "description": "Precision controls for bullets and numbers. Real lists (ul, ol, role list, dl) whose items start with a glyph, one bulleted line alone, a French dialogue with em dashes, a poem and an address on lines separated by br, code, a ranking in a table, numbered headings of sections, lettered options of a question in labels, price reductions that start with a minus sign, a bulleted list hidden from assistive technology, a menu with a different icon per link, a breadcrumb and a row of links with separators drawn by ::before, links inside a sentence, three lines with three icons cut out of one sprite, closed details. None is fail or likely. Dates that count up from 12, two footnotes with an asterisk, two names with initials, and the titles of two panels with the same dot before each are held back as info, with the reason as a flag. The two real lists without markers are the inventory of list-style none; the rows of links and of cards are advisory.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#dates", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "startsMidSequence"] },
+    { "selector": "#footnotes", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "fewWeakItems"] },
+    { "selector": "#initials", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "fewLetterItems"] },
+    { "selector": "#panels", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["shape", "fewGraphicItems", "itemsHeadText"] },
+    { "selector": "#real-ul", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#real-ol", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#prices", "check": "lists", "status": "advisory", "rule": "lists/repeated-structure", "flags": ["cards"] },
+    { "selector": "#menu", "check": "lists", "status": "advisory", "rule": "lists/repeated-structure", "flags": ["links", "navigation"] },
+    { "selector": "#crumbs", "check": "lists", "status": "advisory", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "#toolbar", "check": "lists", "status": "advisory", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

@@ -1,4 +1,5 @@
 import { headingJudgements } from './checks/headings-adjudication.js';
+import { listJudgements } from './checks/lists-adjudication.js';
 import { sortFindings } from './run.js';
 import type { AiEvidence, AiProblem, CheckId, Config, Finding, JsonValue, Png, Snapshot, Verdict } from './types.js';
 
@@ -51,6 +52,7 @@ type JudgementSource = (snapshot: Snapshot, findings: Finding[], config: Config)
 
 const SOURCES: Partial<Record<CheckId, JudgementSource>> = {
   headings: headingJudgements,
+  lists: listJudgements,
 };
 
 /**

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: content-visibility</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; padding: 32px; }
+      p { margin: 0 0 16px; }
+      .title, h2 { font-size: 26px; font-weight: 700; margin: 24px 0 8px; }
+      .tall { height: 2400px; }
+      /* Off screen, the browser does not render what is in here, and leaves it out of the accessibility tree. */
+      footer { content-visibility: auto; contain-intrinsic-size: auto 300px; padding: 24px 32px; background: #f2f2f2; max-width: 640px; }
+      .closed { content-visibility: hidden; height: 40px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Body text of the page, long enough to set the body style: sixteen pixels, normal weight. A second sentence makes sure of it, and a third one adds what is still missing for the count of characters to leave no doubt about what body text looks like on this page.</p>
+      <div class="tall"><p>A long stretch of page between the top and the footer, with one more sentence of body text in it.</p></div>
+      <div class="closed"><div class="title" id="hidden-title">A title nobody can see</div><p>Body text under it.</p></div>
+    </main>
+    <footer>
+      <h2 id="real">A real heading in the footer</h2>
+      <p>Body text under the real heading, in the footer that the browser skips while it is off screen.</p>
+      <div class="title" id="unmarked">A title without heading semantics</div>
+      <p>Body text under the title that is not marked up as a heading.</p>
+    </footer>
+  </body>
+</html>

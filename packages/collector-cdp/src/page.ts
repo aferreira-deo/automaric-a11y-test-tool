@@ -224,6 +224,24 @@ export async function withStablePage<T>(
         sameLineMinOverlap: config.headings.sameLineMinOverlap,
         mergeMaxGapEm: config.headings.mergeMaxGapEm,
       },
+      lists: {
+        lineStartChars: config.lists.lineStartChars,
+        maxAncestorLevels: config.lists.maxAncestorLevels,
+        markerAncestorLevels: config.lists.markerAncestorLevels,
+        maxGroups: config.lists.maxGroups,
+        maxGroupItems: config.lists.maxGroupItems,
+        maxListElements: config.lists.maxListElements,
+        markerMinSizeCssPx: config.lists.markerMinSizeCssPx,
+        markerMaxSizeCssPx: config.lists.markerMaxSizeCssPx,
+        markerMaxGapEm: config.lists.markerMaxGapEm,
+        markerRoomEm: config.lists.markerRoomEm,
+        shapeDepth: config.lists.shapeDepth,
+        minRepeatedItems: config.lists.minRepeatedItems,
+        itemTextMaxChars: config.lists.itemTextMaxChars,
+        clipMarginCssPx: config.lists.clipMarginCssPx,
+        clipMarkerRoomCssPx: config.lists.clipMarkerRoomCssPx,
+        sameRowMinOverlap: config.lists.sameRowMinOverlap,
+      },
     };
     await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);
     agentReady = true;

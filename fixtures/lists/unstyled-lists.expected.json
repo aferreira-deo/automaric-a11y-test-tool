@@ -1,0 +1,11 @@
+{
+  "description": "Real lists that show no markers (list-style none): info only, since Safari not exposing them as lists is platform behaviour. Not listed: a list with markers, a list with an explicit role list, a list whose items draw their own bullet with ::before, a list inside a navigation landmark, a description list, a list made with ARIA roles. Nothing is fail, likely or advisory.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#no-markers", "check": "lists", "status": "info", "wcag": "1.3.1", "rule": "lists/list-style-none" },
+    { "selector": "#ordered-no-markers", "check": "lists", "status": "info", "wcag": "1.3.1", "rule": "lists/list-style-none" },
+    { "selector": "#flex-row", "check": "lists", "status": "info", "wcag": "1.3.1", "rule": "lists/list-style-none" },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

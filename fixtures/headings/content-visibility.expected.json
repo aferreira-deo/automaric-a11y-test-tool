@@ -1,0 +1,9 @@
+{
+  "description": "A footer with content-visibility: auto, far below the window. Chrome does not render it there and leaves it out of the accessibility tree, so its real heading would look like text styled as a heading. The scan has it rendered first: the real heading is not reported, and the title without semantics under it is likely. A title inside content-visibility: hidden is not read at all.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#unmarked", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/unmarked-heading", "flags": ["matchesHeadingStyle"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

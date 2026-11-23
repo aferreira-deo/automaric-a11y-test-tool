@@ -17,6 +17,7 @@ export interface AgentOptions {
   invisibleCoverMaxOpacity: number;
   icon: AgentIconOptions;
   headings: AgentHeadingsOptions;
+  lists: AgentListsOptions;
 }
 
 /** Subset of HeadingsConfig the agent needs; documented there. */
@@ -31,6 +32,109 @@ export interface AgentHeadingsOptions {
   clipBelowCssPx: number;
   sameLineMinOverlap: number;
   mergeMaxGapEm: number;
+}
+
+/** Subset of ListsConfig the agent needs; documented there. */
+export interface AgentListsOptions {
+  lineStartChars: number;
+  maxAncestorLevels: number;
+  markerAncestorLevels: number;
+  maxGroups: number;
+  maxGroupItems: number;
+  maxListElements: number;
+  markerMinSizeCssPx: number;
+  markerMaxSizeCssPx: number;
+  markerMaxGapEm: number;
+  markerRoomEm: number;
+  shapeDepth: number;
+  minRepeatedItems: number;
+  itemTextMaxChars: number;
+  clipMarginCssPx: number;
+  clipMarkerRoomCssPx: number;
+  sameRowMinOverlap: number;
+}
+
+/** Mirror ListMarker, ListLine, ListBlock, ListGroupItem, ListGroup and ListElement of core. */
+export interface AgentListMarker {
+  kind: 'pseudo-text' | 'pseudo-counter' | 'pseudo-shape' | 'image' | 'shape' | 'list-item';
+  text: string;
+  key: string;
+}
+
+export interface AgentListLine {
+  start: string;
+  box: AgentRect;
+  marker?: AgentListMarker;
+}
+
+export interface AgentListBlock {
+  selector: string;
+  frame: string;
+  tag: string;
+  text: string;
+  chars: number;
+  words: number;
+  box: AgentRect;
+  lines: number;
+  firstLine: AgentRect;
+  style: AgentTextStyle;
+  contexts: AgentTextContext[];
+  inList: boolean;
+  heading: boolean;
+  rtl: boolean;
+  chain: number[];
+  segments: AgentListLine[];
+}
+
+export interface AgentListGroupItem {
+  box: AgentRect;
+  ord: number;
+  end: number;
+  blocks: number;
+  chars: number;
+  links: number;
+  linkChars: number;
+  buttonChars: number;
+  controls: number;
+  graphics: number;
+  lists: number;
+  heading: 'none' | 'plain' | 'link';
+  text: string;
+}
+
+export interface AgentListGroup {
+  selector: string;
+  frame: string;
+  ord: number;
+  end: number;
+  count: number;
+  looseChars: number;
+  items: AgentListGroupItem[];
+  navigation: boolean;
+  target: number;
+}
+
+export interface AgentListElement {
+  kind: 'presentational' | 'unstyled';
+  selector: string;
+  frame: string;
+  tag: string;
+  box: AgentRect;
+  ord: number;
+  items: number;
+  markers: number;
+  markersInside: boolean;
+  target: number;
+}
+
+export interface AgentListSurvey {
+  blocks: AgentListBlock[];
+  totalBlocks: number;
+  groups: AgentListGroup[];
+  totalGroups: number;
+  lists: AgentListElement[];
+  totalLists: number;
+  exposedLists: number;
 }
 
 /** Mirrors TextContext, TextStyle and TextBlock of core (the agent cannot import). */
@@ -244,8 +348,17 @@ export interface Agent {
   markHeading(element: unknown, level: number): boolean;
   /** True for a frame element whose document the agent can look into. */
   frameReadable(element: unknown): boolean;
+  /** Has the browser render what it skips (`content-visibility: auto`), until cleanup(). Called before the accessibility tree and the text are read. */
+  renderAll(): Promise<void>;
   headingSurvey(): AgentHeadingSurvey;
   prepareHeading(index: number): Promise<AgentHeadingPrepared>;
+  /** Records that the accessibility tree exposes this element as a list or a description list. Called on the node itself. */
+  markList(element: unknown): boolean;
+  listSurvey(): AgentListSurvey;
+  /** Selectors of elements of the last list survey, by their position; null for a position it does not know. */
+  listSelectors(ords: number[]): (string | null)[];
+  /** Scrolls what a finding of the lists check is about into view and says what to capture. */
+  prepareList(kind: 'blocks' | 'elements', ids: number[]): Promise<AgentHeadingPrepared>;
   cleanup(): void;
 }
 
@@ -1691,6 +1804,69 @@ export function agentFactory(options: AgentOptions): Agent {
     return !!element && (element as Node).nodeType === 1 && isFrame(element as Element) && frameDocument(element as Element) !== null;
   }
 
+  /**
+   * Rendering that the browser skips is switched on for as long as text is read: with
+   * `content-visibility: auto`, what is off screen is not laid out, and Chrome leaves it out of
+   * the accessibility tree as well (verified against Chrome: a list inside such a subtree has no
+   * node in `Accessibility.getFullAXTree` until it is rendered). Text read from the DOM there
+   * would look like text without any semantics. A reader gets that content rendered on scrolling
+   * to it, so it is rendered here, by a constructed style sheet that cleanup() removes.
+   *
+   * What the author hides with `content-visibility: hidden` must stay unread: those elements are
+   * recorded first, and the walk passes them over.
+   */
+  const RENDER_ALL_CSS = '*,*::before,*::after{content-visibility:visible!important}';
+  const contentHidden = new WeakSet<Element>();
+  let renderedAll = false;
+
+  async function renderAll(): Promise<void> {
+    if (renderedAll) return;
+    renderedAll = true;
+    const roots: (Document | ShadowRoot)[] = [document];
+    let skipped = false;
+    eachElement(document, (element) => {
+      const visibility = element.ownerDocument.defaultView?.getComputedStyle(element).contentVisibility;
+      if (visibility === 'hidden') contentHidden.add(element);
+      else if (visibility === 'auto') skipped = true;
+      if (element.shadowRoot) roots.push(element.shadowRoot);
+      const doc = isFrame(element) ? frameDocument(element) : null;
+      if (doc) roots.push(doc);
+    });
+    // Nothing is skipped: the page is left alone.
+    if (!skipped) return;
+    for (const root of roots) {
+      try {
+        const doc = root.nodeType === 9 ? (root as Document) : root.ownerDocument;
+        const view = doc?.defaultView as (Window & { CSSStyleSheet: typeof CSSStyleSheet }) | null | undefined;
+        if (!view) continue;
+        const sheet = new view.CSSStyleSheet();
+        sheet.replaceSync(RENDER_ALL_CSS);
+        root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+        sheets.push({ root, sheet });
+      } catch {
+        // The content of that root stays as the browser renders it.
+      }
+    }
+    await settle();
+  }
+
+  /**
+   * True for an element that a modal dialog makes inert: the dialog was opened with showModal(),
+   * and the element is outside it. Chrome leaves such content out of the accessibility tree
+   * (verified), as it does for `inert`. Asked of the topmost such elements only: the answer is
+   * handed down to what they hold.
+   */
+  function blockedByModal(element: Element): boolean {
+    let modals: Element[];
+    try {
+      modals = [...element.ownerDocument.querySelectorAll('dialog:modal')];
+    } catch {
+      return false;
+    }
+    if (modals.length === 0 || element === element.ownerDocument.documentElement) return false;
+    return !modals.some((modal) => modal.contains(element) || element.contains(modal));
+  }
+
   function ownContexts(element: Element): AgentTextContext[] {
     const name = element.localName;
     const role = (element.getAttribute('role') ?? '').trim().toLowerCase();
@@ -1710,15 +1886,309 @@ export function agentFactory(options: AgentOptions): Agent {
     if (name === 'blockquote' || name === 'q') found.push('quote');
     if (name === 'pre' || name === 'code' || name === 'kbd' || name === 'samp') found.push('code');
     if (name === 'nav' || NAVIGATION_ROLES.includes(role)) found.push('navigation');
-    if (element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert')) found.push('ariaHidden');
+    if (element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert') || blockedByModal(element)) found.push('ariaHidden');
     return found;
   }
 
+  /** Elements the accessibility tree exposes as lists or description lists. Filled by the collector before the list survey. */
+  const listMarks = new Set<Element>();
+  /** The elements of the last list survey by position, and what each capture handle stands for. */
+  let listOrdElements: Element[] = [];
+  let listTargets: Element[][] = [];
+
+  function markList(element: unknown): boolean {
+    if (!element || (element as Node).nodeType !== 1) return false;
+    listMarks.add(element as Element);
+    return true;
+  }
+
   function headingSurvey(): AgentHeadingSurvey {
+    return textSurvey(false).survey;
+  }
+
+  function listSurvey(): AgentListSurvey {
+    return textSurvey(true).lists!;
+  }
+
+  /**
+   * Reads the blocks of visible text of the page. For the lists check (`forLists`) the same walk
+   * also records what stands before each line, where each block sits among the elements, the
+   * series of sibling elements of one shape and the lists of interest; nothing of that is done,
+   * and nothing changes, for the headings check.
+   */
+  function textSurvey(forLists: boolean): { survey: AgentHeadingSurvey; lists: AgentListSurvey | null } {
     const limits = options.headings;
     const blocks: AgentTextBlock[] = [];
     surveyedBlocks = [];
     let total = 0;
+
+    const listLimits = options.lists;
+    interface Graphic {
+      /** Client coordinates of its frame. */
+      rect: AgentRect;
+      kind: 'image' | 'shape';
+      key: string;
+      doc: Document;
+    }
+    const ords = new Map<Element, { ord: number; end: number }>();
+    const ordElements: Element[] = [];
+    let lastGraphic: Graphic | null = null;
+    const firstPieceIn = new Map<Element, Piece>();
+    const charCounts = new Map<Element, number>();
+    /** Characters of the text an element holds itself, outside its child elements. */
+    const looseCounts = new Map<Element, number>();
+    const blockCounts = new Map<Element, number>();
+    const lastBlockIn = new Map<Element, Pending>();
+    const groupParents: Element[] = [];
+    const listBlocks: AgentListBlock[] = [];
+    const listElements: AgentListElement[] = [];
+    const targets: Element[][] = [];
+    let totalLists = 0;
+    let exposedLists = 0;
+
+    const shortKey = (text: string): string => (text.length <= 160 ? text : text.length + ':' + text.slice(0, 80) + text.slice(-80));
+    const markerSized = (width: number, height: number): boolean =>
+      width >= listLimits.markerMinSizeCssPx &&
+      height >= listLimits.markerMinSizeCssPx &&
+      width <= listLimits.markerMaxSizeCssPx &&
+      height <= listLimits.markerMaxSizeCssPx;
+
+    /** A small image or inline SVG: what a bullet is when it is not a character. */
+    function noteGraphic(element: Element): void {
+      if (!element.checkVisibility(VISIBLE)) return;
+      const rect = plainRect(element.getBoundingClientRect());
+      // A picture between a bullet and text means the bullet is not at the start of that text.
+      lastGraphic = null;
+      if (!markerSized(rect.width, rect.height)) return;
+      const source =
+        element.localName === 'img'
+          ? (element as HTMLImageElement).currentSrc || element.getAttribute('src') || ''
+          : element.innerHTML.replace(/\s+/g, ' ').trim();
+      lastGraphic = {
+        rect,
+        kind: 'image',
+        key: element.localName + '|' + Math.round(rect.width) + 'x' + Math.round(rect.height) + '|' + shortKey(source),
+        doc: element.ownerDocument,
+      };
+    }
+
+    /** Generated content of `::before`, when it shows: its text, and whether it uses a counter or an image. */
+    function generated(element: Element, view: Window): { text: string; counter: boolean; image: boolean; style: CSSStyleDeclaration } | null {
+      const style = view.getComputedStyle(element, '::before');
+      const content = style.content;
+      if (!content || content === 'none' || content === 'normal') return null;
+      if (style.display === 'none' || style.visibility !== 'visible' || parseFloat(style.opacity) === 0) return null;
+      // Alternative text after a slash is not shown.
+      const shown = content.replace(/\s\/\s"(?:[^"\\]|\\.)*"$/, '');
+      let text = '';
+      const strings = /"((?:[^"\\]|\\.)*)"/g;
+      for (let match = strings.exec(shown); match; match = strings.exec(shown)) text += match[1]!.replace(/\\(.)/g, '$1');
+      return { text: text.replace(/\s+/g, ' ').trim(), counter: /counters?\(/.test(shown), image: /url\(|gradient\(/.test(shown), style };
+    }
+
+    /**
+     * Whether a list item shows its marker: it is displayed as a list item, has a list style, the
+     * marker paints, and a marker outside the item has room before it (it is cut off by a box
+     * that clips, and off the page at its edge).
+     */
+    function markerShows(item: Element, style: CSSStyleDeclaration, view: Window): { shows: boolean; inside: boolean } {
+      const no = { shows: false, inside: false };
+      if (style.display !== 'list-item') return no;
+      const type = style.listStyleType;
+      const image = style.listStyleImage;
+      if ((type === 'none' || type.startsWith('disclosure')) && image === 'none') return no;
+      const marker = view.getComputedStyle(item, '::marker');
+      if (marker.content === 'none' || marker.content === '""') return no;
+      if (image === 'none' && !(alphaOf(marker.color) > 0 && parseFloat(marker.fontSize) > 0)) return no;
+      if (style.listStylePosition === 'inside') return { shows: true, inside: true };
+      const rect = item.getBoundingClientRect();
+      const clip = clipOf(item);
+      const size = parseFloat(style.fontSize) || 0;
+      const root = item.ownerDocument.documentElement;
+      const room =
+        style.direction === 'rtl'
+          ? Math.min(clip ? clip.x + clip.width : Infinity, root.scrollWidth - view.scrollX) -
+            (rect.right - (parseFloat(style.borderRightWidth) || 0) - (parseFloat(style.paddingRight) || 0))
+          : rect.left + (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0) - Math.max(clip ? clip.x : -Infinity, -view.scrollX);
+      return { shows: room >= listLimits.markerRoomEm * size, inside: false };
+    }
+
+    /**
+     * What stands before a line of text where a bullet would: a marker or generated content of
+     * the elements this text is the first text of, or a small graphic right before it on its line.
+     */
+    function markerOf(piece: Piece, line: AgentRect): AgentListMarker | null {
+      const view = piece.holder.ownerDocument.defaultView;
+      if (!view) return null;
+      let level = 0;
+      for (let current: Element | null = piece.holder; current && level < listLimits.markerAncestorLevels; current = parentElementOf(current), level++) {
+        if (firstPieceIn.get(current) !== piece) break;
+        const style = view.getComputedStyle(current);
+        const name = current.localName;
+        // A `li` outside a list is for axe (`listitem`); `summary` shows a disclosure triangle.
+        if (style.display === 'list-item' && name !== 'li' && name !== 'summary' && placeOf(current).list === null && markerShows(current, style, view).shows) {
+          return { kind: 'list-item', text: '', key: style.listStyleType + '|' + shortKey(style.listStyleImage) };
+        }
+        const before = generated(current, view);
+        if (!before) continue;
+        if (before.counter) return { kind: 'pseudo-counter', text: '', key: shortKey(before.style.content) };
+        if (before.text !== '') {
+          if (alphaOf(before.style.color) > 0 && parseFloat(before.style.fontSize) > 0) {
+            const text = before.text.slice(0, 16);
+            return { kind: 'pseudo-text', text, key: text + '|' + (before.style.fontFamily.split(',')[0] ?? '').trim() };
+          }
+          continue;
+        }
+        const side = (...values: string[]): number => values.reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
+        const width = side(before.style.width, before.style.borderLeftWidth, before.style.borderRightWidth, before.style.paddingLeft, before.style.paddingRight);
+        const height = side(before.style.height, before.style.borderTopWidth, before.style.borderBottomWidth, before.style.paddingTop, before.style.paddingBottom);
+        const paints =
+          before.image || alphaOf(before.style.backgroundColor) > 0 || before.style.backgroundImage !== 'none' || hasBorder(before.style);
+        // An image given as content has the size of the image, which styles do not tell.
+        const sized = markerSized(width, height) || (before.image && before.style.width === 'auto');
+        if (paints && sized) {
+          return {
+            kind: 'pseudo-shape',
+            text: '',
+            key: [Math.round(width) + 'x' + Math.round(height), before.style.backgroundColor, shortKey(before.style.backgroundImage), before.style.backgroundPosition, before.style.borderRadius, shortKey(before.style.content)].join('|'),
+          };
+        }
+      }
+      const graphic = piece.before;
+      if (graphic && graphic.doc === piece.holder.ownerDocument) {
+        const rtl = view.getComputedStyle(piece.holder).direction === 'rtl';
+        const gap = rtl ? graphic.rect.x - (line.x + line.width) : line.x - (graphic.rect.x + graphic.rect.width);
+        const overlap = Math.min(graphic.rect.y + graphic.rect.height, line.y + line.height) - Math.max(graphic.rect.y, line.y);
+        if (
+          overlap >= listLimits.sameRowMinOverlap * Math.min(graphic.rect.height, line.height) &&
+          gap >= -listLimits.markerMinSizeCssPx &&
+          gap <= listLimits.markerMaxGapEm * piece.look.style.size
+        ) {
+          return { kind: graphic.kind, text: '', key: graphic.key };
+        }
+      }
+      return null;
+    }
+
+    /** A `ul`, `ol` or `menu`: recorded when its role was removed and markers still show, or when it is a list without markers. */
+    function noteListElement(element: Element): void {
+      const view = element.ownerDocument.defaultView;
+      if (!view) return;
+      const role = (element.getAttribute('role') ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+      const exposed = listMarks.has(element);
+      const presentational = (role === 'presentation' || role === 'none') && !exposed;
+      const unstyled = exposed && !element.hasAttribute('role');
+      if (!presentational && !unstyled) return;
+      // Hidden from assistive technology altogether: not a list that lost its role.
+      if (placeOf(element).contexts.has('ariaHidden')) return;
+      let items = 0;
+      let markers = 0;
+      let inside = 0;
+      let styled = false;
+      let ownBullets = false;
+      for (const child of composedChildren(element)) {
+        if (child.nodeType !== 1 || (child as Element).localName !== 'li' || !ords.has(child as Element)) continue;
+        const item = child as Element;
+        const rect = item.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || !item.checkVisibility(VISIBLE)) continue;
+        items++;
+        const style = view.getComputedStyle(item);
+        if (style.display === 'list-item' && (style.listStyleType !== 'none' || style.listStyleImage !== 'none')) styled = true;
+        const before = generated(item, view);
+        if (before && (before.text !== '' || before.image || before.counter)) ownBullets = true;
+        const shown = markerShows(item, style, view);
+        if (shown.shows) {
+          markers++;
+          if (shown.inside) inside++;
+        }
+      }
+      if (items === 0) return;
+      if (presentational && markers === 0) return;
+      if (unstyled) {
+        if (styled || ownBullets) return;
+        for (let current: Element | null = element; current; current = parentElementOf(current)) {
+          if (current.localName === 'nav' || (current.getAttribute('role') ?? '').trim().toLowerCase() === 'navigation') return;
+        }
+      }
+      const box = boxOf(element);
+      const slot = ords.get(element);
+      if (!box || !slot) return;
+      totalLists++;
+      if (listElements.length >= listLimits.maxListElements) return;
+      targets.push([element]);
+      listElements.push({
+        kind: presentational ? 'presentational' : 'unstyled',
+        selector: selectorOf(element),
+        frame: frameOf(element),
+        tag: element.localName,
+        box,
+        ord: slot.ord,
+        items,
+        markers,
+        markersInside: markers > 0 && inside === markers,
+        target: targets.length - 1,
+      });
+    }
+
+    /** Called when the walk leaves an element, once everything inside it has been visited. */
+    function afterElement(element: Element): void {
+      if (listMarks.has(element)) exposedLists++;
+      const name = element.localName;
+      if (name === 'ul' || name === 'ol' || name === 'menu') noteListElement(element);
+      if ((element.shadowRoot ?? element).childElementCount >= listLimits.minRepeatedItems || name === 'slot') groupParents.push(element);
+      // An empty element that paints a small box, or shows a glyph of an icon font: a bullet of its own.
+      if (element.firstElementChild || element.shadowRoot || /\S/.test(element.textContent ?? '')) return;
+      const view = element.ownerDocument.defaultView;
+      if (!view || !element.checkVisibility(VISIBLE)) return;
+      const rect = plainRect(element.getBoundingClientRect());
+      if (!markerSized(rect.width, rect.height)) return;
+      const style = view.getComputedStyle(element);
+      const size = Math.round(rect.width) + 'x' + Math.round(rect.height);
+      if (alphaOf(style.backgroundColor) > 0 || style.backgroundImage !== 'none' || style.maskImage !== 'none' || hasBorder(style)) {
+        lastGraphic = {
+          rect,
+          kind: 'shape',
+          // The position too: icons cut out of one sprite share everything else.
+          key: ['shape', size, style.backgroundColor, shortKey(style.backgroundImage), style.backgroundPosition, shortKey(style.maskImage), style.maskPosition, style.borderRadius].join('|'),
+          doc: element.ownerDocument,
+        };
+        return;
+      }
+      const before = generated(element, view);
+      if (before && before.text !== '' && alphaOf(before.style.color) > 0) {
+        lastGraphic = { rect, kind: 'image', key: ['glyph', before.text.slice(0, 16), (before.style.fontFamily.split(',')[0] ?? '').trim()].join('|'), doc: element.ownerDocument };
+      }
+    }
+
+    /** The element and its ancestors in its document, innermost first: position, and position of the last element inside. */
+    function chainOf(element: Element): number[] {
+      const chain: number[] = [];
+      let level = 0;
+      for (let current: Element | null = element; current && level < listLimits.maxAncestorLevels; current = parentElementOf(current), level++) {
+        const slot = ords.get(current);
+        if (!slot) break;
+        chain.push(slot.ord, slot.end);
+      }
+      return chain;
+    }
+
+    /** The lines of a block, as forced line breaks cut it. */
+    function segmentsOf(entry: Pending, page: (rect: AgentRect) => AgentRect): AgentListLine[] {
+      const out: AgentListLine[] = [];
+      entry.starts.forEach((start, index) => {
+        const pieces = entry.pieces.slice(start, entry.starts[index + 1] ?? entry.pieces.length);
+        if (pieces.length === 0) return;
+        const line = linesOf(pieces)[0]!;
+        const text = pieces
+          .map((piece, at) => (at > 0 && piece.apart ? ' ' : '') + piece.text)
+          .join('')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const marker = markerOf(pieces[0]!, line);
+        out.push({ start: text.slice(0, listLimits.lineStartChars), box: page(line), ...(marker ? { marker } : {}) });
+      });
+      return out;
+    }
 
     interface Place {
       contexts: Set<AgentTextContext>;
@@ -1726,6 +2196,8 @@ export function agentFactory(options: AgentOptions): Agent {
       inListItem: boolean;
       region: Element | null;
       heading: Element | null;
+      /** The nearest element, itself included, that the accessibility tree exposes as a list. */
+      list: Element | null;
     }
     interface Look {
       visible: boolean;
@@ -1743,10 +2215,14 @@ export function agentFactory(options: AgentOptions): Agent {
       look: Look;
       /** Something stands between this text and the text before it in its block: a forced line break, or the edge of a box. */
       apart?: boolean;
+      /** Lists: the small graphic met just before this text, with no other text in between. */
+      before?: Graphic;
     }
     interface Pending {
       pieces: Piece[];
       breaks: number;
+      /** Where each line starts in `pieces`: the first piece, and the first after each forced line break. */
+      starts: number[];
       /** Set once the block has taken in a neighbour: the element whose boxes they both are. */
       home?: Element;
     }
@@ -1772,7 +2248,7 @@ export function agentFactory(options: AgentOptions): Agent {
         if (base) break;
         chain.push(current);
       }
-      let place: Place = base ?? { contexts: new Set(), inMain: false, inListItem: false, region: null, heading: null };
+      let place: Place = base ?? { contexts: new Set(), inMain: false, inListItem: false, region: null, heading: null, list: null };
       for (let index = chain.length - 1; index >= 0; index--) {
         const current = chain[index]!;
         const own = ownContexts(current);
@@ -1786,13 +2262,15 @@ export function agentFactory(options: AgentOptions): Agent {
         }
         const isHeading = headingMarks.has(current);
         const isItem = current.localName === 'li' || (current.getAttribute('role') ?? '').trim().toLowerCase() === 'listitem';
-        if (own.length > 0 || matchesRegion || matchesMain || isHeading || isItem) {
+        const isList = listMarks.has(current);
+        if (own.length > 0 || matchesRegion || matchesMain || isHeading || isItem || isList) {
           place = {
             contexts: own.length > 0 ? new Set([...place.contexts, ...own]) : place.contexts,
             inMain: place.inMain || matchesMain,
             inListItem: place.inListItem || isItem,
             region: matchesRegion ? current : place.region,
             heading: isHeading ? current : place.heading,
+            list: isList ? current : place.list,
           };
         }
         places.set(current, place);
@@ -1950,20 +2428,31 @@ export function agentFactory(options: AgentOptions): Agent {
       // A forced line break splits the block only where the style changes across it.
       let group: Piece[] = [];
       let breaks = 0;
+      let starts: number[] = [];
       let signature = '';
       const close = (): void => {
         if (group.length === 0) return;
         total++;
         if (pending.length < limits.maxBlocks) {
-          pending.push({ pieces: group, breaks });
+          const entry: Pending = { pieces: group, breaks, starts };
+          pending.push(entry);
           for (const piece of group) {
             for (let current: Element | null = piece.holder; current; current = parentElementOf(current)) {
               textCounts.set(current, (textCounts.get(current) ?? 0) + 1);
+              if (!forLists) continue;
+              if (current === piece.holder) looseCounts.set(current, (looseCounts.get(current) ?? 0) + piece.chars);
+              if (!firstPieceIn.has(current)) firstPieceIn.set(current, piece);
+              charCounts.set(current, (charCounts.get(current) ?? 0) + piece.chars);
+              if (lastBlockIn.get(current) !== entry) {
+                lastBlockIn.set(current, entry);
+                blockCounts.set(current, (blockCounts.get(current) ?? 0) + 1);
+              }
             }
           }
         }
         group = [];
         breaks = 0;
+        starts = [];
       };
       for (const segment of segments) {
         const own = dominant(segment).look.signature;
@@ -1974,6 +2463,7 @@ export function agentFactory(options: AgentOptions): Agent {
           segment[0]!.apart = true;
         }
         if (group.length === 0) signature = own;
+        starts.push(group.length);
         group.push(...segment);
       }
       close();
@@ -1983,6 +2473,8 @@ export function agentFactory(options: AgentOptions): Agent {
       if (node.nodeType === 3) {
         const piece = pieceOf(node as Text);
         if (!piece) return;
+        if (lastGraphic) piece.before = lastGraphic;
+        lastGraphic = null;
         open ??= [[]];
         open[open.length - 1]!.push(piece);
         return;
@@ -1990,14 +2482,23 @@ export function agentFactory(options: AgentOptions): Agent {
       if (node.nodeType !== 1) return;
       const element = node as Element;
       const name = element.localName;
-      if (TEXT_SKIPPED.includes(name)) return;
+      if (TEXT_SKIPPED.includes(name)) {
+        if (forLists && (name === 'img' || name === 'svg')) noteGraphic(element);
+        return;
+      }
       const view = element.ownerDocument.defaultView;
       if (!view) return;
       const display = view.getComputedStyle(element).display;
-      if (display === 'none') return;
+      if (display === 'none' || contentHidden.has(element)) return;
       if (name === 'br') {
         if (open && open[open.length - 1]!.length > 0) open.push([]);
         return;
+      }
+      // Lists: the position of the element among the elements of the page, and of the last one inside it.
+      const slot = forLists ? { ord: ordElements.length, end: 0 } : null;
+      if (slot) {
+        ords.set(element, slot);
+        ordElements.push(element);
       }
       if (isFrame(element)) {
         flush();
@@ -2005,12 +2506,17 @@ export function agentFactory(options: AgentOptions): Agent {
         // Where a transformed frame puts its content cannot be worked out from its box.
         if (doc?.body && !inTransformedFrame(doc.body)) visit(doc.body);
         flush();
+        if (slot) slot.end = ordElements.length - 1;
         return;
       }
       const inline = display === 'inline' || display === 'contents' || display.startsWith('ruby');
       if (!inline) flush();
       for (const child of composedChildren(element)) visit(child);
       if (!inline) flush();
+      if (slot) {
+        slot.end = ordElements.length - 1;
+        afterElement(element);
+      }
     }
 
     if (document.body) visit(document.body);
@@ -2104,6 +2610,8 @@ export function agentFactory(options: AgentOptions): Agent {
           const home = sharedHome(last, entry);
           if (home) {
             entry.pieces[0]!.apart = true;
+            // The first line of the block that is taken in goes on with the last line of this one.
+            last.starts.push(...entry.starts.slice(1).map((start) => start + last.pieces.length));
             last.pieces.push(...entry.pieces);
             last.breaks += entry.breaks;
             last.home = home;
@@ -2115,7 +2623,8 @@ export function agentFactory(options: AgentOptions): Agent {
       blocksToRead.push(entry);
     }
 
-    for (const { pieces, breaks } of blocksToRead) {
+    for (const entry of blocksToRead) {
+      const { pieces, breaks } = entry;
       const first = pieces[0]!;
       const lines = linesOf(pieces);
       const offset = offsetOf(first.holder);
@@ -2142,6 +2651,27 @@ export function agentFactory(options: AgentOptions): Agent {
         .replace(/\s+/g, ' ')
         .trim();
       surveyedBlocks.push({ nodes: pieces.map((piece) => piece.node), element });
+      if (forLists) {
+        listBlocks.push({
+          selector: selectorOf(element),
+          frame: frameOf(element),
+          tag: element.localName,
+          text: text.slice(0, limits.maxTextChars),
+          chars: text.replace(/\s/g, '').length,
+          words: text.split(' ').filter(Boolean).length,
+          box: page(lines.reduce(union)),
+          lines: lines.length,
+          firstLine: page(lines[0]!),
+          style: look.style,
+          contexts: CONTEXT_ORDER.filter((context) => piecePlaces.every((own) => own.contexts.has(context))),
+          inList: piecePlaces.every((own) => own.list !== null),
+          heading: isHeading,
+          rtl: element.ownerDocument.defaultView?.getComputedStyle(element).direction === 'rtl',
+          chain: chainOf(element),
+          segments: segmentsOf(entry, page),
+        });
+        continue;
+      }
       blocks.push({
         selector: selectorOf(element),
         frame: frameOf(element),
@@ -2164,7 +2694,236 @@ export function agentFactory(options: AgentOptions): Agent {
         ...(pieces.every((piece) => piece.look.blends) ? { sameColourAsBackground: true } : {}),
       });
     }
-    return { blocks, total };
+    if (!forLists) return { survey: { blocks, total }, lists: null };
+
+    // Series of sibling elements of one shape. Looked for now, when every block of text is known.
+    const STRUCTURE_TAGS = ['table', 'thead', 'tbody', 'tfoot', 'tr', 'colgroup', 'dl', 'select', 'datalist', 'optgroup', 'ruby'];
+    const STRUCTURE_ROLES = [
+      'table', 'grid', 'treegrid', 'rowgroup', 'row', 'list', 'tablist', 'menu', 'menubar', 'listbox', 'tree', 'radiogroup', 'toolbar', 'feed', 'combobox',
+    ];
+    const NOT_IN: AgentTextContext[] = ['ariaHidden', 'button', 'link', 'label', 'code', 'tableCell', 'tableHeader', 'term', 'caption'];
+    const SHAPE_LEAVES = ['img', 'svg', 'picture', 'video', 'canvas', 'input', 'select', 'textarea'];
+    const FIELD_ROLES = ['textbox', 'searchbox', 'combobox', 'slider', 'spinbutton', 'checkbox', 'radio', 'switch'];
+    const NOT_FIELDS = ['hidden', 'button', 'submit', 'reset', 'image'];
+    const INSIDE = 'a[href],[role],button,summary,input,select,textarea,[contenteditable],img,svg,picture,video,canvas,ul,ol,dl,table';
+    const roleOf = (element: Element): string => (element.getAttribute('role') ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+    const shapeMemo: Map<Element, string>[] = [];
+    const shapeOf = (element: Element, depth: number): string => {
+      const memo = (shapeMemo[depth] ??= new Map<Element, string>());
+      const known = memo.get(element);
+      if (known !== undefined) return known;
+      let shape = element.localName;
+      if (depth > 0) {
+        const parts: string[] = [];
+        for (const child of composedChildren(element)) {
+          if (child.nodeType !== 1) continue;
+          if (!ords.has(child as Element) && !SHAPE_LEAVES.includes((child as Element).localName)) continue;
+          const own = shapeOf(child as Element, depth - 1);
+          // Two paragraphs or three: the same shape.
+          if (parts[parts.length - 1] !== own) parts.push(own);
+        }
+        if (parts.length > 0) shape += '(' + parts.join(',') + ')';
+      }
+      shape = shortKey(shape);
+      memo.set(element, shape);
+      return shape;
+    };
+    const structural = (parent: Element): boolean => {
+      if (STRUCTURE_ROLES.includes(roleOf(parent))) return true;
+      if (!STRUCTURE_TAGS.includes(parent.localName)) return false;
+      // The rows of a table used for layout are not rows to assistive technology.
+      const tableRole = parent.localName === 'dl' ? '' : roleOf(parent.closest('table') ?? parent);
+      return tableRole !== 'presentation' && tableRole !== 'none';
+    };
+    const facts = (item: Element): AgentListGroupItem => {
+      const slot = ords.get(item)!;
+      const chars = charCounts.get(item) ?? 0;
+      const isLink = (element: Element): boolean => (element.localName === 'a' && element.hasAttribute('href')) || roleOf(element) === 'link';
+      const isButton = (element: Element): boolean => {
+        const name = element.localName;
+        const type = (element.getAttribute('type') ?? '').toLowerCase();
+        return name === 'button' || name === 'summary' || roleOf(element) === 'button' || (name === 'input' && ['button', 'submit', 'reset'].includes(type));
+      };
+      const whole = { link: isLink(item), button: isButton(item) };
+      let links = whole.link ? 1 : 0;
+      let linkChars = whole.link ? chars : 0;
+      let buttonChars = whole.button ? chars : 0;
+      let controls = 0;
+      let graphics = 0;
+      // A list or a table is no item of a series, whatever stands beside it.
+      let inner = ['ul', 'ol', 'dl', 'table'].includes(item.localName) || ['list', 'table', 'grid'].includes(roleOf(item)) ? 1 : 0;
+      for (const element of item.querySelectorAll(INSIDE)) {
+        const name = element.localName;
+        const role = roleOf(element);
+        if (isLink(element)) {
+          links++;
+          if (!whole.link) linkChars += charCounts.get(element) ?? 0;
+        } else if (isButton(element)) {
+          if (!whole.button) buttonChars += charCounts.get(element) ?? 0;
+        }
+        if (name === 'select' || name === 'textarea' || FIELD_ROLES.includes(role) || element.hasAttribute('contenteditable')) controls++;
+        else if (name === 'input' && !NOT_FIELDS.includes((element.getAttribute('type') ?? '').toLowerCase())) controls++;
+        if (name === 'img' || name === 'svg' || name === 'picture' || name === 'video' || name === 'canvas') graphics++;
+        if (name === 'ul' || name === 'ol' || name === 'dl' || name === 'table' || role === 'list' || role === 'table' || role === 'grid') inner++;
+      }
+      let heading: AgentListGroupItem['heading'] = 'none';
+      for (const element of headingMarks.has(item) ? [item] : item.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')) {
+        if (!headingMarks.has(element)) continue;
+        heading = element.querySelector('a[href]') || element.closest('a[href]') ? 'link' : 'plain';
+        break;
+      }
+      return {
+        box: toPage(viewportRect(item)),
+        ord: slot.ord,
+        end: slot.end,
+        blocks: blockCounts.get(item) ?? 0,
+        chars,
+        links,
+        linkChars: Math.min(chars, linkChars),
+        buttonChars: Math.min(chars, buttonChars),
+        controls,
+        graphics,
+        lists: inner,
+        heading,
+        text: (item.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, listLimits.itemTextMaxChars),
+      };
+    };
+    const groups: AgentListGroup[] = [];
+    let totalGroups = 0;
+    groupParents.sort((a, b) => ords.get(a)!.ord - ords.get(b)!.ord);
+    for (const parent of groupParents) {
+      const place = placeOf(parent);
+      if (place.list !== null || NOT_IN.some((context) => place.contexts.has(context)) || structural(parent)) continue;
+      const kids: Element[] = [];
+      for (const child of composedChildren(parent)) {
+        if (child.nodeType !== 1 || !ords.has(child as Element)) continue;
+        const rect = (child as Element).getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && (child as Element).checkVisibility(VISIBLE)) kids.push(child as Element);
+      }
+      let series = 0;
+      for (let start = 0; start < kids.length; ) {
+        const shape = shapeOf(kids[start]!, listLimits.shapeDepth);
+        let stop = start + 1;
+        while (stop < kids.length && shapeOf(kids[stop]!, listLimits.shapeDepth) === shape) stop++;
+        const members = kids.slice(start, stop);
+        start = stop;
+        if (members.length < listLimits.minRepeatedItems) continue;
+        // Without text there is nothing to call an item: spacers, a row of pictures.
+        if (!members.some((member) => (charCounts.get(member) ?? 0) > 0)) continue;
+        totalGroups++;
+        if (groups.length >= listLimits.maxGroups) continue;
+        const measured = members.slice(0, listLimits.maxGroupItems);
+        const slot = ords.get(parent)!;
+        targets.push(measured);
+        groups.push({
+          // A second series under one parent is named after its first item, so that the two stay apart.
+          selector: selectorOf(series === 0 ? parent : members[0]!),
+          frame: frameOf(parent),
+          ord: slot.ord,
+          end: slot.end,
+          count: members.length,
+          looseChars: looseCounts.get(parent) ?? 0,
+          items: measured.map(facts),
+          navigation: place.contexts.has('navigation'),
+          target: targets.length - 1,
+        });
+        series++;
+      }
+    }
+
+    listOrdElements = ordElements;
+    listTargets = targets;
+    return {
+      survey: { blocks, total },
+      lists: { blocks: listBlocks, totalBlocks: total, groups, totalGroups, lists: listElements, totalLists, exposedLists },
+    };
+  }
+
+  function listSelectors(positions: number[]): (string | null)[] {
+    return positions.map((position) => {
+      const element = listOrdElements[position];
+      return element && element.isConnected ? selectorOf(element) : null;
+    });
+  }
+
+  /** True when content that floats over the page (fixed or sticky, outside what holds the element) lies at a point of the element's frame. */
+  function floatsOver(element: Element, x: number, y: number): boolean {
+    const doc = element.ownerDocument;
+    const view = doc.defaultView;
+    if (!view || x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight) return false;
+    let floating = false;
+    for (let current: Node | null = topElementAt(doc, x, y); current; current = composedParent(current)) {
+      if (current.nodeType !== 1) continue;
+      if (composedContains(current, element)) break;
+      const position = view.getComputedStyle(current as Element).position;
+      if (position === 'fixed' || position === 'sticky') floating = true;
+    }
+    return floating || frameCoveredAt(element, x, y);
+  }
+
+  /**
+   * Scrolls what a finding of the lists check is about into view and says what to capture: the
+   * blocks of text (`blocks`, by position in the last survey) or the elements behind a capture
+   * handle (`elements`), with a margin, as far as the window shows them.
+   */
+  async function prepareList(kind: 'blocks' | 'elements', ids: number[]): Promise<AgentHeadingPrepared> {
+    const none = { clip: null, covered: false };
+    const entries = kind === 'blocks' ? ids.map((id) => surveyedBlocks[id]).filter((entry) => entry !== undefined) : [];
+    const members = kind === 'elements' ? (listTargets[ids[0] ?? -1] ?? []) : [];
+    const anchor = kind === 'blocks' ? entries[0]?.element : members[0];
+    if (!anchor || !anchor.isConnected) return none;
+    // Registered, so that the scroll positions of what holds it are put back by cleanup().
+    keyOf(anchor);
+    ensureStableAround(anchor);
+    anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    await settle();
+    if (!anchor.isConnected || inTransformedFrame(anchor)) return none;
+    let own: AgentRect | null = null;
+    const add = (rect: AgentRect): void => {
+      if (rect.width > 0 && rect.height > 0) own = own ? union(own, rect) : rect;
+    };
+    for (const entry of entries) {
+      for (const node of entry.nodes) {
+        if (!node.isConnected || node.ownerDocument !== anchor.ownerDocument) continue;
+        const range = node.ownerDocument.createRange();
+        range.selectNodeContents(node);
+        add(plainRect(range.getBoundingClientRect()));
+      }
+    }
+    for (const member of members) {
+      if (member.isConnected && member.ownerDocument === anchor.ownerDocument) add(plainRect(member.getBoundingClientRect()));
+    }
+    const found = own as AgentRect | null;
+    if (!found) return none;
+    const view = anchor.ownerDocument.defaultView;
+    if (!view) return none;
+    const offset = frameOffset(anchor);
+    const margin = options.lists.clipMarginCssPx;
+    // The boxes of text do not hold a bullet that is drawn or generated: room is left for it on both sides.
+    const beside = margin + (kind === 'blocks' ? options.lists.clipMarkerRoomCssPx : 0);
+    let left = Math.max(0, found.x + offset.x - beside);
+    let right = Math.min(window.innerWidth, found.x + found.width + offset.x + beside);
+    let upper = Math.max(0, found.y + offset.y - margin);
+    let lower = Math.min(window.innerHeight, found.y + found.height + offset.y + margin);
+    if (view !== window) {
+      // Inside a frame, only what the frame shows.
+      left = Math.max(left, offset.x);
+      right = Math.min(right, offset.x + view.innerWidth);
+      upper = Math.max(upper, offset.y);
+      lower = Math.min(lower, offset.y + view.innerHeight);
+    }
+    if (right - left < 1 || lower - upper < 1) return none;
+    // A capture is evidence only if it shows the content: not when a banner or a dialog lies over it.
+    if (floatsOver(anchor, (left + right) / 2 - offset.x, (upper + lower) / 2 - offset.y)) return { clip: null, covered: true };
+    const x0 = Math.floor(left + window.scrollX);
+    const y0 = Math.floor(upper + window.scrollY);
+    const x1 = Math.ceil(right + window.scrollX);
+    const y1 = Math.ceil(lower + window.scrollY);
+    const shown = intersect(
+      { x: found.x + offset.x + window.scrollX, y: found.y + offset.y + window.scrollY, width: found.width, height: found.height },
+      { x: x0, y: y0, width: x1 - x0, height: y1 - y0 },
+    );
+    return { clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, target: shown, covered: false };
   }
 
   /** Scrolls a block of the last survey into view and says what to capture: the block with what is above and below it. */
@@ -2374,8 +3133,13 @@ export function agentFactory(options: AgentOptions): Agent {
     coveredBelow,
     markHeading,
     frameReadable,
+    renderAll,
     headingSurvey,
     prepareHeading,
+    markList,
+    listSurvey,
+    listSelectors,
+    prepareList,
 
     connected(key) {
       return get(key).isConnected;

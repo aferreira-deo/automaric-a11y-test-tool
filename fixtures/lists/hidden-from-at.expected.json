@@ -1,0 +1,9 @@
+{
+  "description": "A modal dialog (showModal) is open. What is outside it is inert and absent from the accessibility tree: a real list, bulleted lines, a column of links and a presentational list with bullets are not reported, because assistive technology gets none of that content. The bulleted lines inside the dialog are likely.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#inside-dialog", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

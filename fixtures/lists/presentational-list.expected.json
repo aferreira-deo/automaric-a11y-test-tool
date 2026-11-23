@@ -1,0 +1,11 @@
+{
+  "description": "Lists with role presentation or none. Likely when at least two items still show their bullet or number (markers outside with room for them, or inside). Not reported: no markers (list-style none, items displayed as blocks, transparent markers, markers cut off by a box that clips), a presentational role the browser ignores because of aria-label or tabindex (the accessibility tree still has the list), a list with its role, and one item alone.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#bullets", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/presentational-list" },
+    { "selector": "#numbers", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/presentational-list" },
+    { "selector": "#inside", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/presentational-list", "flags": ["markersInside"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

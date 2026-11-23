@@ -1,0 +1,12 @@
+{
+  "description": "A well-marked page: seven real lists whose bullets and numbers are drawn by the browser, by ::before (text and shape), by an icon, and typed in the text. As it is, nothing is fail, likely or advisory. The lists on which no item shows a list marker and none draws its own as generated text or as a generated image are the inventory of list-style none. The mutation test strips the list elements and expects every list back.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#dot", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#check", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#text-bullets", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#text-numbers", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

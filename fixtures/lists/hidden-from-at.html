@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: hidden-from-at</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      section, ul { margin: 0 0 24px; }
+      dialog { width: 420px; margin-top: 420px; border: 2px solid #1a1a1a; padding: 16px; }
+      dialog::backdrop { background: transparent; }
+      a { display: block; color: #00539b; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>A modal dialog is open on this page. Everything outside it is inert: the browser takes it out of the accessibility tree, real lists included. Content that assistive technology does not get at all is not a list that lost its semantics.</p>
+      <ul id="real-list"><li>• Delivery</li><li>• Returns</li></ul>
+      <section id="outside-dialog">
+        <div>• Wholemeal flour</div>
+        <div>• Fresh yeast</div>
+      </section>
+      <div id="links"><a href="/a">Delivery</a><a href="/b">Returns</a><a href="/c">Payment</a></div>
+      <ul id="presentational" role="presentation"><li>Bullets on a list without its role</li><li>Inert as well</li></ul>
+    </main>
+    <dialog id="dialog" aria-label="Before you go on">
+      <p>What we need from you:</p>
+      <section id="inside-dialog">
+        <div>• Your order number</div>
+        <div>• The e-mail address you ordered with</div>
+      </section>
+      <button type="button">Continue</button>
+    </dialog>
+    <script>
+      document.getElementById('dialog').showModal();
+    </script>
+  </body>
+</html>

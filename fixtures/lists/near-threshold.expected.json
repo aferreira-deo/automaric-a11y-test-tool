@@ -1,0 +1,18 @@
+{
+  "description": "Either side of each limit. Likely: two bullets, three hyphens, numbers from 1, three letters from a, roman numerals from i, the same 24 px image before three lines. Info, held back for a judgement: two hyphens (fewWeakItems), the same image before two lines only (fewGraphicItems), numbers that start at 4 (startsMidSequence), numbered blocks that each head a paragraph (itemsHeadText). Not reported: one bullet, numbers that do not follow each other, a 40 px picture before each line. A series that is reported for its bullets or numbers is not reported again as blocks of one shape.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#two-bullets", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#three-dashes", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#two-dashes", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["bullet", "fewWeakItems"] },
+    { "selector": "#from-one", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#from-four", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "startsMidSequence"] },
+    { "selector": "#three-letters", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#roman", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#image-24", "check": "lists", "status": "likely", "rule": "lists/glyph-list", "flags": ["image"] },
+    { "selector": "#image-pair", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["image", "fewGraphicItems"] },
+    { "selector": "#steps", "check": "lists", "status": "info", "rule": "lists/glyph-list-candidate", "flags": ["number", "itemsHeadText"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

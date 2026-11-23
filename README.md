@@ -3,15 +3,19 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M4. Three checks are implemented, and all run by default. None of them needs a model. When a model is
-configured it judges the heading candidates, and nothing else (see "Having a model judge candidates").
+Status: M5. Four checks are implemented, and all run by default. None of them needs a model. When a model is
+configured it judges the heading candidates and the series of lines with bullets or numbers, and nothing else
+(see "Having a model judge candidates").
 
 - `focus-indicator`: 2.4.7, 1.4.11 for the indicator, 2.4.11.
 - `icon-contrast`: 1.4.11 for the icon of controls without visible text, and for the boundary of form controls.
 - `headings`: 1.3.1 for text that looks like a heading and is not exposed as one, and for heading levels that
   contradict the visual order. It never reports a `fail`.
+- `lists`: 1.3.1 for content presented as a list (bullets, numbers) that is not exposed as one, for lists whose
+  role was removed while their markers still show, and, as advisory, for series of blocks of one shape and for
+  names and values in pairs. It never reports a `fail`.
 
-`--checks focus-indicator`, `--checks icon-contrast` or `--checks headings` runs one of them.
+`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings` or `--checks lists` runs one of them.
 
 ## Use
 
@@ -34,8 +38,9 @@ Chromium only.
 Optional, and off unless you configure it: with no provider, no model is asked, nothing is sent anywhere, and the
 report is the one deterministic code gives. There is no default endpoint and no default model.
 
-At present the model is asked one thing: for each heading candidate, whether the text functions as a heading for
-what follows it. The checks find and measure; the model only answers `yes`, `no` or `unsure`.
+At present the model is asked two things: for each heading candidate, whether the text functions as a heading for
+what follows it; and for each series of lines that open with a bullet or a number, whether it is presented as a
+list. The checks find and measure; the model only answers `yes`, `no` or `unsure`.
 
 ```sh
 node packages/cli/dist/bin.js scan https://example.com \
@@ -49,11 +54,11 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-key-env <NAME>` | `A11Y_VISION_AI_KEY_ENV` | NAME of the environment variable that holds the API key. The key is never given on the command line or in a file. Leave it out for an endpoint that takes no key. |
 | `--ai-label <text>` | | Name shown in reports for the provider (default `openai-compatible`). |
 | `--ai-allow-remote` | | Allow an endpoint that is not on this machine. It has to be an `https` URL. |
-| `--ai-lower-on-no` | | Lower a `likely` heading candidate to `info` when the model says it is not a heading (`headingNoStatus: "info"`). Off by default, see "What a verdict changes". |
+| `--ai-lower-on-no` | | Lower a `likely` heading or list candidate to `info` when the model says it is not one (`headingNoStatus: "info"` and `listNoStatus: "info"`). Off by default, see "What a verdict changes". |
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
-| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `adjudication`). Options win over the environment, which wins over the file. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `adjudication`). Options win over the environment, which wins over the file. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -78,7 +83,10 @@ const { result, adjudication } = await new A11yVision({ page })
 
 With the API nothing is cached unless `cacheFile` or `cache` is given; `adjudicator` takes an adapter of your own.
 
-**What a verdict changes.** Only the status of a heading candidate, and only between `likely` and `info`:
+**What a verdict changes.** Only the status of a heading candidate or of a series of lines with bullets or
+numbers, and only between `likely` and `info`. The table and what follows it are written for headings; lists
+follow the same rules with `listNoStatus` in place of `headingNoStatus`, and their `advisory` findings, lists
+with a removed role and the inventory are never sent:
 
 | Deterministic status | `yes` | `no` | `unsure` |
 |---|---|---|---|
@@ -337,7 +345,8 @@ What is asked and what an answer may change is decided in `core`, per check; ask
    `question` with its `questionVersion`, the `generatorVersion` of the candidate code, a `crop` with the target
    outlined or null, its `cropHash`, and a compact `context`) and an `apply(finding, ai, config)` that returns the
    finding after the verdict. `headings-adjudication.ts` is the model to copy.
-2. Register it in `SOURCES` in `packages/core/src/adjudication.ts`.
+2. Register it in `SOURCES` in `packages/core/src/adjudication.ts`. `lists-adjudication.ts` is the second
+   entry, and shows a check of which only some findings are a model's to judge.
 3. Give the candidates what `headingCandidates` gives: the id of their finding, whether a judgement could change
    anything, a capture with the place of the target in it.
 
@@ -346,6 +355,168 @@ depends on a model is never `fail`. Votes, retries, the cap on calls, the cache,
 validation of answers are in `packages/adjudicators` and need no change. A new provider is one more
 implementation of `Adjudicator` (`judge` sends one request and returns a verdict or a problem code, and never
 throws) plus a case in `createAdjudicator`.
+
+### What `lists` reports
+
+Content that is presented as a list and is not exposed as one, and three neighbours of that (1.3.1). No model is
+needed, and nothing is ever a `fail`: that lines which open with a bullet are the items of a list is read from what
+is rendered, and a tester confirms it.
+
+What has list semantics is taken from the accessibility tree of each document, not from tags: a `ul` with
+`role="presentation"` is not a list, a `div` with the role list is, and so is a `ul` whose presentational role the
+browser ignores because it also has `aria-label` or `tabindex`. Chrome exposes `ul`, `ol` and `menu` as `list`
+and `dl` as `DescriptionList`, whatever `list-style` and `display` say (verified with
+`Accessibility.getFullAXTree`). Only the list containers are marked in the page, at most `maxAxMarks` (3000) per
+document; an item has list semantics when a marked list holds it.
+
+The text is read as for `headings`: the same blocks of visible text, from the same walk, with the settings of
+`headings` for that part. On top of it, for each line: what it opens with, and where its block sits among the
+elements.
+
+**Lines with bullets or numbers** (`lists/glyph-list`, `likely`). Two or more lines, each starting with a marker,
+one under the other and starting at one edge (or centred on one axis), outside list semantics. The lines are
+either separated by `br` inside one block, or sibling blocks: each the first text of its element, the elements
+side by side under one parent, with nothing else between them. A marker is:
+
+- a bullet character (`bulletPattern`: bullets, geometric shapes, arrows, dingbats, check marks, emoji, the
+  Japanese middle dot and reference mark);
+- a hyphen, an en dash, an asterisk, a middle dot or an angle followed by a space (`weakBulletPattern`). The em
+  dash and the horizontal bar are left out on purpose: they open the lines of a dialogue in French and other
+  languages. A figure after the hyphen is a reduction, not an item (`- 20 %`);
+- a number, a letter or a numeral with what closes it, in sequence: `1.` `2)` `(3)` `1.2.` `4/` `1°`, digits of any
+  script (`١.`), one letter of any script (`a)` `(b)` `C.`), roman numerals (`ii.`), Chinese and Japanese numerals
+  (`一、`), enclosed numbers (`①`). The numbers have to follow each other in one notation; "i." is read as a roman
+  numeral or as a letter, as the lines after it say;
+- generated content of `::before`: a bullet character, a glyph of an icon font, a counter, or a small box that is
+  painted (a dot, a square, an image);
+- the same small image, inline SVG or empty painted element before every line, from `markerMinSizeCssPx` (3) to
+  `markerMaxSizeCssPx` (24), on the line and no further from the text than `markerMaxGapEm` (2);
+- a list-item marker on an element that is no `li` (`display: list-item` with a list style, in a colour that
+  paints, with room for it).
+
+A bullet in a box of its own before the text of each item (a flex row) counts as the start of that text.
+
+Held back as `info` (`lists/glyph-list-candidate`), with the reason as a flag:
+
+| Flag | What it is |
+|---|---|
+| `fewWeakItems` | Fewer than `weakMinItems` (3) lines, each opening with a hyphen, a dash or an asterisk: asides, footnotes and quoted replies open that way too. |
+| `fewGraphicItems` | Fewer than `graphicMinItems` (3) lines with the same image or drawn shape before each: two links that share an icon. |
+| `mixedGlyphs` | Lines that open with different symbols, one of them used once: symbols that label a line (a telephone, an envelope). |
+| `startsMidSequence` | Numbers that follow each other and do not start at 1, a or i: dates ("12. Mai", "13. Mai"), or a list that goes on from elsewhere. |
+| `fewLetterItems` | Fewer than `letterMinItems` (3) lines numbered "A.", "B.": initials of names. "a)" and "(a)" need two. |
+| `itemsHeadText` | Numbered lines that each have further blocks of text under them (steps, or the numbered titles of sections), and lines with any other marker that each have `headedItemMinBlocks` (3) blocks or more: the titles of panels with an icon before each. |
+
+Not reported at all: one line alone; numbers that do not follow each other; bullets side by side on one line
+(separators of a breadcrumb or of a row of links); lines that do not start at one edge; lines in different cells
+of a table; headings; text in a label, a button, a term, a caption or code; text hidden from assistive technology.
+Inside navigation the status is `advisory` (flag `navigation`): the brief asks no more of groups of links.
+
+**Lists with a removed role** (`lists/presentational-list`, `likely`). A `ul`, `ol` or `menu` with
+`role="presentation"` or `role="none"`, not exposed as a list, of which at least two items still show their
+marker: displayed as a list item, with a list style, in a colour that paints, and, for a marker outside the item,
+with `markerRoomEm` (1) of room before the item that no clipping box and no edge of the page cuts off.
+
+**Series of blocks of one shape** (`lists/repeated-structure`, `advisory`). Three or more consecutive siblings
+whose tags agree down to `shapeDepth` (3) levels (two paragraphs or three count the same), laid out in line with
+even gaps: one row, one column with a shared edge or centre, or rows that start at one edge (a grid, a row that
+wraps). The gaps may differ by `gapToleranceCssPx` (4) or `gapToleranceShare` (0.1). Flag `links`: each item is one
+link (navigation links, a breadcrumb, a tag cloud, pagination). Flag `cards`: each item has two blocks of text or
+more, or a graphic (card grids, search results, feeds). Left out: what is inside list semantics, the rows of
+tables and grids, tabs, menus, toolbars, feeds with the role, anything inside a link, a button, a label or a
+table cell, items with a form field (that is for the grouping check), items that are or hold a list or a table,
+rows of buttons, plain blocks of text, items with more than `repeatedItemMaxChars` (300) characters (prose in
+sections), blocks under each other that each have a heading of their own that is no link (the sections of a
+document), links with more text between them than separators (links inside a sentence), a series inside an item
+of a series that is reported, and whatever is reported for its bullets or as pairs.
+
+**Names and values** (`lists/key-value`, `advisory`). Three or more rows that each hold a short name and a value
+side by side, the names in one style at one edge and the values in another style or after a colon; or three or
+more lines that each read as a name of at most `keyMaxWords` (5) words, a colon and a value. Outside `dl` and
+tables. Titles that are links are not names, and neither are hours ("09:30 Welcome").
+
+**Lists without markers** (`lists/list-style-none`, `info`). A real `ul`, `ol` or `menu`, exposed as a list by
+Chrome, of which no item shows a list marker or generated text or image of its own, without an explicit role and
+outside navigation: the lists Safari exposes as a group and not as a list. That is the choice of a browser and no
+failure of the page. The rule is the one of WebKit's source, read in November 2026
+(`AccessibilityNodeObject::determineListRoleWithCleanChildren` and `AXListHelpers::childHasPseudoVisibleListItemMarkers`
+in `Source/WebCore/accessibility`), not tested in Safari: a list with an ARIA role is kept when it has an item;
+one without is kept when an item is rendered as a list item with a list style or a list image, or has
+accessible generated content in `::before`, or when the list is inside a navigation landmark. A dot drawn by
+`::before` with empty content does not count there, so such lists are in the inventory. At most
+`maxUnstyledLists` (50) are listed.
+
+`lists/survey` (`info`) gives the counts, and the flag `truncated` when something was left out: at most
+`maxCandidates` (150) findings above the inventory are reported (`likely` first, then `advisory`, then `info`,
+each in document order), `maxCaptures` (120) captures taken, `maxGroups` (400) series and `maxListElements` (400)
+lists read. A finding beyond the captures, under a fixed banner or in a place that cannot be shown carries
+`notCaptured` or `covered` and keeps its status: nothing is measured on a capture here. When the accessibility
+tree cannot be read, or a document has more lists than can be marked, nothing is above `info` (`axIncomplete`).
+
+A finding names the element that holds the items and gives their number, the first of them as text, and a capture
+of the series. Of two series under one parent, the second is named after its first line.
+
+Every pattern is an option and holds no word of any language.
+
+#### Decisions left to the owner, and their defaults
+
+- **Card grids and search results** (section 10.2 of the brief): `advisory` by default; `lists.cardListStatus:
+  "likely"` reports them as `likely`. The option takes those two values only: `fail` is turned into `likely`,
+  anything else into `advisory`, when the configuration is resolved and again where the status is computed. Rows
+  of links stay `advisory` either way.
+- **What a "no" of a model does** to a `likely` series of lines: nothing by default, as for headings
+  (`adjudication.listNoStatus: "likely"`); `"info"` or `--ai-lower-on-no` lowers it.
+- **Two lines are a list.** The brief says "two or more"; that holds for bullet characters, numbers, counters and
+  list-item markers. Three are asked for hyphens, for images and shapes, and for letters with a full
+  stop (see the table above): with two, real pages gave more asides, pairs of links with one icon and initials
+  than lists. Each limit is an option (`minItems`, `weakMinItems`, `graphicMinItems`, `letterMinItems`); the two
+  lines are still reported, as `info`, and a model can raise them.
+
+#### How the adjudicator layer takes the candidates
+
+`listCandidates(snapshot.lists, config.lists)` gives what the check reports as data: `findingId` (a fingerprint
+under the constant key `lists/glyph` for series of lines, so that the id survives a change of status and of rule
+name), `status` (`likely`, `advisory` or `info`), `adjudicate`, `crop` (or null) with `cropTarget`, and a compact
+`context` (the kind of marker, how the lines are separated, the start of up to `contextMaxItems` (12) items, the
+reasons, the text before and after).
+
+Only series of lines with bullets or numbers are sent to a model, `likely` ones and those held back as `info`,
+and not those inside navigation. The question is fixed (`LIST_QUESTION`, version `lists-1`): is the target
+presented as a list of parallel items, each introduced by a bullet, a number or a small symbol. Lists with a
+removed role are not sent (their role and their markers are facts), nor are series of blocks and pairs (their
+status is a policy), nor the inventory.
+
+### Known limits of the lists check
+
+- One viewport width and one state, as for headings: the page as it is.
+- A list is found by its markers. Lines without any (three short lines under each other) are not reported as
+  lists, whatever they look like; blocks of plain text of one shape are left out of the series as well.
+- Bullets drawn as a background image of the line, and markers inside images, canvas and SVG text, are not seen.
+  `::after` is not looked at. Of generated content only `::before` of the elements a line is the first text of
+  (up to `markerAncestorLevels`, 3) is read.
+- Two images are the same when their source and size are; two inline SVGs when their content is. The same icon
+  drawn twice with different markup is two icons. Icons cut out of one sprite are told apart by position.
+- Lines that are indented differently are not one series, so a list with one nested item under each other is
+  missed; items in two columns are found when each edge is shared by two lines.
+- A dialogue whose lines open with an en dash or a hyphen is reported as a list (`likely` from three lines): the
+  em dash is the only dash left out. Dates in German that start on the first of a month ("1. Mai", "2. Mai") read
+  as a numbered list. Sequences of letters are known for scripts whose letters follow each other in Unicode, from
+  the letters in `firstLetters`.
+- Lines in the cells of a table are never items, also in a table used for layout that does not say so with
+  `role="presentation"`: bullets as images in the cells of an old layout table are missed.
+- A series of sibling blocks is compared by tags only. Cards that differ by one optional element are two shapes
+  and may fall under three in a row; items are measured up to `maxGroupItems` (40).
+- Sibling items must share a parent within `maxAncestorLevels` (6) of their text.
+- A first item that is bare text of the element that holds the others (text, then one paragraph per further
+  item) is not counted: the series then starts at its second item and is held back (`startsMidSequence`), as
+  seen on a real page of legal text numbered a), b), c).
+- A modal dialog opened with `showModal()` makes the rest of the page inert, and Chrome takes it out of the
+  accessibility tree: nothing outside the dialog is reported (it is treated as hidden from assistive technology,
+  for headings as well). A modal dialog inside a shadow root is not noticed.
+- Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. A series
+  never spans two documents.
+- The capture shows the series as far as the window does: a list taller than the window is cut. Other covers than
+  fixed or sticky content over its middle are not looked for.
 
 ### What `icon-contrast` reports
 
@@ -422,8 +593,13 @@ that is larger than the device screen, so more of the page counts as on screen t
 The icon check also blurs the focused element before it looks at the controls, so that a focus ring is not measured
 as part of a control. Focus is put back with everything else.
 
-The headings check reads the accessibility tree of the page and of its same-origin iframes, and scrolls each block
-it reports into view to capture it. It changes nothing else.
+The headings and the lists checks read the accessibility tree of the page and of its same-origin iframes, and
+scroll what they report into view to capture it. On a page that uses `content-visibility: auto`, they also adopt a
+style sheet that has the browser render what it skips, until the scan ends: Chrome leaves skipped content out of
+the accessibility tree (verified: a list or a heading in such a subtree has no node in
+`Accessibility.getFullAXTree` while it is off screen), so text read from the DOM there would look like text
+without semantics. The page can be taller while the scan runs; what the author hides with
+`content-visibility: hidden` stays unread. They change nothing else.
 
 ### Known limits of the headings check
 
@@ -460,6 +636,8 @@ it reports into view to capture it. It changes nothing else.
   `maxBlocks` (6000) blocks are read, `maxCandidates` (150) candidates and `maxInversions` (50) contradictions
   between levels reported.
 - Heading markup on text that is not a heading is not looked for yet.
+- Outside a modal dialog opened with `showModal()`, the page is inert and absent from the accessibility tree: text
+  there is treated as hidden from assistive technology (`ariaHidden`), so a candidate there is `info` at most.
 
 ### Known limits of the icon check
 
@@ -558,4 +736,4 @@ node e2e/support/dump.mjs focus-indicator/gradient
 | `packages/cli` | `scan <url>` |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |
+| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings and lists, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |

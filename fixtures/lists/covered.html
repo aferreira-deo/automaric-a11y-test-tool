@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: covered</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      /* Taller than any window the tests use, so that the footer is the end of a page that scrolls. */
+      main { max-width: 640px; padding: 32px; min-height: 1200px; }
+      p { margin: 0 0 16px; }
+      section { margin: 0 0 24px; }
+      footer { background: #f2f2f2; padding: 24px 32px; }
+      /* A cookie banner fixed to the bottom of the window: the end of the page cannot be scrolled out from under it. */
+      .banner { position: fixed; left: 0; right: 0; bottom: 0; height: 200px; background: #fff; border-top: 2px solid #1a1a1a; padding: 12px 32px; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Two bulleted lists without list semantics. The first can be scrolled into view and is captured. The second is at the very end of the page, under a banner fixed to the bottom of the window, and cannot be shown.</p>
+      <section id="visible">
+        <div>• Wholemeal flour</div>
+        <div>• Fresh yeast</div>
+      </section>
+    </main>
+    <footer>
+      <section id="under-banner">
+        <div>• Terms of sale</div>
+        <div>• Privacy</div>
+        <div>• Contact</div>
+      </section>
+    </footer>
+    <div class="banner"><p>We use cookies to measure how many people visit this site and which pages they read.</p><button type="button">Refuse</button> <button type="button">Accept</button></div>
+  </body>
+</html>

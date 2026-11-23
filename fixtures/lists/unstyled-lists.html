@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: unstyled-lists</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      p { margin: 0 0 16px; }
+      ul, ol, dl, nav { margin: 0 0 24px; }
+      .none { list-style: none; padding: 0; }
+      .row { list-style: none; padding: 0; display: flex; gap: 16px; }
+      .own > li::before { content: "\2013"; margin-right: 8px; }
+      a { color: #00539b; }
+    </style>
+  </head>
+  <body>
+    <nav aria-label="Main">
+      <ul id="nav-list" class="row"><li><a href="/">Home</a></li><li><a href="/shop">Shop</a></li><li><a href="/help">Help</a></li></ul>
+    </nav>
+    <main>
+      <p>Real lists, all exposed as lists by Chrome. Safari does not expose a ul or ol as a list when no item shows a marker, unless the list has an explicit role or sits in a navigation landmark. That is the behaviour of a browser and not a failure of the author: such lists are an inventory.</p>
+
+      <ul id="no-markers" class="none"><li>Wholemeal flour</li><li>Fresh yeast</li><li>Olive oil</li></ul>
+      <ol id="ordered-no-markers" class="none"><li>Mix the flour.</li><li>Add the yeast.</li></ol>
+      <ul id="flex-row" class="row"><li>Monday</li><li>Tuesday</li><li>Wednesday</li></ul>
+      <p>The following keep their list role in Safari.</p>
+
+      <ul id="with-markers"><li>Flour</li><li>Yeast</li></ul>
+      <ul id="explicit-role" class="none" role="list"><li>Flour</li><li>Yeast</li></ul>
+      <ul id="own-bullets" class="none own"><li>Flour</li><li>Yeast</li></ul>
+      <dl id="description-list"><dt>Flour</dt><dd>500 g</dd><dt>Yeast</dt><dd>20 g</dd></dl>
+      <div id="aria-list" role="list"><div role="listitem">Flour</div><div role="listitem">Yeast</div></div>
+      <p>Closing paragraph of plain text.</p>
+    </main>
+  </body>
+</html>

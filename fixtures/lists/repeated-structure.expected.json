@@ -1,0 +1,14 @@
+{
+  "description": "Three or more sibling blocks of one shape, in line with even gaps, outside list semantics: advisory. A card grid and search results whose titles are headings that link (cards), a column of navigation links, a tag cloud that wraps, pagination and a breadcrumb (links). Not reported: the same cards in a real list, rows of a table and of an ARIA grid, tabs, form rows, paragraphs of prose, short sections under each other that each have a heading of their own, a pair, three blocks placed without alignment, a row of buttons, columns that each hold a real list. Nothing is fail or likely.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#cards", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["cards"] },
+    { "selector": "#results", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["cards"] },
+    { "selector": "#nav-links", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["links", "navigation"] },
+    { "selector": "#tags", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "#pages", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "#crumbs", "check": "lists", "status": "advisory", "wcag": "1.3.1", "rule": "lists/repeated-structure", "flags": ["links"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

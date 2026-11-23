@@ -1,0 +1,10 @@
+{
+  "description": "A footer with content-visibility: auto, far below the window. Chrome does not render it there and leaves it out of the accessibility tree, so its real list would look like bulleted lines without semantics. The scan has it rendered first: the real list is not reported, and the bulleted list without semantics next to it is likely, as the one at the top of the page is. A bulleted list inside content-visibility: hidden is not read at all.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#top-list", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#footer-list", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

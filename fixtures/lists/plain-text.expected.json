@@ -1,0 +1,6 @@
+{
+  "description": "Precision control: text that is not a list, in French and in other scripts. Dashes and colons inside sentences, one line that starts with a dash, a dialogue with em dashes, an address and a signature on lines of their own, a poem with br and one with a block per line, code that holds numbered and bulleted lines, Arabic, Japanese, Russian (with initials at the start of two lines) and Greek prose, a quotation, footnotes numbered without punctuation, lines that start with a year. The check reports nothing but its survey.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }]
+}

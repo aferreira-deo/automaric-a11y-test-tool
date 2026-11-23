@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lists: repeated-structure</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 900px; }
+      p { margin: 0 0 16px; }
+      h2 { font-size: 22px; margin: 24px 0 8px; }
+      h3 { font-size: 18px; margin: 0 0 4px; }
+      a { color: #00539b; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0 0 24px; }
+      .card { border: 1px solid #767676; padding: 12px; }
+      .card img { display: block; width: 100%; height: 60px; }
+      .card p { margin: 0; }
+      .results > div { margin: 0 0 16px; }
+      .results p { margin: 0; }
+      .links a { display: block; }
+      .tags { display: flex; flex-wrap: wrap; gap: 8px; max-width: 420px; margin: 0 0 24px; }
+      .tags a { border: 1px solid #00539b; border-radius: 12px; padding: 2px 10px; }
+      .pages { display: flex; gap: 12px; margin: 0 0 24px; }
+      .crumbs { display: flex; gap: 8px; margin: 0 0 24px; }
+      .ragged { position: relative; height: 150px; margin: 0 0 24px; }
+      .ragged > div { position: absolute; width: 150px; border: 1px solid #767676; }
+      table { border-collapse: collapse; margin: 0 0 24px; }
+      td, th { border: 1px solid #767676; padding: 4px 8px; text-align: left; }
+      .rows > div { display: flex; gap: 24px; }
+      .rows > div > span { width: 140px; }
+      form > div { margin: 0 0 12px; }
+      label { display: block; }
+      [role="tablist"] { display: flex; gap: 8px; margin: 0 0 24px; }
+      .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .columns ul { margin: 0; padding-left: 20px; }
+      .buttons { display: flex; gap: 8px; margin: 0 0 24px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Series of sibling blocks of one shape, laid out in line with even gaps, and without list semantics. They are reported as advisory. Under them, series that are not: real lists, tables, grids, tabs, forms, prose, a pair, a ragged layout.</p>
+
+      <h2>Products</h2>
+      <div class="grid" id="cards">
+        <div class="card"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='60'%3E%3Crect width='200' height='60' fill='%23c9d8e6'/%3E%3C/svg%3E" alt="Rain jacket"><h3>Rain jacket</h3><p>89,00 €</p></div>
+        <div class="card"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='60'%3E%3Crect width='200' height='60' fill='%23e6d8c9'/%3E%3C/svg%3E" alt="Walking boots"><h3>Walking boots</h3><p>129,00 €</p></div>
+        <div class="card"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='60'%3E%3Crect width='200' height='60' fill='%23d8e6c9'/%3E%3C/svg%3E" alt="Wool socks"><h3>Wool socks</h3><p>12,00 €</p></div>
+        <div class="card"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='60'%3E%3Crect width='200' height='60' fill='%23e6c9d8'/%3E%3C/svg%3E" alt="Gloves"><h3>Gloves</h3><p>24,00 €</p></div>
+        <div class="card"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='60'%3E%3Crect width='200' height='60' fill='%23c9e6e0'/%3E%3C/svg%3E" alt="Scarf"><h3>Scarf</h3><p>19,00 €</p></div>
+      </div>
+
+      <h2>Search results</h2>
+      <div class="results" id="results">
+        <div><h3><a href="/r/1">Opening hours of the town hall</a></h3><p>Monday to Friday from nine to five, Saturday morning by appointment.</p></div>
+        <div><h3><a href="/r/2">Opening hours of the library</a></h3><p>Tuesday to Saturday from ten to six, closed on public holidays.</p></div>
+        <div><h3><a href="/r/3">Opening hours of the swimming pool</a></h3><p>Every day from seven in the morning, last entry at eight in the evening.</p></div>
+      </div>
+
+      <h2>Links</h2>
+      <nav class="links" id="nav-links" aria-label="Section">
+        <a href="/a">Delivery</a><a href="/b">Returns</a><a href="/c">Payment</a><a href="/d">Contact</a>
+      </nav>
+      <div class="tags" id="tags">
+        <a href="/t/1">hiking</a><a href="/t/2">rain</a><a href="/t/3">winter</a><a href="/t/4">waterproof</a><a href="/t/5">wool</a><a href="/t/6">children</a><a href="/t/7">ultralight</a><a href="/t/8">second hand</a>
+      </div>
+      <div class="pages" id="pages"><a href="?p=1">1</a><a href="?p=2">2</a><a href="?p=3">3</a><a href="?p=4">Next</a></div>
+      <div class="crumbs" id="crumbs"><a href="/">Home</a><a href="/shop">Shop</a><a href="/shop/boots">Boots</a></div>
+
+      <h2>Not reported</h2>
+      <ul class="grid" id="real-list" style="padding: 0; list-style: disc inside">
+        <li class="card"><h3>Rain jacket</h3><p>89,00 €</p></li>
+        <li class="card"><h3>Walking boots</h3><p>129,00 €</p></li>
+        <li class="card"><h3>Wool socks</h3><p>12,00 €</p></li>
+      </ul>
+      <table id="table">
+        <tr><th>Item</th><th>Price</th></tr>
+        <tr><td>Rain jacket</td><td>89,00 €</td></tr>
+        <tr><td>Walking boots</td><td>129,00 €</td></tr>
+        <tr><td>Wool socks</td><td>12,00 €</td></tr>
+      </table>
+      <div class="rows" id="aria-grid" role="grid" aria-label="Prices">
+        <div role="row"><span role="gridcell">Rain jacket</span><span role="gridcell">89,00 €</span></div>
+        <div role="row"><span role="gridcell">Walking boots</span><span role="gridcell">129,00 €</span></div>
+        <div role="row"><span role="gridcell">Wool socks</span><span role="gridcell">12,00 €</span></div>
+      </div>
+      <div role="tablist" id="tabs" aria-label="Views"><a role="tab" href="#one" aria-selected="true">Overview</a><a role="tab" href="#two">Details</a><a role="tab" href="#three">Reviews</a></div>
+      <form id="form">
+        <div><label for="f1">Given name</label><input id="f1" type="text"></div>
+        <div><label for="f2">Family name</label><input id="f2" type="text"></div>
+        <div><label for="f3">E-mail address</label><input id="f3" type="email"></div>
+      </form>
+      <div id="prose">
+        <p>A first paragraph of plain prose, which says what it has to say in two sentences. This is the second of them.</p>
+        <p>A second paragraph of plain prose, in the same style and of about the same length. It follows the first.</p>
+        <p>A third paragraph of plain prose. Three blocks of one shape, in line and evenly spaced, and still not a list.</p>
+      </div>
+      <div id="sections">
+        <section><h3>Delivery</h3><p>Orders leave the warehouse within two working days.</p></section>
+        <section><h3>Returns</h3><p>Anything can be sent back within thirty days.</p></section>
+        <section><h3>Payment</h3><p>By card, by transfer or on delivery.</p></section>
+      </div>
+      <div class="grid" id="pair">
+        <div class="card"><h3>Standard</h3><p>Delivered in four days.</p></div>
+        <div class="card"><h3>Express</h3><p>Delivered tomorrow.</p></div>
+      </div>
+      <div class="ragged" id="ragged">
+        <div style="left: 0; top: 0"><h3>North</h3><p>12 shops</p></div>
+        <div style="left: 190px; top: 30px"><h3>South</h3><p>7 shops</p></div>
+        <div style="left: 520px; top: 5px"><h3>West</h3><p>3 shops</p></div>
+      </div>
+      <div class="buttons" id="buttons"><button type="button">Save</button><button type="button">Duplicate</button><button type="button">Delete</button></div>
+      <footer class="columns" id="columns">
+        <div><h3>Help</h3><ul><li><a href="/h1">Delivery</a></li><li><a href="/h2">Returns</a></li></ul></div>
+        <div><h3>About</h3><ul><li><a href="/a1">Our story</a></li><li><a href="/a2">Jobs</a></li></ul></div>
+        <div><h3>Legal</h3><ul><li><a href="/l1">Terms</a></li><li><a href="/l2">Privacy</a></li></ul></div>
+      </footer>
+    </main>
+  </body>
+</html>

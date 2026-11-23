@@ -1,0 +1,13 @@
+{
+  "description": "Precision control: a page of an application (menu, breadcrumb, dashboard tiles, a table with a numbered column, tabs, product cards, tags, pagination, a form with numbered options, a feed, a code block, footer columns) where everything that is a list is marked up as one. Nothing is fail, likely or advisory. The only findings are the inventory of real lists without markers that Safari would not expose: those outside navigation and without an explicit role.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#tiles", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#products", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#footer-help", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#footer-about", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "#footer-legal", "check": "lists", "status": "info", "rule": "lists/list-style-none" },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}

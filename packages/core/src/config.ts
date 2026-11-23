@@ -1,4 +1,4 @@
-import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, IconConfig } from './types.js';
+import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, IconConfig, ListsConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +6,7 @@ import type { AdjudicationConfig, CheckId, Config, FocusConfig, HeadingsConfig, 
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast', 'headings'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists'],
   focus: {
     deviceScaleFactor: 2,
     captureSizeTolerancePx: 1,
@@ -134,6 +134,59 @@ export const defaultConfig: Config = {
     extremeInversionMinSizeRatio: 1.5,
     extremeInversionMinLevelGap: 2,
   },
+  lists: {
+    lineStartChars: 64,
+    maxAncestorLevels: 6,
+    markerAncestorLevels: 3,
+    maxGroups: 400,
+    maxGroupItems: 40,
+    maxListElements: 400,
+    maxAxMarks: 3000,
+    maxCandidates: 150,
+    maxUnstyledLists: 50,
+    maxCaptures: 120,
+    maxTargetBlocks: 60,
+    clipMarginCssPx: 16,
+    clipMarkerRoomCssPx: 32,
+    messageItems: 4,
+    itemTextMaxChars: 60,
+    contextMaxItems: 12,
+    markerMinSizeCssPx: 3,
+    markerMaxSizeCssPx: 24,
+    markerMaxGapEm: 2,
+    markerRoomEm: 1,
+    shapeDepth: 3,
+    bulletPattern:
+      '^[\\u2022\\u2023\\u2043\\u204c\\u204d\\u2219\\u25a0-\\u25ff\\u2600-\\u27bf\\u2b00-\\u2bff\\u2190-\\u21ff\\u30fb\\uff65\\u203b\\u{1f300}-\\u{1faff}]\\ufe0f?\\s*',
+    weakBulletPattern: '^[-\\u2010-\\u2013*\\u00b7>\\u203a\\u00bb~]\\s+',
+    pseudoBulletPattern:
+      '^[-\\u2010-\\u2013*\\u00b7>\\u203a\\u00bb~+\\u2022\\u2023\\u2043\\u204c\\u204d\\u2219\\u25a0-\\u25ff\\u2600-\\u27bf\\u2b00-\\u2bff\\u2190-\\u21ff\\u30fb\\uff65\\u203b\\u{1f300}-\\u{1faff}]\\ufe0f?$',
+    iconGlyphPattern: '^[\\ue000-\\uf8ff\\u{f0000}-\\u{ffffd}\\u{100000}-\\u{10fffd}]+$',
+    numberPattern: '^\\(?(\\p{Nd}{1,3}(?:\\.\\p{Nd}{1,3}){0,3})(?:[.)\\]/\\u00b0]\\s+|[\\uff0e\\u3001\\uff09]\\s*)',
+    letterPattern: '^\\(?(\\p{L})([.)])\\s+',
+    romanPattern: '^\\(?([ivxlcdm]{1,7}|[IVXLCDM]{1,7})[.)]\\s+',
+    ideographicNumberPattern: '^([\\u4e00\\u4e8c\\u4e09\\u56db\\u4e94\\u516d\\u4e03\\u516b\\u4e5d\\u5341]{1,3})[\\u3001\\uff0e.\\uff09)]\\s*',
+    enclosedNumberPattern: '^([\\u2460-\\u249b\\u2776-\\u277f])\\s*',
+    firstLetters: 'aA\u03b1\u0391\u0430\u0410\u05d0\u3042\u30a2\uff41\uff21',
+    numericMinDigitShare: 0.5,
+    minItems: 2,
+    weakMinItems: 3,
+    letterMinItems: 3,
+    graphicMinItems: 3,
+    headedItemMinBlocks: 3,
+    alignToleranceCssPx: 3,
+    sameRowMinOverlap: 0.5,
+    minRepeatedItems: 3,
+    gapToleranceCssPx: 4,
+    gapToleranceShare: 0.1,
+    linkSeparatorMaxChars: 2,
+    repeatedItemMaxChars: 300,
+    cardListStatus: 'advisory',
+    keyValueMinPairs: 3,
+    keyMaxWords: 5,
+    keyValueLinePattern: '^([^:\\uff1a]{1,48}?)(?:\\s?:\\s+|\\uff1a\\s*)\\S',
+    keyEndPattern: '[:\\uff1a]$',
+  },
   adjudication: {
     provider: 'none',
     baseUrl: '',
@@ -166,6 +219,7 @@ export const defaultConfig: Config = {
     outlineWidthCssPx: 2,
     outlineGapCssPx: 3,
     headingNoStatus: 'likely',
+    listNoStatus: 'likely',
   },
 };
 
@@ -174,6 +228,7 @@ export type ConfigInput = {
   focus?: Partial<FocusConfig>;
   icon?: Partial<IconConfig>;
   headings?: Partial<HeadingsConfig>;
+  lists?: Partial<ListsConfig>;
   adjudication?: Partial<AdjudicationConfig>;
 };
 
@@ -186,6 +241,16 @@ export type ConfigInput = {
 export function clampInversionStatus(value: unknown, fallback: 'advisory' | 'likely'): 'advisory' | 'likely' {
   if (value === 'advisory' || value === 'likely') return value;
   return value === 'fail' ? 'likely' : fallback;
+}
+
+/**
+ * The status of a series of blocks of one shape (card grids, search results), whatever was
+ * configured: whether such a series is a list is a judgement and a house policy, so it is
+ * `advisory` or `likely` and never `fail`. A configured `fail` becomes `likely`, anything
+ * else that is not one of the two becomes the default.
+ */
+export function clampCardListStatus(value: unknown): 'advisory' | 'likely' {
+  return clampInversionStatus(value, 'advisory');
 }
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -208,7 +273,7 @@ function duration(value: unknown, min: number, fallback: number): number {
 /**
  * Settings of the adjudicator layer, with anything that is not a usable value put back to its
  * default: a configuration can come from a JSON file. Whatever is configured, a status that
- * depends on a model is `likely` at most (`headingNoStatus` takes `info` or `likely` only).
+ * depends on a model is `likely` at most (`headingNoStatus` and `listNoStatus` take `info` or `likely` only).
  */
 export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): AdjudicationConfig {
   const base = defaultConfig.adjudication;
@@ -246,6 +311,7 @@ export function resolveAdjudication(input: Partial<AdjudicationConfig> = {}): Ad
     outlineWidthCssPx: atLeast(merged.outlineWidthCssPx, 0, base.outlineWidthCssPx, false),
     outlineGapCssPx: atLeast(merged.outlineGapCssPx, 0, base.outlineGapCssPx, false),
     headingNoStatus: oneOf(merged.headingNoStatus, ['info', 'likely'], base.headingNoStatus),
+    listNoStatus: oneOf(merged.listNoStatus, ['info', 'likely'], base.listNoStatus),
   };
 }
 
@@ -253,11 +319,14 @@ export function resolveConfig(input: ConfigInput = {}): Config {
   const headings = { ...defaultConfig.headings, ...input.headings };
   headings.inversionStatus = clampInversionStatus(headings.inversionStatus, defaultConfig.headings.inversionStatus);
   headings.extremeInversionStatus = clampInversionStatus(headings.extremeInversionStatus, defaultConfig.headings.extremeInversionStatus);
+  const lists = { ...defaultConfig.lists, ...input.lists };
+  lists.cardListStatus = clampCardListStatus(lists.cardListStatus);
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
     headings,
+    lists,
     adjudication: resolveAdjudication(input.adjudication),
   };
 }

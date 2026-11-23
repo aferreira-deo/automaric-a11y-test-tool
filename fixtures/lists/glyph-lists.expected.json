@@ -1,0 +1,21 @@
+{
+  "description": "Content presented as a list with bullets or numbers and no list semantics: bullet characters in sibling blocks, dashes on lines separated by br (French), numbers and letters in sequence, bullets and numbers drawn by ::before (text, shape, counter), the same small image or icon before every line, blocks displayed as list items, Arabic-Indic digits right to left, a Japanese middle dot, items of several blocks. Each is likely, reported once on the element that holds the items.",
+  "checks": ["lists"],
+  "exact": true,
+  "expected": [
+    { "selector": "#bullets", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#br-dashes", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet", "lineBreaks"] },
+    { "selector": "#numbers", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#letters", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number", "lineBreaks"] },
+    { "selector": "#pseudo", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet", "pseudoElement"] },
+    { "selector": "#shape", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["shape", "pseudoElement"] },
+    { "selector": "#counter", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["counter", "pseudoElement"] },
+    { "selector": "#images", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["image", "lineBreaks"] },
+    { "selector": "#icons", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["image"] },
+    { "selector": "#marker", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["listItemMarker"] },
+    { "selector": "#arabic", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["number"] },
+    { "selector": "#japanese", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "#rich", "check": "lists", "status": "likely", "wcag": "1.3.1", "rule": "lists/glyph-list", "flags": ["bullet"] },
+    { "selector": "html", "check": "lists", "status": "info", "rule": "lists/survey" }
+  ]
+}
