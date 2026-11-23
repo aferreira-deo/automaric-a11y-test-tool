@@ -342,6 +342,17 @@ export interface TextBlock {
    * behind it, so it is read as text and only held back.
    */
   sameColourAsBackground?: boolean;
+  /**
+   * How much content that is no block of visible text the walk of the page had met when it came
+   * to this block: images and other graphics, embedded content, form controls, frames that cannot
+   * be looked into, empty elements that paint a picture, and text that is in the page without
+   * showing (the panel of a closed accordion). A running count; what is inside a heading is not
+   * counted. The difference between two blocks says whether anything of that kind stands between
+   * them. Absent in a survey that did not count: nothing is then concluded from it.
+   */
+  contentBefore?: number;
+  /** Set on a heading the pointer shows as something to click (`cursor: pointer`): the title of an accordion made without a button. */
+  clickable?: boolean;
 }
 
 export interface HeadingSurvey {
@@ -355,6 +366,8 @@ export interface HeadingSurvey {
    * is then not known for certain, and nothing is reported above `info`.
    */
   axComplete: boolean;
+  /** `TextBlock.contentBefore` at the end of the page: what was counted in all. */
+  otherContent?: number;
 }
 
 /**
@@ -1291,6 +1304,59 @@ export interface HeadingsConfig {
   extremeInversionMinSizeRatio: number;
   /** ...and at least this many levels apart. */
   extremeInversionMinLevelGap: number;
+
+  /** At most this many headings that do not read as a heading are reported and captured: by status, then in document order. */
+  maxNonHeadings: number;
+  /**
+   * Where one sentence ends and the next begins inside a text (pattern, Unicode flag, no capturing
+   * group; the text is split by it). By default: a full stop, a question or exclamation mark or
+   * an ellipsis, with any closing quotation mark or bracket after it, then white space, then a
+   * capital letter or a letter of a script without capitals, with any opening mark before it;
+   * and an ideographic full stop or a full-width mark with text after it. The white space French
+   * puts before `?`, `!` and `:` and inside guillemets plays no part: the mark is what is
+   * looked at, and what follows it. A full stop before a small letter or a digit ("approx. 3
+   * days", "e.g. this") ends nothing, and neither does one after a word of one to three letters
+   * that opens with a capital ("Dr. Smith", "U.S. Army", "M. Dupont"): such a word is taken for
+   * an abbreviation whatever the language, at the price of the sentences that end on one ("in the
+   * EU. Next"), which are counted with the sentence after them.
+   */
+  sentenceBreakPattern: string;
+  /**
+   * A part of a text between two such places counts as a sentence from this many words; a
+   * shorter one is counted with the part after it. That keeps "M. Dupont", "Dr. Smith" and
+   * "U.S. Army" in one sentence, and makes "Build faster. Ship smarter." one.
+   */
+  sentenceMinWords: number;
+  /** A heading reads as running text from this many sentences (`severalSentences`)... */
+  runningTextMinSentences: number;
+  /** ...when it also has this many words: two short sentences are a title and its subtitle, or a slogan. */
+  runningTextMinWords: number;
+  /**
+   * A heading of this many words is long whatever its sentences (`long`). Twice `maxWords`, the
+   * limit for a candidate: a legitimate heading that is one long question stays under it.
+   */
+  longHeadingMinWords: number;
+  /**
+   * A heading that opens and ends with a quotation mark is a quotation from this many words
+   * (`quotation`); a shorter one is the name of a work, which a heading may well be.
+   */
+  quotationMinWords: number;
+  /** Text ending like this closes a quotation (pattern, Unicode flag). The apostrophe is left out. */
+  quoteEndPattern: string;
+  /**
+   * Headings that follow each other with nothing between them, none of a lower level than the
+   * one before it, are a run from this many (`headingRun`): the lines of an address, a tagline
+   * and a legal line each marked as a heading. Two are a title over its subtitle.
+   */
+  headingRunMinLength: number;
+  /**
+   * Characters of scripts that are written without spaces between words (pattern, Unicode flag),
+   * as `GroupingConfig.unspacedScriptPattern`: words of such text are counted by
+   * `Intl.Segmenter`...
+   */
+  unspacedScriptPattern: string;
+  /** ...and where there is none, every this many characters count as a word. */
+  unspacedCharsPerWord: number;
 }
 
 export interface ListsConfig {
@@ -1567,7 +1633,9 @@ export interface AdjudicationConfig {
   outlineGapCssPx: number;
   /**
    * Open decision of the owner. Status of a heading candidate that deterministic code reported as
-   * `likely` and the model judged not to be a heading.
+   * `likely` and the model judged not to be a heading. The same option decides, the other way
+   * round, for a heading reported as not reading as one (`headings/heading-not-a-heading`) that
+   * the model judged to function as a heading: kept with the verdict recorded, or lowered to `info`.
    * - `likely` (default): the finding stays in the tester's list, with the verdict recorded in
    *   `ai` and shown in the report. The brief only says that a judged candidate is `likely` at
    *   most; it does not say a model may take one off the list.

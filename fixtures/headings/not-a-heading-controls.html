@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: not-a-heading-controls</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main, aside, footer, header { max-width: 720px; }
+      h1, h2, h3, h4 { margin: 24px 0 8px; font-weight: 700; line-height: 1.2; }
+      h1 { font-size: 32px; }
+      h2 { font-size: 24px; }
+      h3 { font-size: 18px; }
+      h4 { font-size: 16px; }
+      p { margin: 0 0 16px; }
+      ul { margin: 0 0 16px; padding-left: 20px; }
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .cards article { border: 1px solid #767676; padding: 12px; }
+      .cards img, .thumb { display: block; width: 100%; height: 60px; background: #d0d7de; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      .accordion button { font: inherit; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; }
+      .panel-closed { max-height: 0; overflow: hidden; }
+      .clickable { cursor: pointer; }
+      .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .icon { display: inline-block; width: 24px; height: 24px; background-image: linear-gradient(#0b57d0, #0b57d0); }
+      .side-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #595959; }
+      .byline { margin: 0; }
+      dialog { position: static; margin: 16px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <!-- A heading followed only by a form control. -->
+      <h2 id="search-title">Search this site</h2>
+      <input type="search" aria-label="Search this site" />
+    </header>
+    <main>
+      <!-- A title and, at once, a heading of a lower level: it heads that section. -->
+      <h1 id="h1">Services for residents</h1>
+      <h2 id="first-section">Waste and recycling</h2>
+      <p>
+        Body text that goes on for a while so that it is the most common style of the page by far. It has a second
+        sentence and a third one, so that one paragraph alone holds enough characters to say what body text looks
+        like on a page that has little else.
+      </p>
+
+      <!-- A long heading that is one question, in French, with a space before the question mark. -->
+      <h2 id="question">
+        Que faire si mon employeur refuse de me remettre les documents dont j'ai besoin pour faire valoir mes droits
+        après la fin de mon contrat de travail ?
+      </h2>
+      <p>Body text that answers the question.</p>
+
+      <!-- Short sentences in a title, an abbreviation, a title and its subtitle in one heading. -->
+      <h2 id="slogan">Build faster. Ship smarter.</h2>
+      <p>Body text under the slogan.</p>
+      <h3 id="abbreviation">Interview with M. Dupont, head of the U.S. office of the company since 2019</h3>
+      <p>Body text under the heading with abbreviations.</p>
+      <h3 id="two-part">Moving house? What to tell us</h3>
+      <p>Body text under the heading in two parts.</p>
+
+      <!-- Card titles: the picture of each card stands between two titles. -->
+      <h2 id="cards-title">Popular services</h2>
+      <div class="cards">
+        <article><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /><h3 id="card-1">Report a missed bin</h3></article>
+        <article><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /><h3 id="card-2">Book a bulky waste collection</h3></article>
+        <article><img alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /><h3 id="card-3">Order a new container</h3></article>
+      </div>
+
+      <!-- Teasers: every title is a link, with nothing between them. A heading that is a link names what it opens. -->
+      <h2 id="news-title">Latest news</h2>
+      <h3 id="teaser-1"><a href="/news/1">New opening hours for the recycling centre</a></h3>
+      <h3 id="teaser-2"><a href="/news/2">Road works on Harbour Street next month</a></h3>
+      <h3 id="teaser-3"><a href="/news/3">The library reopens after its renovation</a></h3>
+      <h3 id="teaser-4"><a href="/news/4">Applications for school places are open</a></h3>
+
+      <!-- An accordion as the ARIA practices describe it: each heading wraps a button, and the panels are closed. -->
+      <h2 id="faq-title">Frequent questions</h2>
+      <div class="accordion">
+        <h3 id="faq-1"><button type="button" aria-expanded="false" aria-controls="faq-panel-1">When is my bin collected?</button></h3>
+        <div id="faq-panel-1" hidden>Every Tuesday morning.</div>
+        <h3 id="faq-2"><button type="button" aria-expanded="false" aria-controls="faq-panel-2">What goes in the green bin?</button></h3>
+        <div id="faq-panel-2" hidden>Garden waste only.</div>
+        <h3 id="faq-3"><button type="button" aria-expanded="false" aria-controls="faq-panel-3">How do I order a new bin?</button></h3>
+        <div id="faq-panel-3" hidden>Use the form on this site.</div>
+      </div>
+
+      <!-- An accordion made without buttons: the headings are clicked, and the closed panels are in the page. -->
+      <h2 id="steps-title">How it works</h2>
+      <h3 id="step-1" class="clickable">Tell us what you need</h3>
+      <div class="panel-closed">Fill in the form.</div>
+      <h3 id="step-2" class="clickable">We confirm the date</h3>
+      <div class="panel-closed">By e-mail, within two days.</div>
+      <h3 id="step-3" class="clickable">We come to you</h3>
+      <div class="panel-closed">Between 7 and 12 in the morning.</div>
+      <!-- The same, with the panels not in the page until they are opened: only the pointer says that the headings open something. -->
+      <h3 id="step-4" class="clickable">You get a receipt</h3>
+      <h3 id="step-5" class="clickable">You can give feedback</h3>
+      <h3 id="step-6" class="clickable">We keep your details for a year</h3>
+      <p>Body text after the steps.</p>
+
+      <!-- Questions that open, with details and summary. -->
+      <details><summary><h3 id="details-1">Can I change the date?</h3></summary><p>Yes, up to the day before.</p></details>
+      <details><summary><h3 id="details-2">Is the service free?</h3></summary><p>Yes, twice a year.</p></details>
+      <details><summary><h3 id="details-3">Who can use it?</h3></summary><p>Every resident.</p></details>
+
+      <!-- The title of an article, followed only by a byline. -->
+      <article>
+        <h2 id="article-title">The recycling centre has a new manager</h2>
+        <p class="byline">By Jane Example, 12 March 2026</p>
+      </article>
+
+      <!-- Headings that are visually hidden: they have no visible text, and are no run. -->
+      <h2 id="hidden-1" class="sr-only">Share this page</h2>
+      <h2 id="hidden-2" class="sr-only">Related pages</h2>
+      <h2 id="hidden-3" class="sr-only">Page tools</h2>
+
+      <!-- Headings hidden from assistive technology are not exposed as headings, whatever they hold. -->
+      <div aria-hidden="true">
+        <h3 id="aria-hidden-heading" style="font: inherit; margin: 0 0 16px">
+          This text is decoration for sighted users only. It is a paragraph of two sentences inside a heading that the accessibility tree does not expose.
+        </h3>
+      </div>
+      <div inert>
+        <h3 id="inert-1" style="font: inherit; margin: 0">Example Company Ltd</h3>
+        <h3 id="inert-2" style="font: inherit; margin: 0">12 Harbour Street</h3>
+        <h3 id="inert-3" style="font: inherit; margin: 0 0 16px">Bristol BS1 4XY</h3>
+      </div>
+
+      <!-- A year over its events and a date over an entry: numbers that head something. -->
+      <h2 id="history-title">History</h2>
+      <h3 id="year">2024</h3>
+      <p>The second recycling centre opened in the north of the town.</p>
+      <h3 id="date">12/03/2026</h3>
+      <p>The new manager took up her post.</p>
+
+      <!-- The name of a work in quotation marks, and the quoted words of someone as the title of an interview: over content, and as a teaser that is a link. -->
+      <h3 id="work">« Tartuffe »</h3>
+      <p>Body text about the play.</p>
+      <h3 id="interview">« Nous avons doublé la part des déchets recyclés en cinq ans »</h3>
+      <p>Body text of the interview.</p>
+      <h3 id="quoted-teaser-1"><a href="/opinion/1">« Le tri à la source reste le moyen le plus sûr de réduire les coûts »</a></h3>
+      <h3 id="quoted-teaser-2"><a href="/opinion/2">« Il faut repenser la collecte dans les quartiers anciens de la ville »</a></h3>
+
+      <!-- A heading followed only by a link, only by a picture, only by a chart drawn on a canvas. -->
+      <h2 id="link-only">Download the calendar</h2>
+      <a href="/calendar.pdf">Collection calendar 2026 (PDF, 120 KB)</a>
+      <h2 id="image-only">Map of the collection areas</h2>
+      <div class="thumb" role="img" aria-label="Map"><svg width="100" height="40" viewBox="0 0 100 40" aria-hidden="true"><rect width="100" height="40" fill="#8c959f" /></svg></div>
+      <h2 id="canvas-only">Tonnes recycled each year</h2>
+      <canvas width="200" height="60" role="img" aria-label="Chart"></canvas>
+      <!-- Two headings in a row: a title and its subtitle. Not a run. -->
+      <h2 id="title-pair-1">Contact</h2>
+      <h2 id="title-pair-2">We answer within two days</h2>
+      <p>Body text under the two headings.</p>
+
+      <!-- The title of a dialog, with only buttons under it. -->
+      <dialog open aria-labelledby="dialog-title">
+        <h2 id="dialog-title">Delete this request?</h2>
+        <button type="button">Delete</button> <button type="button">Cancel</button>
+      </dialog>
+    </main>
+    <aside>
+      <!-- A heading set small on purpose, in the capitals of a sidebar title. -->
+      <h2 id="sidebar-title" class="side-title">In this section</h2>
+      <ul>
+        <li><a href="/a">Waste and recycling</a></li>
+        <li><a href="/b">Roads and parking</a></li>
+      </ul>
+    </aside>
+    <footer>
+      <!-- Columns of a footer: the last holds only icons that are backgrounds of empty links. -->
+      <div class="columns">
+        <div>
+          <h2 id="footer-1">About</h2>
+          <ul><li><a href="/who">Who we are</a></li></ul>
+        </div>
+        <div>
+          <h2 id="footer-2">Help</h2>
+          <ul><li><a href="/faq">Questions</a></li></ul>
+        </div>
+        <div>
+          <h2 id="footer-3">Follow us</h2>
+          <a href="https://social.example/a" class="icon" aria-label="Example on A"></a>
+          <a href="https://social.example/b" class="icon" aria-label="Example on B"></a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

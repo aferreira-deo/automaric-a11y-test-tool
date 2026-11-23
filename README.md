@@ -121,6 +121,10 @@ field names are never sent:
 
   Which of the two is the default is for the owner to decide; until then it is the first. A `yes` raising a
   held-back `info` to `likely` is not part of the question: it only ever adds to the tester's list.
+- Headings reported as not reading as one (`headings/heading-not-a-heading`) are sent too, with a question of
+  their own, in which `yes` is the verdict that speaks against the finding. A verdict never raises their status;
+  `yes` lowers it to `info` only with `headingNoStatus: "info"`. See "Heading markup on text that is not a
+  heading".
 - Never `fail`, whatever is configured and whatever the model says. The exit code does not depend on a model.
 - The id of a finding, its selector and its evidence are those of deterministic code. The finding gains an `ai`
   part: provider label, model as configured, prompt version, the votes, the verdict, `confidence` (`high` or
@@ -319,7 +323,84 @@ Candidates come from what is rendered, not from tags:
   reported once, on itself; the headings after it are not reported as smaller than it. At most `maxInversions`
   (50) are reported. Skipped levels, a missing or repeated `h1`, a page without headings and repeated heading text
   are never reported.
+- `likely`, `advisory` or `info` (`headings/heading-not-a-heading`): heading markup on text that is not a
+  heading. See the next section.
 - `info` (`headings/survey`): counts, and the body style that was used.
+
+#### Heading markup on text that is not a heading
+
+Looked at: every heading the accessibility tree exposes that has visible text (an `h3` under `aria-hidden` or
+with `role="presentation"` is not one, a `div` with the role heading is). A heading laid out in several blocks is
+one heading: its text is the blocks joined, its style that of most of its characters. Seven signals of three
+kinds, each kind measured without the others:
+
+| Kind | Signal | What is measured |
+|---|---|---|
+| Text | `severalSentences` | At least `runningTextMinSentences` (2) sentences in at least `runningTextMinWords` (15) words. |
+| Text | `long` | At least `longHeadingMinWords` (40) words. |
+| Text | `quotation` | Opens and closes with quotation marks (`quoteStartPattern`, `quoteEndPattern`), at least `quotationMinWords` (8) words, and not a link or a button. |
+| Text | `numeric` | Mostly digits, or with a currency or percent sign, as for candidates (`numericMinDigitShare`). |
+| Rendering | `bodyStyle` | Every block has the family and colour of body text, a size no larger than it, a weight less than `minWeightDelta` (200) above it, no capitals, no italics. |
+| What follows | `headsNothing` | Nothing stands between it and the next heading, which is of its level or above; or nothing follows it on the page. |
+| What follows | `headingRun` | It heads nothing and is one of at least `headingRunMinLength` (3) headings that follow each other that way. |
+
+- `likely`: running text by one measure, confirmed by another kind or by the other measures of text
+  (`severalSentences` or `long`, with `bodyStyle`, `headsNothing` or `quotation`; or `severalSentences` and `long`
+  together), or a run of headings rendered as body text (`headingRun` with `bodyStyle`). A paragraph given an
+  `h2` for its size is the case of `severalSentences` with `long`: both are read from the text, but one counts
+  where sentences end and the other counts words, and a long heading that is one question has only the second.
+- `advisory`: `severalSentences` or `long` alone; `headingRun` alone; `headsNothing` with `bodyStyle`, `numeric`
+  or `quotation`.
+- `info`: `bodyStyle` alone. A fact about the rendering, which on its own does not say that the text is no heading.
+- Not reported: `headsNothing` alone (the title of a card, the last title of a column, a title over its
+  subtitle), `numeric` alone (a year over its events, a price over a list of features) and `quotation` alone (the
+  usual title of an interview or an opinion piece). Never reported, as the brief asks: a page without headings,
+  a missing or repeated `h1`, skipped levels, repeated heading text. Empty headings are left to axe-core: a
+  heading without visible text has no block and is not looked at.
+
+How each is measured, and why:
+
+- **Words** are runs between white space that hold a letter or a digit, so the `?`, `!`, `:`, `«` and `»` that
+  French sets apart with a space are not words. Text of a script written without spaces (`unspacedScriptPattern`)
+  is cut by `Intl.Segmenter`, as in the grouping check; without one, every `unspacedCharsPerWord` (3) characters
+  count as a word. The text of a block is kept up to `maxTextChars` (300); the count of words of a longer block is
+  that of its whole text, and its sentences are those of the part that was kept, so they are undercounted.
+- **Sentences** are the parts of the text between the places where one ends and the next begins
+  (`sentenceBreakPattern`): `.`, `?`, `!` or `…`, any closing quotation mark or bracket, white space, then a
+  capital letter or a letter of a script without capitals, with any opening mark before it; and `。`, `！`, `？`
+  with text after them. A part of fewer than `sentenceMinWords` (3) words is counted with its neighbour, a full
+  stop before a small letter or a digit ends nothing, and neither does one after a word of one to three letters
+  that opens with a capital. So "Build faster. Ship smarter." and "Interview with M. Dupont of the U.S. office"
+  are one sentence, and a heading that is one long question is one sentence whatever its length. The space before
+  the mark and the guillemets play no part: "Vous avez une question ? Notre équipe répond « sous deux jours » !
+  Écrivez-nous." is three. The patterns hold no words of any language.
+- **Length** is absolute, not relative to the other headings of the page: a page of long headings would move a
+  relative limit with it. 40 is twice the limit for a candidate (`maxWords`).
+- **Rendered as body text** needs a body style that can be trusted (not `lowText`). It asks for the same family
+  and colour because a heading of body size in another colour or in capitals is visibly a heading: the small grey
+  capitals of a sidebar title are not `bodyStyle`.
+- **What follows** is read in document order, in the heading's own document. Text between two headings is
+  content. So is anything else the walk of the page counts on the way (`TextBlock.contentBefore`): an image, an
+  SVG, a canvas, a video, a form control, a frame that cannot be looked into, an empty element that paints a
+  background image, a mask or generated content (an icon), and text that is in the page without showing, whether
+  not displayed or clipped (the panel of a closed accordion or tab). What is inside a heading is not counted. A
+  heading of a lower level after it is a subsection, which it heads. A heading whose text is all a link or a
+  button, or that the pointer shows as clickable (`cursor: pointer`), never heads nothing: it names what it opens
+  (a teaser, the question of an accordion made as the ARIA practices describe, or without a button).
+- When the accessibility tree could not be read in full, these findings are `info` (`axIncomplete`). At most
+  `maxNonHeadings` (50) are reported and captured: `likely` first, then `advisory`, then `info`.
+
+Each finding carries the text, the level, the counts of words and sentences, the font size and weight against
+those of body text, the text that follows, the level of the next heading and the number of headings in the run
+when there is one, the signals as flags, and a capture of the heading in context when one could be taken.
+
+A model can be asked whether the text functions as a heading for the content that follows it (question
+`headings-not-heading-1`, in `headings-adjudication.ts`). Here `no` agrees with the finding and `yes` speaks against
+it, and a verdict lowers a status or keeps it, never raises it: `no` and `unsure` change nothing; `yes` changes
+nothing either by default and is recorded, and lowers the finding to `info` with `headingNoStatus: "info"`
+(`--ai-lower-on-no`), the same decision of the owner as for a candidate a model speaks against. An `advisory`
+that a model agrees with stays `advisory`: what kept it from `likely` is a measurement, which a model does not
+redo.
 
 Every candidate comes with its text, its style and that of body text, the text that follows it, and a capture of
 the block in context when one could be taken. When the accessibility tree cannot be read, nothing is above `info`
@@ -996,7 +1077,24 @@ when the scan starts is waited for first (`focus.navigationTimeoutMs`, 15 s at m
 - Cross-origin iframes, closed shadow roots, and iframes that are scaled or rotated are not looked into. At most
   `maxBlocks` (6000) blocks are read, `maxCandidates` (150) candidates and `maxInversions` (50) contradictions
   between levels reported.
-- Heading markup on text that is not a heading is not looked for yet.
+- Heading markup on text that is not a heading (`headings/heading-not-a-heading`) is found from the length of the
+  text, its rendering and what follows it, and from nothing else. Not found: a short tagline or slogan set as a
+  heading over a button or a paragraph, a label over its value, one legal line or one line of an address (a run
+  needs three headings), a date written in words, and a heading with nothing after it inside its section when
+  text of another section follows in the document (the end of a sectioning container is not looked for: the
+  title that closes a card is the usual case, and is a real title).
+- For that rule, what stands between two headings is counted, not understood: a decorative image, a spacer with
+  a background image or a hidden skip link between two headings counts as content, and the run is not reported.
+  Content painted by a background on an element that has children, and the panels of an accordion that are not
+  in the page until it is opened and whose headings have neither a button nor `cursor: pointer`, are not seen:
+  such headings can be reported as a run (`advisory`).
+- `bodyStyle` compares family, size, weight, colour, capitals and italics. A heading set apart only by a rule, a
+  background, letter spacing, small capitals or the space around it is reported as rendered like body text
+  (`info` on its own).
+- Sentences: one that ends on a short capitalised word ("in the EU. Next") is counted with the next, and an
+  abbreviation of more than three letters before a capital ("Prof. Smith") ends a sentence it does not end. The
+  floor of 15 words keeps the second from mattering in short headings.
+- The same heading can carry a `headings/level-inversion` finding as well; the two have different ids.
 - Outside a modal dialog opened with `showModal()`, the page is inert and absent from the accessibility tree: text
   there is treated as hidden from assistive technology (`ariaHidden`), so a candidate there is `info` at most.
 

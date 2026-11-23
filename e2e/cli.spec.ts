@@ -12,7 +12,7 @@ interface Report {
   violations: { id: string; tags: string[]; nodes: { target: string[] }[] }[];
   incomplete: unknown[];
   a11yVision: {
-    findings: { check: string; status: string; selector: string; evidence: { crops: string[] } }[];
+    findings: { check: string; rule: string; status: string; selector: string; evidence: { crops: string[] } }[];
   };
 }
 
@@ -153,4 +153,39 @@ test('headings is a default check, never fails a scan, and shows its evidence in
   expect(page).toContain('<figcaption>In context</figcaption>');
   expect(page).toContain('<dt>text</dt><dd>A title in a div</dd>');
   expect(page).toContain('<dt>fontSizePx</dt><dd>28</dd>');
+});
+
+test('a page where only headings that do not read as one are found exits 0, and they land in incomplete', async ({ baseURL }, testInfo) => {
+  const html = testInfo.outputPath('out', 'report.html');
+  const sarif = testInfo.outputPath('out', 'report.sarif');
+  const crops = testInfo.outputPath('out', 'crops');
+  const { code, stdout } = await cli('scan', `${baseURL}/headings/not-a-heading.html`, '--checks', 'headings', '--html', html, '--sarif', sarif, '--crops', crops);
+  // Eight are `likely`: a judgement is never a failure, so the exit code stays 0.
+  expect(code).toBe(0);
+  const report = JSON.parse(stdout) as Report;
+  expect(report.violations).toEqual([]);
+  expect(report.incomplete).toEqual([expect.objectContaining({ id: 'headings/heading-not-a-heading', tags: ['wcag131'] })]);
+  const found = report.a11yVision.findings.filter((finding) => finding.rule === 'headings/heading-not-a-heading');
+  expect(found.filter((finding) => finding.status === 'likely')).toHaveLength(8);
+  expect(found.filter((finding) => finding.status === 'advisory')).toHaveLength(6);
+  expect(found.filter((finding) => finding.status === 'info')).toHaveLength(2);
+  expect(report.a11yVision.findings.some((finding) => finding.rule !== 'headings/heading-not-a-heading' && finding.rule !== 'headings/survey')).toBe(false);
+  expect((await readdir(`${crops}/headings`)).length).toBe(16);
+  const page = await readFile(html, 'utf8');
+  expect(page).toContain('<figcaption>In context</figcaption>');
+  expect(page).toContain('headings/heading-not-a-heading');
+  expect(page).toContain('<dt>sentences</dt><dd>3</dd>');
+  expect(page).not.toMatch(/passes WCAG|conforms/i);
+  const log = JSON.parse(await readFile(sarif, 'utf8')) as { runs: { results: { ruleId: string; level: string }[] }[] };
+  const results = log.runs[0]!.results.filter((result) => result.ruleId === 'headings/heading-not-a-heading');
+  expect(results.length).toBeGreaterThan(0);
+  expect(results.some((result) => result.level === 'error')).toBe(false);
+});
+
+test('the page of controls for that rule gives nothing but the survey', async ({ baseURL }) => {
+  const { code, stdout } = await cli('scan', `${baseURL}/headings/not-a-heading-controls.html`, '--checks', 'headings');
+  expect(code).toBe(0);
+  const report = JSON.parse(stdout) as Report;
+  expect(report.a11yVision.findings.map((finding) => finding.rule)).toEqual(['headings/survey']);
+  expect(report.incomplete).toEqual([]);
 });

@@ -1,0 +1,24 @@
+{
+  "description": "Heading markup on text that is not a heading (headings/heading-not-a-heading). Likely where two kinds of measurement agree: a paragraph of several sentences that is also long (an h2, a div with the role heading, and two sentences in Japanese, whose words are cut by the segmenter), several sentences rendered as body text, several sentences in French followed at once by another heading, and the lines of an address rendered as body text. Advisory where one kind stands alone or two weak ones meet: one very long sentence, a run of three headings set as headings, a price and a quotation that head nothing, the last text of the page set as body text. Info for a short heading rendered as body text and followed by content. The heading that closes a run and heads content is not reported, nor are the real headings. Never fail.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "#paragraph", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["severalSentences", "long"] },
+    { "selector": "#role-paragraph", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["severalSentences", "long"] },
+    { "selector": "#plain-sentences", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["severalSentences", "bodyStyle"] },
+    { "selector": "#french", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["severalSentences", "headsNothing"] },
+    { "selector": "#address-1", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["headingRun", "bodyStyle"] },
+    { "selector": "#address-2", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["headingRun", "bodyStyle"] },
+    { "selector": "#address-3", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["headingRun", "bodyStyle"] },
+    { "selector": "#long-sentence", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["long"] },
+    { "selector": "#japanese", "check": "headings", "status": "likely", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["severalSentences"] },
+    { "selector": "#run-1", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["headingRun"] },
+    { "selector": "#run-2", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["headingRun"] },
+    { "selector": "#price", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["numeric", "headsNothing"] },
+    { "selector": "#last", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["bodyStyle", "headsNothing"] },
+    { "selector": "#quotation", "check": "headings", "status": "advisory", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["quotation", "headsNothing"] },
+    { "selector": "#plain-short", "check": "headings", "status": "info", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["bodyStyle"] },
+    { "selector": "#address-4", "check": "headings", "status": "info", "wcag": "1.3.1", "rule": "headings/heading-not-a-heading", "flags": ["bodyStyle"] },
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

@@ -134,6 +134,18 @@ export const defaultConfig: Config = {
     inversionMinSizeRatio: 1.15,
     extremeInversionMinSizeRatio: 1.5,
     extremeInversionMinLevelGap: 2,
+    maxNonHeadings: 50,
+    sentenceBreakPattern:
+      '(?<=(?:(?<!(?:^|[\\s.\\p{Ps}\\p{Pi}"\'])\\p{Lu}\\p{L}{0,2})\\.|[!?\\u2026])(?:\\s?[\\p{Pe}\\p{Pf}"\'])*)\\s+(?=(?:[\\p{Ps}\\p{Pi}"\'\\u00bf\\u00a1]\\s?)*[\\p{Lu}\\p{Lo}])|(?<=[\\u3002\\uff01\\uff1f\\uff0e][\\p{Pe}\\p{Pf}]*)(?=[^\\s\\p{Pe}\\p{Pf}\\u3002\\uff01\\uff1f\\uff0e])',
+    sentenceMinWords: 3,
+    runningTextMinSentences: 2,
+    runningTextMinWords: 15,
+    longHeadingMinWords: 40,
+    quotationMinWords: 8,
+    quoteEndPattern: '["\\u00bb\\u203a\\u201d\\u300d\\u300f]\\s?[.!?\\u2026]?$',
+    headingRunMinLength: 3,
+    unspacedScriptPattern: '[\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}\\p{Script=Lao}\\p{Script=Khmer}\\p{Script=Myanmar}]',
+    unspacedCharsPerWord: 3,
   },
   lists: {
     lineStartChars: 64,

@@ -21,13 +21,14 @@ export async function collectHeadings(page: StablePage, config: HeadingsConfig, 
 
   const read = await agent<AgentHeadingSurvey>('headingSurvey()');
   const blocks: TextBlock[] = read.blocks.map((block) => ({ ...block, crop: null }));
-  const survey: HeadingSurvey = { blocks, total: read.total, axComplete };
+  const survey: HeadingSurvey = { blocks, total: read.total, axComplete, ...(read.otherContent !== undefined ? { otherContent: read.otherContent } : {}) };
 
-  // Core decides what is reported; only that is captured: at most `maxCandidates` candidates and
-  // `maxInversions` contradictions between levels, so the number of captures is bounded by both.
+  // Core decides what is reported; only that is captured: at most `maxCandidates` candidates,
+  // `maxInversions` contradictions between levels and `maxNonHeadings` headings that do not read
+  // as one, so the number of captures is bounded by the three.
   const report = headingReport(survey, config);
   const used = new Set<string>();
-  for (const index of new Set([...report.candidates.map((candidate) => candidate.block), ...report.inversions.map((inversion) => inversion.block)])) {
+  for (const index of new Set([...report.candidates.map((candidate) => candidate.block), ...report.inversions.map((inversion) => inversion.block), ...report.nonHeadings.map((found) => found.block)])) {
     const block = blocks[index];
     if (!block) continue;
     // Named after the element, so that two runs give the same ids.

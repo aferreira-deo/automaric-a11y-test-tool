@@ -1,0 +1,8 @@
+{
+  "description": "Precision controls for headings/heading-not-a-heading: real headings that share one trait with text that is no heading. None is reported by that rule at any status. A heading over a form control, a link, a picture or a canvas only; a title followed at once by a heading of a lower level; a long heading that is one question, in French; short sentences, abbreviations and a title in two parts; card titles with a picture between them; teasers whose titles are links; an accordion whose headings wrap buttons, one whose headings are clicked (panels closed in the page, or absent from it), and details with summaries; an article title over a byline; visually hidden headings; headings under aria-hidden and inert; a year and a date over their entries; the name of a work in guillemets, the quoted title of an interview and quoted titles that are links; two headings in a row; the title of a dialog over its buttons; a sidebar title set small in capitals; footer columns, the last with icons only.",
+  "checks": ["headings"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "headings", "status": "info", "rule": "headings/survey" }
+  ]
+}

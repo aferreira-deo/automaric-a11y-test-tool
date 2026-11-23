@@ -1,5 +1,6 @@
 import { clampInversionStatus } from '../config.js';
 import { fingerprint } from '../fingerprint.js';
+import { countWords } from './grouping.js';
 import type { Box, HeadingSurvey, HeadingsConfig, JsonValue, TextBlock, TextContext, TextStyle, WcagRef } from '../types.js';
 
 /**
@@ -203,6 +204,75 @@ export interface HeadingReport {
   omitted: number;
   /** Contradictions between levels left out because of `maxInversions`. */
   omittedInversions: number;
+  /** Exposed headings that do not read as a heading: `likely` ones first, then `advisory`, then `info`, each in document order. */
+  nonHeadings: NonHeading[];
+  /** Such headings left out because of `maxNonHeadings`. */
+  omittedNonHeadings: number;
+}
+
+export const NOT_A_HEADING_RULE = 'headings/heading-not-a-heading';
+/** Version of what a `NonHeading` is and of what its `context` holds; part of the key of cached verdicts. */
+export const NON_HEADINGS_GENERATOR_VERSION = '1';
+
+/**
+ * What says that an exposed heading may not be one. Three kinds, which do not depend on each other.
+ * From the text:
+ * - `severalSentences`: at least `runningTextMinSentences` sentences in at least
+ *   `runningTextMinWords` words: running text.
+ * - `long`: at least `longHeadingMinWords` words.
+ * - `quotation`: it opens and closes with quotation marks, has at least `quotationMinWords`
+ *   words and is not a link or a button.
+ * - `numeric`: a price, a figure, a date in digits (`isNumericText`).
+ * From how it is rendered:
+ * - `bodyStyle`: every part of it has the size, weight, family and colour of body text, without
+ *   capitals or italics: nothing shows that it is a heading.
+ * From what follows it:
+ * - `headsNothing`: no text and no other content stands between it and the next heading, which
+ *   is of its level or above; or nothing at all follows it on the page.
+ * - `headingRun`: it heads nothing and is one of at least `headingRunMinLength` headings that
+ *   follow each other that way.
+ */
+export type NonHeadingSignal = 'severalSentences' | 'long' | 'quotation' | 'numeric' | 'bodyStyle' | 'headsNothing' | 'headingRun';
+
+/** A heading of the accessibility tree whose text does not read as a heading. */
+export interface NonHeading {
+  /** Index of the first block of the heading in `HeadingSurvey.blocks`. */
+  block: number;
+  /** Id of the finding the check reports for it (`Finding.id`). */
+  findingId: string;
+  /** The heading element. */
+  selector: string;
+  frame: string;
+  /** The first block of its text, page coordinates. */
+  box: Box;
+  level: number;
+  /** Its visible text, the blocks joined with a space; each block is cut to `maxTextChars`. */
+  text: string;
+  /**
+   * Never `fail`. `likely` when signals of two kinds agree, or the text is both long and several
+   * sentences; `advisory` and `info` as `nonHeadingStatus` says. `info` at most when the
+   * accessibility tree could not be read in full.
+   */
+  status: 'likely' | 'advisory' | 'info';
+  signals: NonHeadingSignal[];
+  words: number;
+  sentences: number;
+  /** Style of most of its text. */
+  style: TextStyle;
+  /** Headings that follow each other with nothing between them, this one included; 1 when it is in no run. */
+  runLength: number;
+  /** The text block after it, cut to `contextAfterMaxChars`; null when there is none. */
+  followedBy: string | null;
+  /** Level of the heading that follows it with nothing in between; null when what follows is no heading. */
+  nextHeadingLevel: number | null;
+  /** As `HeadingCandidate.crop`, `cropTarget` and `covered`. */
+  crop: string | null;
+  cropTarget: Box | null;
+  covered: boolean;
+  /** Whether a model's judgement could change the status: false when the accessibility tree could not be read. */
+  adjudicate: boolean;
+  /** Compact context for a model. Text of the page under test: untrusted, and sent only when a provider is configured. */
+  context: { [key: string]: JsonValue };
 }
 
 /** Reasons that no judgement would overturn. */
@@ -366,7 +436,10 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
   const inversions = allInversions.slice(0, config.maxInversions);
   const omittedInversions = allInversions.length - inversions.length;
   const exposedHeadings = new Set(blocks.filter((block) => block.heading).map((block) => `${block.frame}\u0000${block.heading!.selector}`)).size;
-  if (!baseline) return { baseline, candidates: [], inversions, exposedHeadings, omitted: 0, omittedInversions };
+  const allNonHeadings = nonHeadings(survey, baseline, config);
+  const keptNonHeadings = allNonHeadings.slice(0, Math.max(0, config.maxNonHeadings));
+  const notHeadings = { nonHeadings: keptNonHeadings, omittedNonHeadings: allNonHeadings.length - keptNonHeadings.length };
+  if (!baseline) return { baseline, candidates: [], inversions, exposedHeadings, omitted: 0, omittedInversions, ...notHeadings };
 
   const tolerance = config.boxToleranceCssPx;
   const signatures = blocks.map((block) => styleSignature(block.style));
@@ -637,7 +710,235 @@ export function headingReport(survey: HeadingSurvey, config: HeadingsConfig): He
       },
     };
   });
-  return { baseline, candidates, inversions, exposedHeadings, omitted: unique.length - ordered.length, omittedInversions };
+  return { baseline, candidates, inversions, exposedHeadings, omitted: unique.length - ordered.length, omittedInversions, ...notHeadings };
+}
+
+type WordsConfig = Pick<HeadingsConfig, 'unspacedScriptPattern' | 'unspacedCharsPerWord'>;
+
+/**
+ * Words of a text: runs between white space that hold a letter or a digit, so that the `?`, `!`,
+ * `:` and guillemets French sets apart with a space are not words. Text of a script written
+ * without spaces is cut as `countWords` cuts it.
+ */
+export function wordsOf(text: string, config: WordsConfig): number {
+  const runs = text.split(/\s+/).filter((run) => LETTER_OR_DIGIT.test(run));
+  return runs.length === 0 ? 0 : countWords(runs.join(' '), config);
+}
+
+/**
+ * Sentences of a text: its parts between the places where a sentence ends and another begins
+ * (`sentenceBreakPattern`), a part of fewer than `sentenceMinWords` words being counted with the
+ * part after it, or with the one before it when it is the last. A title is one sentence whatever
+ * it ends with. A pattern that does not compile finds no such place.
+ */
+export function countSentences(text: string, config: WordsConfig & Pick<HeadingsConfig, 'sentenceBreakPattern' | 'sentenceMinWords'>): number {
+  let parts: string[];
+  try {
+    parts = text.split(new RegExp(config.sentenceBreakPattern, 'u'));
+  } catch {
+    parts = [text];
+  }
+  let sentences = 0;
+  let carried = 0;
+  for (const part of parts) {
+    // A capturing group in a configured pattern puts what it matched, or undefined, among the parts.
+    if (typeof part !== 'string') continue;
+    const words = carried + wordsOf(part, config);
+    if (words >= config.sentenceMinWords) {
+      sentences++;
+      carried = 0;
+    } else carried = words;
+  }
+  return sentences === 0 && carried > 0 ? 1 : sentences;
+}
+
+const STATUS_ORDER = { likely: 0, advisory: 1, info: 2 } as const;
+
+/**
+ * The status the signals of a heading give, or null when they are not worth a finding. Never `fail`.
+ *
+ * The signals are of three kinds that are measured apart: what the text is (`severalSentences`,
+ * `long`, `quotation`, `numeric`), how it is rendered (`bodyStyle`) and what follows it
+ * (`headsNothing`, `headingRun`).
+ * - `likely`: running text by one measure, confirmed by another kind (it looks like body text,
+ *   or heads nothing) or by the other measures of text (long and several sentences, or a
+ *   quotation); or a run of headings that look like body text.
+ * - `advisory`: running text by one measure and nothing else; a run of headings; or a heading
+ *   that heads nothing and is also set as body text, a number or a quotation.
+ * - `info`: set as body text, and nothing else.
+ * - Not reported: a heading that only heads nothing (the title of a card, the last title of a
+ *   column), a number that heads something (a year over its events, a date over an entry), and
+ *   a quotation that heads something (the title of an interview or of an opinion piece).
+ */
+export function nonHeadingStatus(signals: readonly NonHeadingSignal[]): 'likely' | 'advisory' | 'info' | null {
+  const has = (signal: NonHeadingSignal): boolean => signals.includes(signal);
+  const running = has('severalSentences') || has('long');
+  if (has('severalSentences') && has('long')) return 'likely';
+  if (running && (has('bodyStyle') || has('headsNothing') || has('quotation'))) return 'likely';
+  if (has('headingRun') && has('bodyStyle')) return 'likely';
+  if (running || has('headingRun')) return 'advisory';
+  if (has('headsNothing') && (has('bodyStyle') || has('numeric') || has('quotation'))) return 'advisory';
+  if (has('bodyStyle')) return 'info';
+  return null;
+}
+
+/**
+ * Headings the accessibility tree exposes whose text does not read as a heading (1.3.1, "heading
+ * markup on text that is not a heading"). All of them, by status and then in document order;
+ * `headingReport` keeps `maxNonHeadings`. Pure.
+ *
+ * A heading whose text is all a link or a button, or that the pointer shows as clickable, is
+ * never said to head nothing: it names what it opens (a teaser, the question of an accordion).
+ * Headings hidden from assistive technology are not exposed, and headings without visible text
+ * have no block: neither is looked at.
+ */
+export function nonHeadings(survey: HeadingSurvey, baseline: BodyBaseline | null, config: HeadingsConfig): NonHeading[] {
+  const { blocks } = survey;
+  interface Exposed {
+    first: number;
+    last: number;
+    members: number[];
+    level: number;
+    selector: string;
+    frame: string;
+  }
+  const known = new Map<string, Exposed>();
+  const exposed: Exposed[] = [];
+  blocks.forEach((block, index) => {
+    if (!block.heading) return;
+    const key = `${block.frame}\u0000${block.heading.selector}`;
+    const existing = known.get(key);
+    if (existing) {
+      existing.members.push(index);
+      existing.last = index;
+      return;
+    }
+    const heading: Exposed = { first: index, last: index, members: [index], level: block.heading.level, selector: block.heading.selector, frame: block.frame };
+    known.set(key, heading);
+    exposed.push(heading);
+  });
+  if (exposed.length === 0) return [];
+
+  // Nothing between two headings: the second starts at the block after the first, in the same
+  // document, and nothing else was counted on the way. Without the count, nothing is concluded.
+  const nothingBetween = (a: Exposed, b: Exposed): boolean => {
+    if (b.first !== a.last + 1 || a.frame !== b.frame) return false;
+    const from = blocks[a.last]!.contentBefore;
+    const to = blocks[b.first]!.contentBefore;
+    return from !== undefined && to !== undefined && to === from;
+  };
+  const linked = exposed.map((heading, position): boolean => {
+    const next = exposed[position + 1];
+    return next !== undefined && next.level <= heading.level && nothingBetween(heading, next);
+  });
+  const endsPage = (heading: Exposed): boolean => {
+    const from = blocks[heading.last]!.contentBefore;
+    return heading.last === blocks.length - 1 && survey.total === blocks.length && from !== undefined && survey.otherContent !== undefined && survey.otherContent === from;
+  };
+  const runLength = exposed.map(() => 1);
+  for (let start = 0; start < exposed.length; ) {
+    let end = start;
+    while (linked[end]) end++;
+    for (let position = start; position <= end; position++) runLength[position] = end - start + 1;
+    start = end + 1;
+  }
+
+  const sizeTolerance = config.sizeToleranceCssPx;
+  const plain = (style: TextStyle): boolean =>
+    baseline !== null &&
+    !baseline.lowText &&
+    style.size <= baseline.size + sizeTolerance &&
+    style.weight - baseline.weight < config.minWeightDelta &&
+    style.transform !== 'uppercase' &&
+    !style.italic &&
+    style.color === baseline.color &&
+    style.family === baseline.family;
+  let quoteStart: RegExp | null = null;
+  let quoteEnd: RegExp | null = null;
+  try {
+    quoteStart = new RegExp(config.quoteStartPattern, 'u');
+    quoteEnd = new RegExp(config.quoteEndPattern, 'u');
+  } catch {
+    // A pattern that does not compile finds no quotation.
+  }
+
+  const found: NonHeading[] = [];
+  exposed.forEach((heading, position) => {
+    const members = heading.members.map((index) => blocks[index]!);
+    // Not exposed where it is hidden from assistive technology, whatever marked it.
+    if (members.some((block) => block.contexts.includes('ariaHidden'))) return;
+    const first = members[0]!;
+    const text = members.map((block) => block.text).join(' ').trim();
+    if (!LETTER_OR_DIGIT.test(text)) return;
+    const main = members.reduce((best, block) => (block.chars > best.chars ? block : best), first);
+    const wasCut = members.some((block) => block.text.length >= config.maxTextChars);
+    const counted = wordsOf(text, config);
+    // The text of a block is cut to `maxTextChars`; its count of words is that of all of it.
+    const words = wasCut ? Math.max(counted, members.reduce((sum, block) => sum + block.words, 0)) : counted;
+    const sentences = countSentences(text, config);
+    const control = members.every((block) => block.contexts.includes('link') || block.contexts.includes('button') || block.clickable === true);
+    const next = exposed[position + 1];
+    const headsNothing = !control && (linked[position]! || endsPage(heading));
+
+    const signals: NonHeadingSignal[] = [];
+    if (sentences >= config.runningTextMinSentences && words >= config.runningTextMinWords) signals.push('severalSentences');
+    if (words >= config.longHeadingMinWords) signals.push('long');
+    // The quoted words of someone are the usual title of an opinion piece or an interview: on a
+    // title that is a link, quotation marks say nothing.
+    if (!control && quoteStart !== null && quoteEnd !== null && quoteStart.test(text) && quoteEnd.test(text) && words >= config.quotationMinWords) signals.push('quotation');
+    if (isNumericText(text, config)) signals.push('numeric');
+    if (members.every((block) => plain(block.style))) signals.push('bodyStyle');
+    if (headsNothing) signals.push('headsNothing');
+    if (headsNothing && runLength[position]! >= config.headingRunMinLength) signals.push('headingRun');
+    const measured = nonHeadingStatus(signals);
+    if (measured === null) return;
+    // Without the whole accessibility tree, which text is a heading and what its level is are not
+    // known for certain: recorded, and nothing more.
+    const status = survey.axComplete ? measured : 'info';
+
+    const before = blocks[heading.first - 1]?.frame === heading.frame ? blocks[heading.first - 1]! : null;
+    const after = blocks[heading.last + 1]?.frame === heading.frame ? blocks[heading.last + 1]! : null;
+    const followedBy = after ? cut(after.text, config.contextAfterMaxChars) : null;
+    const nextHeadingLevel = linked[position]! && next ? next.level : null;
+    found.push({
+      block: heading.first,
+      findingId: fingerprint({ rule: NOT_A_HEADING_RULE, wcag: HEADINGS_SC, frame: heading.frame, selector: heading.selector }),
+      selector: heading.selector,
+      frame: heading.frame,
+      box: first.box,
+      level: heading.level,
+      text,
+      status,
+      signals,
+      words,
+      sentences,
+      style: { ...main.style },
+      runLength: runLength[position]!,
+      followedBy,
+      nextHeadingLevel,
+      crop: first.crop,
+      cropTarget: first.crop && first.cropTarget ? { ...first.cropTarget } : null,
+      covered: first.covered === true,
+      adjudicate: survey.axComplete,
+      context: {
+        text,
+        level: heading.level,
+        tag: first.tag,
+        style: { ...main.style },
+        bodyStyle: baseline ? { size: baseline.size, weight: baseline.weight, family: baseline.family, color: baseline.color } : null,
+        signals: [...signals],
+        words,
+        sentences,
+        headingsInRun: runLength[position]!,
+        contexts: [...first.contexts],
+        region: first.region,
+        textBefore: before ? cut(before.text, config.contextBeforeMaxChars) : null,
+        textAfter: followedBy,
+        nextHeadingLevel,
+      },
+    });
+  });
+  return found.sort((a, b) => compare(STATUS_ORDER[a.status], STATUS_ORDER[b.status]) || compare(a.block, b.block));
 }
 
 /** The candidates of a survey: what the adjudicator layer works from. */

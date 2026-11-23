@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>headings: not-a-heading</title>
+    <style>
+      body { margin: 32px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 640px; }
+      h1, h2, h3, h4 { margin: 24px 0 8px; font-weight: 700; line-height: 1.2; }
+      h1 { font-size: 32px; }
+      h2 { font-size: 24px; }
+      h3 { font-size: 18px; }
+      h4 { font-size: 16px; }
+      p { margin: 0 0 16px; }
+      /* Heading markup with the look of a paragraph. */
+      .as-text { font: inherit; font-weight: 400; margin: 0 0 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="h1">Heading markup on text that is not a heading</h1>
+      <p>
+        Body text that goes on for a while so that it is the most common style of the page by far. It has a second
+        sentence and a third one, so that one paragraph alone holds enough characters to say what body text looks
+        like on a page that has little else.
+      </p>
+
+      <!-- A whole paragraph marked up as a heading for its size: several sentences and long. -->
+      <h2 id="paragraph">
+        Our team has worked with public bodies and private companies for more than twenty years. We audit websites,
+        train the people who build them and help them fix what we find. Every audit ends with a report that says what
+        to change and in which order.
+      </h2>
+      <p>Body text under the paragraph that was given heading markup.</p>
+
+      <!-- The same done with the role, on a div: exposure comes from the accessibility tree, not from the tag. -->
+      <div id="role-paragraph" role="heading" aria-level="2" style="font-size: 24px; font-weight: 700; line-height: 1.2; margin: 24px 0 8px">
+        We answer every request within two working days. If your question is urgent, call the number at the bottom of
+        this page and ask for the person on duty, who will find someone to help you before the end of the day.
+      </div>
+      <p>Body text under the div with the role heading.</p>
+
+      <!-- Several sentences, and rendered exactly as body text is: two kinds of measurement agree. -->
+      <h3 id="plain-sentences" class="as-text">
+        The office is closed on public holidays. Requests sent on those days are read the next morning.
+      </h3>
+      <p>Body text under the heading that looks like a paragraph.</p>
+
+      <!-- French punctuation: a space before the question and exclamation marks, guillemets. Followed by a heading at once. -->
+      <h3 id="french">
+        Vous avez une question sur votre dossier ? Notre équipe vous répond « sous deux jours ouvrés » ! Écrivez-nous
+        dès maintenant.
+      </h3>
+      <h3 id="after-french">Nous contacter</h3>
+      <p>Body text under a real heading.</p>
+
+      <!-- One sentence of more than forty words, set as a title and followed by content: long, and nothing else. -->
+      <h2 id="long-sentence">
+        Everything you need to know before you send us the form that asks for a review of the decision that was taken
+        about the request you made last year for a place in one of the schools of the district where you live now
+      </h2>
+      <p>Body text under the long heading.</p>
+
+      <!-- Three sentences in Japanese, which is written without spaces: words are cut by the segmenter. -->
+      <h2 id="japanese" lang="ja">私たちのチームは二十年以上にわたり公共機関や民間企業と協力してきました。ウェブサイトを監査し、それを作る人々を訓練し、見つかった問題の修正を支援します。すべての監査は、何をどの順番で変更すべきかを示す報告書で終わります。</h2>
+      <p>Body text under the Japanese text.</p>
+
+      <!-- A tagline, a legal line and a notice, each a heading, with nothing between them. -->
+      <h2 id="run-1">Quality you can trust</h2>
+      <h2 id="run-2">Registered in England and Wales</h2>
+      <h2 id="run-3">All rights reserved</h2>
+      <p>Body text after the three headings.</p>
+
+      <!-- The lines of an address, each a heading, rendered as body text. -->
+      <h4 id="address-1" class="as-text">Example Company Ltd</h4>
+      <h4 id="address-2" class="as-text">12 Harbour Street</h4>
+      <h4 id="address-3" class="as-text">Bristol BS1 4XY</h4>
+      <h4 id="address-4" class="as-text">United Kingdom</h4>
+      <p>Body text after the address.</p>
+
+      <!-- A price as a heading, with nothing under it before the next heading. -->
+      <h3 id="price">€49.00</h3>
+      <h3 id="after-price">What is included</h3>
+      <p>Body text under a real heading.</p>
+
+      <!-- A quotation of some length as a heading, with nothing under it before the next heading. -->
+      <h3 id="quotation">“They found problems that three earlier audits had missed.”</h3>
+      <h3 id="after-quotation">What our clients say</h3>
+      <p>Body text under a real heading.</p>
+
+      <!-- A short heading rendered exactly as body text is, followed by content: info. -->
+      <h3 id="plain-short" class="as-text">Opening hours</h3>
+      <p>Body text under the heading that does not look like one.</p>
+
+      <!-- Heading markup on the last text of the page, rendered as body text: nothing follows it. -->
+      <h4 id="last" class="as-text">Thank you for reading</h4>
+    </main>
+  </body>
+</html>

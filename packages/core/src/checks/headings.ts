@@ -1,5 +1,5 @@
-import { CANDIDATE_FINGERPRINT_RULE, HEADINGS_SC, headingReport, HEADING_CANDIDATE_RULE, LEVEL_INVERSION_RULE } from '../measure/headings.js';
-import type { BodyBaseline, HeadingCandidate, HeadingReason, LevelInversion } from '../measure/headings.js';
+import { CANDIDATE_FINGERPRINT_RULE, HEADINGS_SC, headingReport, HEADING_CANDIDATE_RULE, LEVEL_INVERSION_RULE, NOT_A_HEADING_RULE } from '../measure/headings.js';
+import type { BodyBaseline, HeadingCandidate, HeadingReason, LevelInversion, NonHeading, NonHeadingSignal } from '../measure/headings.js';
 import type { Check, Evidence, FindingDraft, HeadingsConfig } from '../types.js';
 
 const HELP = {
@@ -7,6 +7,8 @@ const HELP = {
     'Text that functions as a heading for the content that follows it has to be exposed as a heading (1.3.1 Info and Relationships): h1 to h6, or role="heading" with aria-level. Whether a piece of text functions as a heading is a judgement, so this is never reported as a failure without confirmation.',
   inversion:
     'Heading levels convey the structure that the visual presentation shows (1.3.1 Info and Relationships). A heading that looks subordinate to another and is coded at a higher level than it contradicts that structure. Skipped levels and several h1 are not contradictions.',
+  notHeading:
+    'Heading markup tells assistive technology that the text names the content that follows it (1.3.1 Info and Relationships). Text marked up as a heading for its size or weight, without being one, puts a section that does not exist into the structure of the page. Whether a piece of text functions as a heading is a judgement, so this is never reported as a failure.',
   inventory: 'Inventory. Nothing to fix on the strength of this entry alone.',
 };
 
@@ -186,6 +188,80 @@ function inversionFinding(inversion: LevelInversion, config: HeadingsConfig): Fi
   };
 }
 
+function signalText(found: NonHeading, signal: NonHeadingSignal, baseline: BodyBaseline | null, config: HeadingsConfig): string | null {
+  switch (signal) {
+    case 'severalSentences':
+      return `it is ${found.sentences} sentences (${found.words} words)`;
+    case 'long':
+      return found.signals.includes('severalSentences') ? null : `it is ${found.words} words long`;
+    case 'quotation':
+      return 'it opens and closes with quotation marks';
+    case 'numeric':
+      return 'it is a number: a price, a figure or a date';
+    case 'bodyStyle':
+      return `it is set as body text is (${px(found.style.size)} at weight ${found.style.weight}${baseline ? `, against ${px(baseline.size)} at weight ${baseline.weight}` : ''}, in its family and colour)`;
+    case 'headsNothing':
+      if (found.signals.includes('headingRun')) return null;
+      return found.nextHeadingLevel !== null
+        ? `nothing stands between it and the next heading${found.followedBy !== null ? `, ${quote(found.followedBy, config)}` : ''} (level ${found.nextHeadingLevel}), so it heads no content`
+        : 'nothing follows it on the page';
+    case 'headingRun':
+      return `it is one of ${found.runLength} headings that follow each other with nothing between them`;
+  }
+}
+
+function nonHeadingFinding(found: NonHeading, baseline: BodyBaseline | null, axComplete: boolean, config: HeadingsConfig): FindingDraft {
+  const colors: Record<string, string> = {};
+  if (HEX_COLOR.test(found.style.color)) colors['text'] = found.style.color;
+  if (baseline && HEX_COLOR.test(baseline.color)) colors['bodyText'] = baseline.color;
+  const flags: string[] = [...found.signals];
+  if (!found.crop) flags.push(found.covered ? 'covered' : 'notCaptured');
+  if (!axComplete) flags.push('axIncomplete');
+  const values: Record<string, string | number | boolean> = {
+    text: found.text,
+    level: found.level,
+    words: found.words,
+    sentences: found.sentences,
+    fontSizePx: found.style.size,
+    fontWeight: found.style.weight,
+    fontFamily: found.style.family,
+    headingsInRun: found.runLength,
+  };
+  if (baseline) {
+    values['bodyFontSizePx'] = baseline.size;
+    values['bodyFontWeight'] = baseline.weight;
+  }
+  if (found.followedBy !== null) values['followedBy'] = found.followedBy;
+  if (found.nextHeadingLevel !== null) values['nextHeadingLevel'] = found.nextHeadingLevel;
+  const why = found.signals.map((signal) => signalText(found, signal, baseline, config)).filter((text): text is string => text !== null);
+  const subject = `The heading ${quote(found.text, config)} (level ${found.level})`;
+  const message =
+    found.status === 'likely'
+      ? `${subject} does not read as a heading: ${why.join('; ')}. Confirm that it does not function as a heading for what follows it.`
+      : found.status === 'advisory'
+        ? `${subject} may not function as a heading: ${why.join('; ')}. One kind of measurement says so and no other confirms it: check what it heads.`
+        : `${subject}: ${why.join('; ')}. Recorded as info: ${axComplete ? 'on its own that does not say that it is not a heading' : 'the accessibility tree could not be read in full, so which text is a heading is not known for certain'}.`;
+  return {
+    check: 'headings',
+    rule: NOT_A_HEADING_RULE,
+    // Said again where findings are made: never `fail`.
+    status: found.status === 'likely' ? 'likely' : found.status === 'advisory' ? 'advisory' : 'info',
+    wcag: HEADINGS_SC,
+    selector: found.selector,
+    frame: found.frame,
+    box: found.box,
+    evidence: {
+      crops: found.crop ? [found.crop] : [],
+      colors,
+      ratios: baseline ? { sizeToBodyText: Math.round((found.style.size / baseline.size) * 100) / 100 } : {},
+      flags,
+      values,
+    },
+    message,
+    help: HELP.notHeading,
+  };
+}
+
 export const headingsCheck: Check = {
   id: 'headings',
   evaluate(snapshot, config) {
@@ -196,11 +272,12 @@ export const headingsCheck: Check = {
     const { baseline } = report;
     if (baseline) for (const candidate of report.candidates) drafts.push(candidateFinding(candidate, baseline, survey.axComplete, config.headings));
     for (const inversion of report.inversions) drafts.push(inversionFinding(inversion, config.headings));
+    for (const found of report.nonHeadings) drafts.push(nonHeadingFinding(found, baseline, survey.axComplete, config.headings));
 
     const likely = report.candidates.filter((candidate) => candidate.status === 'likely').length;
     const beyond = survey.total - survey.blocks.length;
     const flags: string[] = [];
-    if (beyond > 0 || report.omitted > 0 || report.omittedInversions > 0) flags.push('truncated');
+    if (beyond > 0 || report.omitted > 0 || report.omittedInversions > 0 || report.omittedNonHeadings > 0) flags.push('truncated');
     if (!survey.axComplete) flags.push('axIncomplete');
     if (baseline?.lowText) flags.push('lowText');
     const { width, height } = snapshot.environment.viewport;
@@ -222,6 +299,7 @@ export const headingsCheck: Check = {
           exposedHeadings: report.exposedHeadings,
           likely,
           candidates: report.candidates.length - likely,
+          notHeadings: report.nonHeadings.length,
           ...(baseline ? { bodyFontSizePx: baseline.size, bodyFontWeight: baseline.weight, bodyStyleFrom: baseline.from, bodyStyleChars: baseline.chars } : {}),
         },
       },
@@ -235,6 +313,8 @@ export const headingsCheck: Check = {
           : ' No visible text was found.') +
         ` The accessibility tree exposes ${report.exposedHeadings} heading(s) with visible text.` +
         ` ${likely} block(s) look like headings without being exposed as one, and ${report.candidates.length - likely} more are recorded as candidates.` +
+        (report.nonHeadings.length > 0 ? ` ${report.nonHeadings.length} exposed heading(s) do not read as a heading or may not.` : '') +
+        (report.omittedNonHeadings > 0 ? ` ${report.omittedNonHeadings} more of those are not listed (limit of ${config.headings.maxNonHeadings}).` : '') +
         (report.omitted > 0 ? ` ${report.omitted} further candidate(s) are not listed (limit of ${config.headings.maxCandidates}).` : '') +
         (report.omittedInversions > 0
           ? ` ${report.omittedInversions} further contradiction(s) between heading levels are not listed (limit of ${config.headings.maxInversions}).`

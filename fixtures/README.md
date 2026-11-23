@@ -33,6 +33,12 @@ The `headings/source-*` fixtures are well-marked pages: as they are, they must g
 styles are set by class) and expects at least 90% of them back as candidates, and at least 90% as `likely`, with
 nothing else `likely`.
 
+`headings/not-a-heading` and `headings/not-a-heading-controls` go together, for the rule
+`headings/heading-not-a-heading`: the first holds heading markup on text that is no heading, the second real
+headings that share one trait with it, and gives nothing but the survey. `e2e/headings.spec.ts` takes away what
+holds the controls back (the pictures between card titles, the closed panels, the pointer) and expects the
+findings to appear.
+
 The `lists/source-*` fixtures are well-marked pages as well. `e2e/lists-mutation.spec.ts` replaces every `ul`,
 `ol` and `li` by a `div` that keeps its attributes and expects every list back as `likely`, with nothing else
 `likely`.

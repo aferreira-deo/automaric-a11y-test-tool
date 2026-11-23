@@ -27,6 +27,8 @@ const chosen = [
   'icon-contrast/svg-currentcolor',
   'icon-contrast/input-boundaries',
   'headings/baseline',
+  'headings/not-a-heading',
+  'headings/not-a-heading-controls',
   'lists/glyph-lists',
   'grouping/choice-sets',
 ];
@@ -93,7 +95,9 @@ test('the page is put back after a scan and the debugger is detached', async ({ 
   const before = await pageState(page);
   expect(before.windowScroll[1]).toBe(120);
   await scan(panel, ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping']);
-  expect(await pageState(page)).toEqual(before);
+  // Without the height of the viewport: Chrome's bar is still there for some time after the
+  // debugger is detached, unless it already showed before the scan (see `settled` below).
+  expect({ ...(await pageState(page)), height: 0 }).toEqual({ ...before, height: 0 });
   expect(await extension.attached(tabId)).toBe(false);
 });
 
