@@ -186,6 +186,18 @@ function review(pathname, request, origin, searchParams) {
       }
       return reviewPage('Behind basic authentication', '<button>Bravo</button>');
     }
+    // Pages for the tests of the extension (e2e/extension): one with enough Tab stops for a scan
+    // to be interrupted while it runs, and one whose ids and texts are markup.
+    case '/_ci/ext-many.html':
+      return reviewPage('Many', Array.from({ length: Number(searchParams.get('n')) || 150 }, (_, index) => `<button id="b${index}">Button ${index}</button>`).join(''));
+    case '/_ci/ext-hostile.html':
+      return reviewPage(
+        'Hostile',
+        `<button id='x"><img src=x onerror=window.__pwned=1>'>Go</button>` +
+          '<div style="font-size:28px;font-weight:700;margin:24px 0 8px">&lt;img src=x onerror=&quot;window.__pwned=1&quot;&gt;&lt;script&gt;window.__pwned=1&lt;/script&gt;</div>' +
+          '<p>Body text that follows the bold line, long enough to be a paragraph of its own, so that the line above reads as a title.</p>' +
+          '<button aria-label="<b>bold</b>" class="ok" style="border:0"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="#cccccc" d="M2 2h20v20H2z"/></svg></button>',
+      );
     // A sitemap that is served from another origin than the one that was asked for.
     case '/_ci/sm-redirect.xml':
       return redirect(`${other}/_ci/sm-target.xml`);

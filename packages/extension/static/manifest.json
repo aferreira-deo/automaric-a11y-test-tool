@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "set by build.mjs",
+  "version": "0",
+  "description": "Checks for WCAG 2.2 A and AA items that rule engines do not cover, run on the tab you choose. Assists a tester; makes no statement about conformance.",
+  "minimum_chrome_version": "118",
+  "permissions": ["debugger", "sidePanel", "storage", "activeTab"],
+  "optional_host_permissions": ["http://localhost/*", "http://*.localhost/*", "http://127.0.0.1/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Open the side panel" },
+  "side_panel": { "default_path": "panel.html" },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; object-src 'none'; style-src 'self'; img-src 'self' blob:; connect-src http://localhost:* http://*.localhost:* http://127.0.0.1:* https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  }
+}

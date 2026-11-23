@@ -178,6 +178,8 @@ export async function withStablePage<T>(
   config: Config,
   clips: Record<string, Screenshot>,
   body: (page: StablePage) => Promise<T>,
+  /** Called when `body` is over, before anything is put back: a gate on `cdp` is opened here (see `gateSession`). */
+  beforeRestore: () => void | Promise<void> = () => undefined,
 ): Promise<T> {
   const scale = config.focus.deviceScaleFactor;
   const overrideMotion = !original.reducedMotion;
@@ -284,6 +286,7 @@ export async function withStablePage<T>(
     await agent('stabilise()');
     return await body(page);
   } finally {
+    await beforeRestore();
     if (agentReady) await agent('cleanup()').catch(() => undefined);
     await cdp.send('CSS.disable').catch(() => undefined);
     await cdp.send('DOM.disable').catch(() => undefined);

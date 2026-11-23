@@ -6,7 +6,6 @@
     { "path": "packages/adjudicators" },
     { "path": "packages/reporters" },
     { "path": "packages/playwright" },
-    { "path": "packages/cli" },
-    { "path": "packages/extension" }
+    { "path": "packages/cli" }
   ]
 }

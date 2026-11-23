@@ -2,8 +2,14 @@
   "name": "@a11y-vision/extension",
   "version": "0.0.0",
   "private": true,
-  "description": "Chrome MV3 extension (milestone M8, placeholder)",
+  "description": "Chrome MV3 extension: side panel that runs the checks on the active tab through chrome.debugger",
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist"]
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "@a11y-vision/adjudicators": "workspace:*",
+    "@a11y-vision/collector-cdp": "workspace:*",
+    "@a11y-vision/core": "workspace:*",
+    "@a11y-vision/reporters": "workspace:*"
+  },
+  "devDependencies": { "rolldown": "1.2.19" }
 }

@@ -251,7 +251,24 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0
 
-  packages/extension: {}
+  packages/extension:
+    dependencies:
+      '@a11y-vision/adjudicators':
+        specifier: workspace:*
+        version: link:../adjudicators
+      '@a11y-vision/collector-cdp':
+        specifier: workspace:*
+        version: link:../collector-cdp
+      '@a11y-vision/core':
+        specifier: workspace:*
+        version: link:../core
+      '@a11y-vision/reporters':
+        specifier: workspace:*
+        version: link:../reporters
+    devDependencies:
+      rolldown:
+        specifier: 1.2.19
+        version: 1.2.19
 
   packages/playwright:
     dependencies:

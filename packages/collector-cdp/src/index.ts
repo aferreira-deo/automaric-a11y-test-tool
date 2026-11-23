@@ -9,9 +9,29 @@ import { collectIcons } from './icons.js';
 import { collectLists } from './lists.js';
 import { markAccessibility } from './accessibility.js';
 import { withStablePage } from './page.js';
-import type { CdpSession } from './session.js';
+import { gateSession, stopReason } from './session.js';
+import type { CdpSession, StopSignal } from './session.js';
 
-export type { CdpSession } from './session.js';
+export { CollectionStoppedError } from './session.js';
+export type { CdpSession, StopSignal } from './session.js';
+
+/** How a collection is run. All optional. */
+export interface CollectOptions {
+  /**
+   * Stops the collection when it fires (an `AbortSignal` fits): the collector stops sending,
+   * puts the page back as after a full collection, and `collectSnapshot` rejects with the
+   * reason of the signal. Nothing is returned for a page that was read in part.
+   */
+  signal?: StopSignal;
+  /**
+   * After a stop, how long the commands that were under way are waited for before the page is
+   * put back, in milliseconds (see `GatedSession.release`). Defaults to `IN_FLIGHT_TIMEOUT_MS`.
+   */
+  inFlightTimeoutMs?: number;
+}
+
+/** Long enough for a capture that is being taken to come back, short enough for a stop to feel like one. */
+export const IN_FLIGHT_TIMEOUT_MS = 3000;
 
 /** The document in the main frame: `loaderId` changes when the frame goes to another document, and not when it only changes its address. */
 interface MainDocument {
@@ -71,13 +91,21 @@ async function waitForDocument(cdp: CdpSession, state: 'parsed' | 'loaded', time
  * Chrome renumbers the nodes of a document when it has parsed it, and what was asked about a
  * node before that then fails.
  */
-export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<Snapshot> {
+export async function collectSnapshot(cdp: CdpSession, config: Config, options: CollectOptions = {}): Promise<Snapshot> {
+  const { signal } = options;
+  // Waiting for a document can take as long as a navigation may: a stop ends that wait too.
+  const waiting = gateSession(cdp, signal).session;
+  const stopped = (): void => {
+    if (signal?.aborted) throw stopReason(signal);
+  };
   const attempt = async (): Promise<{ from: MainDocument; to: MainDocument | null; snapshot?: Snapshot; error?: unknown }> => {
     // The document that is read is one that has been parsed: asked again after the wait, as
     // the page may have gone to another document while it was waited for.
+    stopped();
     let from = await mainDocument(cdp);
     for (let round = 0; round < LOAD_ATTEMPTS; round++) {
-      await waitForDocument(cdp, 'parsed', config.focus.navigationTimeoutMs);
+      await waitForDocument(waiting, 'parsed', config.focus.navigationTimeoutMs);
+      stopped();
       const now = await mainDocument(cdp);
       if (now.loaderId === from.loaderId) break;
       from = now;
@@ -85,10 +113,12 @@ export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<
     let snapshot: Snapshot | undefined;
     let error: unknown;
     try {
-      snapshot = await collectOnce(cdp, config);
+      snapshot = await collectOnce(cdp, config, signal, options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS);
     } catch (caught) {
       error = caught ?? new Error('Collection failed.');
     }
+    // Stopped: not a page that went elsewhere, and nothing to read again.
+    stopped();
     const now = await mainDocument(cdp).catch(() => null);
     return { from, to: now && now.loaderId !== from.loaderId ? now : null, ...(snapshot ? { snapshot } : {}), ...(error !== undefined ? { error } : {}) };
   };
@@ -98,7 +128,8 @@ export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<
     if (first.snapshot) return first.snapshot;
     throw first.error;
   }
-  await waitForDocument(cdp, 'loaded', config.focus.navigationTimeoutMs);
+  await waitForDocument(waiting, 'loaded', config.focus.navigationTimeoutMs);
+  stopped();
   const second = await attempt();
   if (second.to) {
     throw new Error(
@@ -113,7 +144,10 @@ export async function collectSnapshot(cdp: CdpSession, config: Config): Promise<
   return second.snapshot;
 }
 
-async function collectOnce(cdp: CdpSession, config: Config): Promise<Snapshot> {
+async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, inFlightTimeoutMs: number): Promise<Snapshot> {
+  // Everything below goes through the gate, the restoring of the page included: it is opened for that.
+  const gate = gateSession(raw, signal);
+  const cdp = gate.session;
   const world = await createWorld(cdp);
   const { reducedMotion, mediaType, ...environment } = await readEnvironment(world);
   const snapshot: Snapshot = {
@@ -151,7 +185,7 @@ async function collectOnce(cdp: CdpSession, config: Config): Promise<Snapshot> {
       const signatures: Record<string, string> = {};
       for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
       snapshot.signatures = signatures;
-    });
+    }, () => gate.release(inFlightTimeoutMs));
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
   }

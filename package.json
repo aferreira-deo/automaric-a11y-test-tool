@@ -6,13 +6,13 @@
   "packageManager": "pnpm@12.21.0",
   "engines": { "node": ">=22.12" },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node packages/extension/build.mjs",
     "clean": "tsc -b --clean",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:browser": "playwright test",
-    "check": "tsc -b && eslint . && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
+    "check": "tsc -b && node packages/extension/build.mjs && eslint . && tsc -p tsconfig.typecheck.json --noEmit && vitest run && playwright test"
   },
   "devDependencies": {
     "@a11y-vision/adjudicators": "workspace:*",

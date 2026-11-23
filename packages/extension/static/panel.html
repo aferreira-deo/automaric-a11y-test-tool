@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>a11y-vision</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <h1 data-text="title">a11y-vision</h1>
+      <p class="muted" data-text="intro"></p>
+    </header>
+    <main>
+      <section aria-labelledby="scan-heading">
+        <h2 id="scan-heading" data-text="scanHeading"></h2>
+        <p id="target" class="muted"></p>
+        <form id="scan-form">
+          <fieldset>
+            <legend data-text="checksLegend"></legend>
+            <div id="checks"></div>
+          </fieldset>
+          <p id="scan-note" class="muted" data-text="scanNote"></p>
+          <p id="model-notice" class="notice" hidden></p>
+          <button type="submit" id="scan" class="primary" aria-describedby="scan-note" data-text="scanButton"></button>
+        </form>
+        <p id="status" role="status" aria-live="polite"></p>
+        <p id="counts" class="muted"></p>
+        <p id="error" class="error" role="alert"></p>
+      </section>
+
+      <section id="results" aria-labelledby="results-heading" hidden>
+        <h2 id="results-heading" tabindex="-1" data-text="resultsHeading"></h2>
+        <p id="results-for" class="muted"></p>
+        <p id="summary"></p>
+        <p id="results-note" class="notice" hidden></p>
+        <div class="toolbar">
+          <div class="field">
+            <label for="group-by" data-text="groupByLabel"></label>
+            <select id="group-by">
+              <option value="status" data-text="groupByStatus"></option>
+              <option value="check" data-text="groupByCheck"></option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="show" data-text="showLabel"></label>
+            <select id="show">
+              <option value="all" data-text="showAll"></option>
+              <option value="to-review" data-text="showToReview"></option>
+              <option value="confirmed" data-text="showConfirmed"></option>
+              <option value="dismissed" data-text="showDismissed"></option>
+            </select>
+          </div>
+        </div>
+        <div class="export" role="group" aria-labelledby="export-heading">
+          <h3 id="export-heading" data-text="exportHeading"></h3>
+          <div class="buttons">
+            <button type="button" id="export-json" data-text="exportJson"></button>
+            <button type="button" id="export-html" data-text="exportHtml"></button>
+            <button type="button" id="export-sarif" data-text="exportSarif"></button>
+          </div>
+          <p class="muted" data-text="exportNote"></p>
+        </div>
+        <p id="action-status" role="status" aria-live="polite"></p>
+        <div id="findings"></div>
+      </section>
+
+      <section aria-labelledby="settings-heading">
+        <h2 id="settings-heading" data-text="settingsHeading"></h2>
+        <details id="settings">
+          <summary data-text="settingsSummary"></summary>
+          <p class="muted" data-text="settingsIntro"></p>
+          <form id="settings-form" novalidate>
+            <div class="check">
+              <input type="checkbox" id="model-enabled" />
+              <label for="model-enabled" data-text="modelEnable"></label>
+            </div>
+            <div class="field">
+              <label for="base-url" data-text="baseUrlLabel"></label>
+              <input type="url" id="base-url" autocomplete="off" spellcheck="false" aria-describedby="base-url-hint settings-error" />
+              <p id="base-url-hint" class="muted" data-text="baseUrlHint"></p>
+            </div>
+            <div class="field">
+              <label for="model-name" data-text="modelNameLabel"></label>
+              <input type="text" id="model-name" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field">
+              <label for="api-key" data-text="apiKeyLabel"></label>
+              <input type="password" id="api-key" autocomplete="off" spellcheck="false" aria-describedby="api-key-hint api-key-state" />
+              <p id="api-key-hint" class="muted" data-text="apiKeyHint"></p>
+              <p id="api-key-state" class="muted"></p>
+              <button type="button" id="remove-key" data-text="apiKeyRemove" hidden></button>
+            </div>
+            <div class="check">
+              <input type="checkbox" id="allow-remote" />
+              <label for="allow-remote" data-text="allowRemoteLabel"></label>
+            </div>
+            <div class="check">
+              <input type="checkbox" id="send-images" />
+              <label for="send-images" data-text="sendImagesLabel"></label>
+            </div>
+            <p id="settings-error" class="error" role="alert"></p>
+            <button type="submit" id="save-settings" data-text="saveSettings"></button>
+            <p id="settings-status" role="status" aria-live="polite"></p>
+            <p id="permission-status" role="status" aria-live="polite"></p>
+          </form>
+        </details>
+      </section>
+    </main>
+    <a id="download" hidden></a>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>
