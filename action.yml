@@ -1,0 +1,155 @@
+name: a11y-vision scan
+description: >-
+  Scans pages for a small set of WCAG 2.2 A/AA findings that rule engines do not cover, writes JSON, HTML and
+  SARIF reports, and fails the job on a "fail" finding that the baseline does not record. Assists a tester; makes
+  no statement of conformance.
+
+# Not published: use it from a checkout of this repository (uses: ./path) or by repository and commit
+# (uses: owner/repo@<full commit SHA>). See "CI" in the README.
+
+inputs:
+  urls:
+    description: Addresses to scan, separated by spaces or line breaks.
+    required: false
+    default: ''
+  urls-file:
+    description: File of the calling repository with one address per line (# starts a comment line).
+    required: false
+    default: ''
+  sitemap:
+    description: Address or file of a sitemap.xml or sitemap index.
+    required: false
+    default: ''
+  max-urls:
+    description: Most pages in one run. Empty for the default of the tool.
+    required: false
+    default: ''
+  baseline:
+    description: Baseline file of the calling repository. Only "fail" findings it does not record fail the job.
+    required: false
+    default: ''
+  checks:
+    description: Comma-separated checks to run. Empty for the defaults.
+    required: false
+    default: ''
+  config:
+    description: JSON config file of the calling repository.
+    required: false
+    default: ''
+  storage-state:
+    description: >-
+      Path of a Playwright storage state for signed-in pages. The file holds session secrets: write it from a
+      secret in a step of your workflow, outside the repository (for example under runner.temp), never commit it.
+    required: false
+    default: ''
+  output-dir:
+    description: Directory for report.json, report.html, report.sarif and crops/.
+    required: false
+    default: a11y-vision-report
+  sarif-anchor:
+    description: >-
+      File of the repository that SARIF results are attached to. Defaults to urls-file when that is given.
+      Without one, results are located at the address of their page, which GitHub code scanning does not document.
+    required: false
+    default: ''
+  upload-sarif:
+    description: Upload the SARIF file to GitHub code scanning. The calling job needs the permission security-events write.
+    required: false
+    default: 'false'
+  fail-on-findings:
+    description: Fail the job on exit code 1 (a "fail" finding the baseline does not record). An error (2) always fails it.
+    required: false
+    default: 'true'
+  setup-node:
+    description: Install Node.js with actions/setup-node. Set to false when the job already has Node 22.12 or later.
+    required: false
+    default: 'true'
+  node-version:
+    description: Node.js version for setup-node.
+    required: false
+    default: '24'
+  install-browser-deps:
+    description: Install the system packages Chromium needs (uses sudo; for GitHub-hosted Linux runners).
+    required: false
+    default: 'true'
+
+outputs:
+  exit-code:
+    description: Exit code of the scan (0 no new fail, 1 new fail, 2 error).
+    value: ${{ steps.scan.outputs.exit-code }}
+  json-file:
+    description: Path of the JSON report.
+    value: ${{ steps.scan.outputs.json-file }}
+  html-file:
+    description: Path of the HTML evidence report.
+    value: ${{ steps.scan.outputs.html-file }}
+  sarif-file:
+    description: Path of the SARIF file.
+    value: ${{ steps.scan.outputs.sarif-file }}
+  crops-dir:
+    description: Directory of the evidence captures.
+    value: ${{ steps.scan.outputs.crops-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      if: inputs.setup-node == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    # No input is used in this step. pnpm comes from corepack at the version pinned in package.json,
+    # and the lockfile decides every dependency.
+    - name: Install and build the scanner
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        INSTALL_BROWSER_DEPS: ${{ inputs.install-browser-deps }}
+      run: |
+        corepack pnpm install --frozen-lockfile
+        corepack pnpm build
+        if [ "$INSTALL_BROWSER_DEPS" = "true" ]; then
+          corepack pnpm exec playwright install --with-deps chromium
+        else
+          corepack pnpm exec playwright install chromium
+        fi
+
+    # Inputs reach the script as environment variables only; it starts the scanner without a shell.
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_URLS: ${{ inputs.urls }}
+        INPUT_URLS_FILE: ${{ inputs.urls-file }}
+        INPUT_SITEMAP: ${{ inputs.sitemap }}
+        INPUT_MAX_URLS: ${{ inputs.max-urls }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_CHECKS: ${{ inputs.checks }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_STORAGE_STATE: ${{ inputs.storage-state }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+        INPUT_SARIF_ANCHOR: ${{ inputs.sarif-anchor }}
+      run: node "$GITHUB_ACTION_PATH/scripts/action-scan.mjs"
+
+    - name: Upload SARIF to code scanning
+      if: inputs.upload-sarif == 'true' && steps.scan.outputs.sarif-file != ''
+      uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-file }}
+        category: a11y-vision
+
+    - name: Result
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.scan.outputs.exit-code }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        code="${EXIT_CODE:-2}"
+        if [ "$code" = "1" ] && [ "$FAIL_ON_FINDINGS" != "true" ]; then
+          echo "The scan has \"fail\" findings that the baseline does not record; fail-on-findings is off."
+          exit 0
+        fi
+        exit "$code"

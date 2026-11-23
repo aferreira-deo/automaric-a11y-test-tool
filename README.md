@@ -3,7 +3,8 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M6. Five checks are implemented, and all run by default. None of them needs a model. When a model is
+Status: M7. Five checks are implemented, and all run by default. A run can cover several pages, be compared with
+a baseline, and be written as SARIF (see [CI](#ci)). None of them needs a model. When a model is
 configured it judges the heading candidates, the series of lines with bullets or numbers and the sets of radios
 or checkboxes under a visible text, and nothing else (see "Having a model judge candidates").
 
@@ -27,7 +28,10 @@ runs one of them.
 node packages/cli/dist/bin.js scan https://example.com --html report.html --crops crops -o report.json
 ```
 
-Exit code 1 means at least one `fail`. `likely`, `advisory` and `info` never fail a run.
+Exit code 1 means at least one `fail` (with a baseline: one that the baseline does not record), 2 an error.
+`likely`, `advisory` and `info` never fail a run. A short summary of counts goes to stderr (`--quiet` leaves it
+out); stdout is the JSON report and nothing else. Several pages in one run, a baseline, SARIF, signed-in pages and
+the GitHub Action are under [CI](#ci).
 
 ```ts
 import { A11yVision } from '@a11y-vision/playwright';
@@ -1062,6 +1066,320 @@ when the scan starts is waited for first (`focus.navigationTimeoutMs`, 15 s at m
 - The stabilising style sheet is a constructed sheet, which a Content-Security-Policy does not block. Pseudo-elements
   and labels are not checked for author rules that outweigh it.
 
+## CI
+
+Everything here is the same `scan` command. Nothing is published: the commands below run from a checkout and a
+build of this repository.
+
+```sh
+# several pages in one run, every report, compared with a baseline
+node packages/cli/dist/bin.js scan --urls a11y/urls.txt \
+  --baseline a11y/baseline.json \
+  -o report.json --html report.html --sarif report.sarif --sarif-anchor a11y/urls.txt --crops crops
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | No `fail` finding, or none that the baseline does not record. |
+| 1 | At least one `fail` finding that the baseline does not record (every `fail` when no baseline is given). |
+| 2 | Error: wrong usage; a config, baseline, list, sitemap or storage state file that cannot be used; or a page that could not be scanned. |
+
+`likely`, `advisory` and `info` never change the exit code. Code 2 wins over code 1: a run in which a page could
+not be scanned is not complete, whatever the other pages gave, and its reports and its summary say how many `fail`
+findings there are all the same. Exit code 0 is not a statement of conformance.
+
+The summary on stderr is a few lines that start with `[a11y-vision] `: pages scanned and not scanned, findings by
+status, with a baseline the new and the recorded `fail` findings and what happened to the file, and the exit code
+with its reason. `--quiet` leaves it out, with the line per page of a run over several pages. Errors and warnings
+are always printed.
+
+### Several pages
+
+- `scan <url> <url> ...`: any number of addresses.
+- `--urls <file>`: one http(s) address per line. Blank lines and lines that start with `#` are skipped (a `#`
+  further on is part of the address). A line that is not an address is an error that names the line: a list with
+  a typo is not scanned in part.
+- `--sitemap <url-or-file>`: a `sitemap.xml` or a sitemap index, gzip or not. An index is followed one level
+  down, which is all the protocol has.
+
+The three can be combined; an address given twice is scanned once. Pages are scanned one after the other, each in
+a browser context of its own, so that nothing one page stores (a dismissed banner, a cookie) changes the next: a
+page gives the same findings in a run as alone. There is no parallel scanning yet.
+
+A page that cannot be scanned (no answer, a timeout after `run.navigationTimeoutMs`, an HTTP status of 400 or
+more) is reported on stderr, in the JSON report (`a11yVision.errors`), at the top of the HTML report and as a
+notification in the SARIF file, and the run goes on with the next page. The run then exits 2. An error page is not
+scanned in place of the page that was asked for, because its findings would be those of another page and a short
+error page would look like a clean scan; `--allow-http-errors` scans it (to test the error page itself). This
+holds for one address as well, where an HTTP error now gives `Scan failed` and exit code 2.
+
+Limits, all in the `run` section of the config file:
+
+| Setting | Default | |
+|---|---|---|
+| `maxUrls` (`--max-urls`) | 200 | Pages in one run. More addresses given by hand is an error. A sitemap with more is cut at the limit, in the order of the file, and the cut is said on stderr and counted in the report (`a11yVision.input.overLimit`). |
+| `sameOrigin` (`--any-origin` switches it off) | true | Sitemap entries on another origin than the sitemap are left out and counted (`a11yVision.input.otherOrigin`); the same goes for the sitemaps an index lists. The origin of a sitemap read from a file is that of its first entry. Addresses given by hand or in a list are not filtered. |
+| `maxInputBytes` | 52428800 | Largest sitemap or list, after decompression: the 50 MB of the sitemap protocol. |
+| `maxSitemaps` | 50 | Sitemaps read from one index. |
+| `sitemapTimeoutMs` | 30000 | For fetching one sitemap. |
+| `navigationTimeoutMs` | 30000 | For loading one page. |
+| `httpErrorIsFailure` (`--allow-http-errors` switches it off) | true | |
+| `sarifMaxResults` | 25000 | See SARIF below. Cannot be raised. |
+
+A sitemap is content of the site under test, so it is read as untrusted input, by a small strict tokenizer in
+`packages/cli/src/sitemap.ts` and not by an XML parser (no dependency was added). A document type declaration is
+refused, so there are no entity declarations, no external entities and no expansion (no XXE, no "billion laughs");
+only the five predefined entities and numeric character references are understood; nothing is fetched or
+resolved; depth, size and the number of addresses kept are bounded. Only `<loc>` directly inside `<url>` or
+`<sitemap>` is read, so the image and alternate-language extensions are not taken for pages. A sitemap that
+cannot be read is an error (exit 2), never an empty run. A sitemap is fetched by the tool itself with a plain GET,
+without the stored session of `--storage-state`: it is the only request of a scan that neither the browser nor
+the model adapter makes, and it goes to the address you gave or to a sitemap of the same origin listed there.
+
+#### Reports of a run over several pages
+
+One address given alone, without `--urls` and `--sitemap`, gives the report of one page exactly as before: the
+shape depends on how the command is written, not on how many pages a sitemap turns out to hold. Anything else
+gives the report of a run:
+
+```json
+{
+  "testEngine": { "name": "a11y-vision", "version": "0.0.0" },
+  "timestamp": "...",
+  "pages": [
+    { "testEngine": {}, "url": "...", "timestamp": "...", "violations": [], "incomplete": [], "passes": [], "inapplicable": [],
+      "a11yVision": { "environment": {}, "findings": [], "requestedUrl": "...", "cropsDir": "001-example.com-about" } }
+  ],
+  "a11yVision": {
+    "summary": { "pages": 3, "errors": 0, "fail": 5, "likely": 4, "advisory": 2, "info": 30, "newFail": 2, "baselinedFail": 3 },
+    "errors": [{ "url": "...", "message": "..." }],
+    "baseline": { "new": 2, "baselined": 3, "stale": 0, "notScanned": 0, "added": 0, "pruned": 0 },
+    "input": { "otherOrigin": 0, "overLimit": 0, "duplicates": 0 }
+  }
+}
+```
+
+Each entry of `pages` is a report in the single-page (axe) shape, so what reads one page reads each of these.
+`url` is the document that was read, `requestedUrl` the address that was asked for (they differ after a
+redirect). `baseline` is there when a baseline was used.
+
+- HTML: one self-contained file. Pages not scanned first, then a table of counts per page, then each page as the
+  single-page report shows it. Captures are embedded, so the file grows with the number of pages.
+- `--crops <dir>`: for one page, `<dir>/<crop id>` as before. For a run, one directory per page,
+  `<dir>/<NNN>-<host-and-path>/<crop id>`, where `NNN` is the place of the page in the run; the directory is
+  `cropsDir` in the report of the page.
+- SARIF: one run with the results of every page.
+
+### Baseline
+
+A baseline file records the `fail` findings that are accepted for now, so that a build breaks on a `fail` that is
+new and not on the ones already known.
+
+```sh
+scan --urls a11y/urls.txt --baseline a11y/baseline.json --update-baseline   # write it, or add to it
+scan --urls a11y/urls.txt --baseline a11y/baseline.json                     # compare: exit 1 only on a new fail
+scan --urls a11y/urls.txt --baseline a11y/baseline.json --prune-baseline    # also drop entries that no longer occur
+```
+
+- A recorded `fail` is still reported, in the same lists as the others (`violations` in the JSON report), and
+  marked: `"baseline": "baselined"` on the finding and on its node in the JSON report (`"new"` on the others),
+  "In the baseline" / "New" beside the status in the HTML report, `baselineState` `unchanged` / `new` in SARIF.
+  The HTML report says that a recorded failure is still a failure. Nothing is hidden, and nothing says a page
+  meets anything.
+- Only `fail` findings are recorded, since only they can break a build. A finding that was `likely` when the file
+  was written and is `fail` now is new.
+- An entry is one finding on one page: the key of the page, and the finding id (the fingerprint of rule, success
+  criterion, frame and selector) with the rule, criterion, frame and selector themselves. A finding is covered
+  only when all five are equal, so a failure of another rule or criterion on the same element is new, and a hash
+  collision cannot cover anything. Measured values, the message and the status are not part of it: an indicator
+  that goes from 1.7:1 to 1.9:1 stays recorded. A selector that changes (an id renamed, an element moved where
+  the selector depends on position) gives a new finding and a stale entry: that is the price of an identity that
+  needs no source file. Seen on a real page: an element whose `id` is generated anew on every load
+  (`#react-aria…` with a number in it) gets another selector each time, so its failure is new on every run
+  and its entry stale on every run. The selectors come from the collector and are not changed by a baseline;
+  until they avoid generated ids, such a finding cannot be recorded.
+- The page is the address that was asked for, not the one it redirected to, turned into a key. By default only
+  the fragment is dropped; scheme and host are lower case and a default port is left out, as `URL` writes them.
+  The query is kept as it is and `/a` and `/a/` are two pages, because a server may answer them differently. The
+  `baseline` section of the config file changes that: `stripFragment` (true), `sortQuery` (false),
+  `stripTrailingSlash` (false, never applied to the root), `dropQueryParams` (`[]`; names such as `utm_source`
+  or a session parameter). The settings are written into the file and a comparison uses those of the file, so
+  that its entries keep their pages; a config file that disagrees gets one line on stderr.
+- Several pages: entries are kept per page, and a finding recorded for one page is new on another. Entries of
+  pages that the run did not scan (not asked for, or not loaded) are never touched, never counted as stale and
+  never pruned: a run over part of the site can update its part of the file.
+- Stale entries (recorded, on a page of this run, and no `fail` matches any more) are counted in the summary and
+  in the report (`baseline.stale`) and kept, so that a failure that comes and goes does not become new each time.
+  `--prune-baseline` removes them; it can be combined with `--update-baseline` or used alone, in which case new
+  failures still give exit code 1.
+- `--update-baseline` adds the `fail` findings of the run to the file, creates it when it is missing, and exits 0
+  unless a page could not be scanned. Without it a missing file is an error: a typo in the path must not turn
+  into a run where everything is new, or one where the comparison is skipped.
+- A file that is not valid JSON, has another `version`, or is not exactly what this version writes is an error
+  (exit 2) before anything is scanned, with or without `--update-baseline`, and the file is left as it is.
+
+The format, version 1. Pages are sorted by key and entries by rule, frame and selector; there is no date and
+nothing else of the run in it, so the same findings always give the same bytes and a diff of the file in a review
+is a change of what is accepted:
+
+```json
+{
+  "version": 1,
+  "tool": "a11y-vision",
+  "urlKey": { "stripFragment": true, "sortQuery": false, "stripTrailingSlash": false, "dropQueryParams": [] },
+  "pages": [
+    {
+      "url": "https://example.com/contact",
+      "findings": [
+        { "id": "9f3c1f0e5d2a7b41", "rule": "focus-indicator/no-visible-change", "sc": "2.4.7", "frame": "", "selector": "#send" }
+      ]
+    }
+  ]
+}
+```
+
+### SARIF
+
+`--sarif <file>` writes SARIF 2.1.0. The output is validated in the tests against the official OASIS schema
+(Errata 01), a copy of which is in `packages/reporters/test-fixtures/` (see the note on its licence there). It is
+written for what GitHub documents that code scanning reads
+([SARIF support for code scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)).
+It has not been uploaded to GitHub from here.
+
+| Status | `level` | `kind` | |
+|---|---|---|---|
+| `fail` | `error` | `fail` | |
+| `likely` | `warning` | `fail` | The message opens with "Needs confirmation by a tester:". |
+| `advisory` | `note` | `fail` | The message opens with "Best practice, not a failure:". |
+| `info` | `none` | `informational` | Left out unless `--sarif-include-info`. |
+
+- SARIF has `kind: "review"` for what a person has to look at, which then requires `level: "none"`. GitHub
+  documents `note`, `warning` and `error` only, so a `likely` is a warning that says in words what it is. GitHub
+  fails the code scanning check of a pull request on `error` (and on security severities this tool does not use)
+  by default, which is the rule of the tool: only `fail` breaks a build.
+- Rules: one per rule name, with `shortDescription`, `fullDescription`, `help.text` (the help of the finding, the
+  success criterion, what the statuses mean, and that the absence of results is not a statement of conformance),
+  `defaultConfiguration.level`, and `properties`: `tags` (`accessibility`, the axe-style tag such as `wcag247`,
+  `WCAG 2.4.7`, `WCAG level AA`), `precision` and `problem.severity`. There is no `helpUri`: the links to the
+  Understanding documents are not written from memory.
+- Each result has its level, a message (finding, element, page), `partialFingerprints`, `baselineState` on a
+  `fail` when a baseline was used, and `properties` (status, finding id, check, page, requested address,
+  selector, frame, criterion). The element is a `logicalLocation` of kind `element`.
+- `partialFingerprints.primaryLocationLineHash` is the only fingerprint GitHub reads. The tool gives it itself
+  (a hash of the key of the page and the finding id), because it cannot be worked out from a line of a source
+  file; the upload action keeps a fingerprint that is already there. The same value is under `a11yVision/v1`.
+- Pages that could not be scanned are `toolExecutionNotifications` of the invocation, whose
+  `executionSuccessful` is then false.
+- Limits of GitHub: a file with more than 25,000 results in a run is rejected, and 5,000 are shown. The tool
+  writes at most `run.sarifMaxResults` (25,000), most severe first, and says on stderr and in the file when it
+  leaves any out. Rule texts are cut at 1,024 characters. The 10 MB limit (gzip) is not checked.
+
+**Where a finding is.** A finding is on a web page, and SARIF as GitHub reads it locates a result in a file of
+the repository: `artifactLocation.uri` is documented as a path from the repository root, and the documentation
+says nothing about results that are not in a file. So:
+
+- By default the location is the address of the page. That is valid SARIF and is what the finding is about; other
+  SARIF viewers show it. How GitHub lists such a result is not documented and was not tried.
+- `--sarif-anchor <path>` attaches every result to one file of the repository instead, given as its path from
+  the repository root, which is the documented form. When the path is the file given to `--urls`, each result is
+  on the line of its page in that list, so the alerts of a page sit on the line that names it; otherwise on line
+  1. The address of the page is then in the message and in `properties`. The upload action will log a warning
+  per result that the fingerprint it computes from that line differs from the one in the file; that is expected,
+  and it keeps the one in the file.
+
+### Signed-in pages
+
+`--storage-state <file>` gives every page of the run a Playwright storage state (cookies and local storage), as
+`browserContext.storageState()` writes it: record it once after signing in, and scan with it.
+
+**The file holds session secrets.** Anyone who has it is signed in as that account. Keep it out of the
+repository; in CI, write it from a secret to a place outside the checkout and delete it after the run. Use an
+account made for testing.
+
+- The file is checked before a browser starts. A file that is not a storage state is an error that names the
+  file and shows nothing of it.
+- Its contents are not written to any report, log or error message. As a last line of defence, every cookie value
+  and local storage value of at least 8 characters is looked for in the JSON, HTML and SARIF reports and in
+  what is printed, and replaced by `[redacted]`: a page that shows its own token in its text would otherwise put
+  it into the evidence of a finding. Shorter values are not searched for (they would match by chance), and the
+  captures are images: a page that displays a secret displays it in its capture too.
+- A session that has expired usually redirects to a sign-in page or answers 401. The second is an error
+  (exit 2). The first is scanned as the page it is: `requestedUrl` and `url` then differ in the report.
+- A sitemap is fetched without the session.
+
+### GitHub Action
+
+`action.yml` at the root of this repository is a composite action: it installs and builds the scanner from the
+checkout of the action, installs Chromium, runs the scan, optionally uploads the SARIF file, and fails the job on
+exit code 1 or 2. It is not published and has no release: use it by path from a checkout, or by repository and
+full commit SHA once the repository is on GitHub (`uses: <owner>/<repo>@<40-character SHA>`).
+
+```yaml
+permissions:
+  contents: read
+  security-events: write   # only for upload-sarif; "actions: read" as well in a private repository
+
+jobs:
+  a11y:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<sha>            # your repository: the list and the baseline
+        with: { persist-credentials: false }
+      - uses: actions/checkout@<sha>            # this tool
+        with: { repository: <owner>/<repo>, ref: <sha>, path: .a11y-vision-action, persist-credentials: false }
+      - uses: ./.a11y-vision-action
+        with:
+          urls-file: a11y/urls.txt
+          baseline: a11y/baseline.json
+          upload-sarif: 'true'
+      - uses: actions/upload-artifact@<sha>
+        if: always()
+        with: { name: a11y-vision-report, path: a11y-vision-report/ }
+```
+
+Inputs: `urls` (addresses separated by spaces or line breaks), `urls-file`, `sitemap`, `max-urls`, `baseline`,
+`checks`, `config`, `storage-state`, `output-dir` (default `a11y-vision-report`: `report.json`, `report.html`,
+`report.sarif`, `crops/`), `sarif-anchor` (defaults to `urls-file`), `upload-sarif` (default `false`),
+`fail-on-findings` (default `true`; `false` lets exit code 1 through, never 2), `setup-node`, `node-version`,
+`install-browser-deps`. Outputs: `exit-code`, `json-file`, `html-file`, `sarif-file`, `crops-dir`. The summary of
+the run is added to the job summary. The baseline is only compared: write it locally with `--update-baseline` and
+commit it, so that a change of what is accepted goes through a review.
+
+For signed-in pages, write the storage state from a secret in a step of your own and give its path:
+
+```yaml
+      - run: printf '%s' "$STATE" > "$RUNNER_TEMP/state.json"
+        env: { STATE: '${{ secrets.A11Y_STORAGE_STATE }}' }
+      - uses: ./.a11y-vision-action
+        with: { urls-file: a11y/urls.txt, storage-state: '${{ runner.temp }}/state.json' }
+```
+
+How it is put together:
+
+- Third-party actions are pinned to a full commit SHA with the release in a comment (`actions/setup-node`,
+  `github/codeql-action/upload-sarif`; in `.github/workflows/ci.yml` also `actions/checkout`,
+  `pnpm/action-setup` and `actions/upload-artifact`). The SHAs were read from the tags of the official
+  repositories with `git ls-remote`, and the inputs used were checked against the `action.yml` at each SHA.
+- No input is ever put into a shell command. Inputs reach `scripts/action-scan.mjs` as environment variables; it
+  accepts only http(s) addresses as addresses, passes every other value as `--name=value`, and starts the CLI
+  without a shell, so an input cannot become a command or an option. The script takes no secret and prints none.
+- A composite action cannot set permissions: the calling job needs `contents: read`, and `security-events: write`
+  only when `upload-sarif` is on. `.github/workflows/ci.yml` of this repository has `contents: read` only, does
+  not keep the checkout credentials, uses no secret and cancels superseded runs.
+- The action has not run on GitHub: nothing was pushed. What was checked here: both YAML files parse; every
+  `uses` is pinned and no `run` holds an expression (`e2e/ci.spec.ts`); and the scan script runs with the same
+  environment variables the action gives it, against the fixture server, including inputs that try to be options
+  or commands. Not checked: the install and build step on a runner, `setup-node`, the upload to code scanning and
+  how alerts then look.
+
+The script can be run by hand the same way:
+
+```sh
+INPUT_URLS_FILE=a11y/urls.txt INPUT_BASELINE=a11y/baseline.json node scripts/action-scan.mjs
+```
+
 ## Development
 
 Requires Node 22.12+ (CI uses 24). pnpm is pinned in `package.json` and run through corepack.
@@ -1084,12 +1402,13 @@ node e2e/support/dump.mjs focus-indicator/gradient
 
 | Path | Role |
 |---|---|
-| `packages/core` | Types, result schema, pure checks and measurers. No Node or DOM APIs: its tsconfig loads neither. |
+| `packages/core` | Types, result schema, pure checks and measurers, and the baseline (keys, comparison, file format; no file access). No Node or DOM APIs: its tsconfig loads neither. |
 | `packages/collector-cdp` | Builds a `Snapshot` over a minimal CDP session interface. |
 | `packages/adjudicators` | The adjudicator layer: the OpenAI-compatible adapter, the prompt and the validation of answers, votes, retries, limits and the verdict cache. The only package that calls a model: through `node:http` without a proxy for an endpoint on this machine (`./node`, loaded only in Node), through the global `fetch` for a remote one. |
-| `packages/reporters` | JSON report in the axe result shape; our data sits under `a11yVision`. |
+| `packages/reporters` | JSON report in the axe result shape (our data sits under `a11yVision`), HTML evidence report, SARIF 2.1.0; each for one page or for a run over several. Pure: they return text and objects. |
 | `packages/playwright` | `new A11yVision({ page }).analyze()` |
-| `packages/cli` | `scan <url>` |
+| `packages/cli` | `scan`: the pages of a run (addresses, list, sitemap), the baseline file, the storage state, the reports and the exit code. All file and network access of M7 is here. |
+| `action.yml`, `scripts/action-scan.mjs` | The GitHub Action (composite) and the script of its scan step. |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings, lists and grouping, the collector, the CLI, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |
+| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings, lists and grouping, the collector, the CLI, runs over several pages with baseline, SARIF, sitemaps and a stored session (`e2e/ci.spec.ts`, against routes of the fixture server under `/_ci/`), and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |

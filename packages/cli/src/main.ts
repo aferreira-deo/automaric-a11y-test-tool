@@ -1,18 +1,33 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AdjudicationConfigError, createAdjudicator, describeStats, isLoopbackHost, redact, secretsOf } from '@a11y-vision/adjudicators';
 import { verifyEndpoint } from '@a11y-vision/adjudicators/node';
-import { defaultConfig, hasFailures, registeredChecks, resolveConfig, TOOL_NAME, TOOL_VERSION } from '@a11y-vision/core';
-import type { AdjudicationConfig, CheckId, ConfigInput } from '@a11y-vision/core';
+import {
+  BaselineError,
+  compareWithBaseline,
+  defaultConfig,
+  emptyBaseline,
+  parseBaseline,
+  registeredChecks,
+  resolveBaselineConfig,
+  resolveConfig,
+  serializeBaseline,
+  TOOL_NAME,
+  TOOL_VERSION,
+} from '@a11y-vision/core';
+import type { AdjudicationConfig, Baseline, BaselineSummary, CheckId, ConfigInput, Png, RunConfig, ScanResult } from '@a11y-vision/core';
 import { A11yVision } from '@a11y-vision/playwright';
-import { toHtmlReport, toJsonReport } from '@a11y-vision/reporters';
+import { countRun, toHtmlReport, toHtmlRunReport, toJsonReport, toJsonRunReport, toSarifReport } from '@a11y-vision/reporters';
+import type { Run, RunCounts } from '@a11y-vision/reporters';
 import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
+import { collectTargets, InputError } from './inputs.js';
 
 export const EXIT_OK = 0;
-/** At least one `fail` finding. */
+/** At least one `fail` finding that no baseline records. */
 export const EXIT_FAILURES = 1;
-/** Usage error or the scan itself could not run. */
+/** Usage error, or the scan could not run, or a page of the run could not be scanned. */
 export const EXIT_ERROR = 2;
 
 /** Prefix of the environment variables the CLI reads, from the tool name: A11Y_VISION_. */
@@ -22,19 +37,68 @@ export const ENV_MODEL = `${ENV_PREFIX}AI_MODEL`;
 export const ENV_KEY_ENV = `${ENV_PREFIX}AI_KEY_ENV`;
 /** Where verdicts are kept between runs unless told otherwise, relative to the working directory. */
 export const DEFAULT_CACHE_FILE = join(`.${TOOL_NAME}`, 'verdicts.json');
+/** What every line of the summary of a run starts with on stderr, so that it can be told from the rest. */
+export const SUMMARY_PREFIX = `[${TOOL_NAME}] `;
+/** A value of a storage state shorter than this is not searched for in what is written: it would match by chance. */
+const MIN_SECRET_CHARS = 8;
 
-const USAGE = `Usage: ${TOOL_NAME} scan <url> [options]
+const USAGE = `Usage: ${TOOL_NAME} scan <url>... [options]
+       ${TOOL_NAME} scan --urls <file> [options]
+       ${TOOL_NAME} scan --sitemap <url-or-file> [options]
 
-Options:
+Pages. One address given alone is scanned as before and reported in the
+single-page shape. Several addresses, --urls or --sitemap make a run over
+several pages: each page is opened in a fresh browser context, one after the
+other, and a page that cannot be loaded is reported and does not stop the run.
+      --urls <file>     File with one http(s) address per line; blank lines and
+                        lines that start with # are skipped
+      --sitemap <src>   Address or file of a sitemap.xml or a sitemap index
+                        (gzip is read). Entries on another origin than the
+                        sitemap are left out
+      --max-urls <n>    Most pages in one run (default: ${defaultConfig.run.maxUrls}). More given by hand is
+                        an error; a longer sitemap is cut, and the cut is said
+      --any-origin      Keep sitemap entries on other origins
+      --allow-http-errors
+                        Scan a page that answers with HTTP status 400 or more
+                        instead of counting it as not scanned
+      --storage-state <file>
+                        Playwright storage state (cookies, local storage) for
+                        every page: scans a signed-in session. The file holds
+                        session secrets: keep it out of the repository
+
+Reports
   -o, --output <file>   Write the JSON report to a file instead of stdout
       --html <file>     Also write a self-contained HTML evidence report
+      --sarif <file>    Also write a SARIF 2.1.0 file (fail = error, likely =
+                        warning, advisory = note; info left out)
+      --sarif-anchor <path>
+                        Attach every SARIF result to this file of the
+                        repository (path from its root) instead of the address
+                        of the page; with the file given to --urls, each result
+                        is on the line of its page. GitHub code scanning only
+                        documents results in files of the repository
+      --sarif-include-info
+                        Also write info findings to the SARIF file
       --crops <dir>     Also write the evidence crops as PNG files; the ids in
-                        "evidence.crops" are paths relative to this directory
+                        "evidence.crops" are paths relative to this directory,
+                        or to one directory per page in it for several pages
+  -q, --quiet           No summary and no progress on stderr
+
+Baseline. Only "fail" findings are recorded, per page and finding id.
+      --baseline <file> Compare with this file: a "fail" it records is still
+                        reported, marked, and does not set exit code 1
+      --update-baseline Add the "fail" findings of this run to the file
+                        (created when missing); entries of pages that were not
+                        scanned are kept
+      --prune-baseline  Remove the entries that no longer occur on the pages
+                        that were scanned
+
+Checks
       --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
                         available: ${registeredChecks().join(', ')})
       --config <file>   JSON file with settings (checks, focus, icon, headings,
-                        lists, grouping, adjudication); the options given here
-                        win over it
+                        lists, grouping, adjudication, baseline, run); the
+                        options given here win over it
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -63,7 +127,15 @@ asked, one line on stderr names the model and the host it is on.
       --no-ai               Ask no model, whatever the environment or the
                             config file say
 
-Exit codes: 0 no "fail" finding, 1 at least one "fail" finding, 2 error.
+Exit codes:
+  0  no "fail" finding, or none that the baseline does not record
+  1  at least one "fail" finding that the baseline does not record (every
+     "fail" when no baseline is given)
+  2  error: wrong usage, a file that cannot be used (config, baseline, list,
+     sitemap, storage state), or a page that could not be scanned. A run over
+     several pages still writes its reports; they list the pages not scanned
+"likely", "advisory" and "info" never change the exit code. Exit code 0 is not a
+statement of conformance: the tool covers a small set of checks.
 `;
 
 interface Io {
@@ -90,7 +162,7 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`The config file ${file} has to hold a JSON object.`);
   const input = value as Record<string, unknown>;
-  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'adjudication']) {
+  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'adjudication', 'baseline', 'run']) {
     const part = input[section];
     if (part !== undefined && (part === null || typeof part !== 'object' || Array.isArray(part))) {
       throw new Error(`"${section}" in the config file ${file} has to be an object.`);
@@ -102,6 +174,131 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   return input;
 }
 
+/** A file given on the command line cannot be used. The message never holds anything read from the file. */
+class FileError extends Error {}
+
+/**
+ * The baseline a file holds, or null when the file is not there. Anything else that is wrong
+ * with it is an error: a baseline that cannot be read is never taken for an empty or a full one.
+ */
+async function readBaselineFile(file: string): Promise<Baseline | null> {
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new FileError(`The baseline file ${file} cannot be opened.`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new FileError(`The baseline file ${file} cannot be used: it is not valid JSON. Nothing was scanned. Restore the file, or move it away and write a new one with --update-baseline.`);
+  }
+  try {
+    return parseBaseline(value);
+  } catch (error) {
+    if (!(error instanceof BaselineError)) throw error;
+    throw new FileError(`The baseline file ${file} cannot be used: ${error.message}. Nothing was scanned.`);
+  }
+}
+
+/**
+ * Checks a Playwright storage state before a browser is started, and gives back the values in it
+ * that have to stay out of everything this program writes. What the file holds is never part of
+ * a message: a JSON parser quotes what it could not read, so its message is not passed on.
+ */
+async function readStorageState(file: string): Promise<string[]> {
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    throw new FileError(`The storage state file ${file} cannot be opened.`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new FileError(`The storage state file ${file} is not valid JSON.`);
+  }
+  const state = value as { cookies?: unknown; origins?: unknown } | null;
+  if (state === null || typeof state !== 'object' || (state.cookies !== undefined && !Array.isArray(state.cookies)) || (state.origins !== undefined && !Array.isArray(state.origins))) {
+    throw new FileError(`The storage state file ${file} is not a Playwright storage state (an object with "cookies" and "origins").`);
+  }
+  const secrets = new Set<string>();
+  const keep = (candidate: unknown): void => {
+    if (typeof candidate === 'string' && candidate.length >= MIN_SECRET_CHARS) secrets.add(candidate);
+  };
+  for (const cookie of (state.cookies ?? []) as { value?: unknown }[]) keep(cookie?.value);
+  for (const origin of (state.origins ?? []) as { localStorage?: unknown }[]) {
+    if (Array.isArray(origin?.localStorage)) for (const item of origin.localStorage as { value?: unknown }[]) keep(item?.value);
+  }
+  // Longest first: a value that holds another is replaced whole.
+  return [...secrets].sort((a, b) => b.length - a.length);
+}
+
+/** A directory name for the captures of one page: its place in the run, then what can be read of its address. */
+export function pageDirectory(index: number, total: number, url: string): string {
+  const number = String(index + 1).padStart(Math.max(3, String(total).length), '0');
+  let slug = 'page';
+  if (URL.canParse(url)) {
+    const { host, pathname } = new URL(url);
+    slug =
+      `${host}${pathname}`
+        .toLowerCase()
+        .replace(/[^a-z0-9.]+/g, '-')
+        .replace(/\.{2,}/g, '.')
+        .slice(0, 60)
+        .replace(/^[-.]+|[-.]+$/g, '') || 'page';
+  }
+  return `${number}-${slug}`;
+}
+
+/** The first line of an error of Playwright: the rest is its log of calls. */
+function firstLine(message: string): string {
+  return message.split('\n', 1)[0]!.trim();
+}
+
+/** The path given for --sarif-anchor as a URI reference relative to the root of a repository, or null when it cannot be one. */
+function anchorUri(path: string): string | null {
+  const forward = path.replaceAll('\\', '/').replace(/^\.\//, '');
+  if (forward === '' || isAbsolute(path) || /^[A-Za-z]:/.test(forward) || forward.split('/').includes('..')) return null;
+  return encodeURI(forward);
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** The summary of a run for a person, in counts. It never says more than what was found. */
+export function summaryLines(counts: RunCounts, baseline: BaselineSummary | undefined, exitCode: number): string[] {
+  const lines: string[] = [];
+  const notScanned = counts.errors > 0 ? `, ${plural(counts.errors, 'page', 'pages')} NOT scanned` : '';
+  lines.push(`${plural(counts.pages, 'page', 'pages')} scanned${notScanned}.`);
+  const fails = baseline ? `${counts.fail} fail (${counts.newFail} new, ${counts.baselinedFail} in the baseline)` : `${counts.fail} fail`;
+  lines.push(`Findings: ${fails}, ${counts.likely} likely, ${counts.advisory} advisory, ${counts.info} info.`);
+  if (baseline) {
+    const parts: string[] = [];
+    if (baseline.added > 0) parts.push(`${plural(baseline.added, 'entry', 'entries')} added`);
+    if (baseline.pruned > 0) parts.push(`${plural(baseline.pruned, 'entry', 'entries')} removed`);
+    if (baseline.stale - baseline.pruned > 0) parts.push(`${plural(baseline.stale - baseline.pruned, 'entry no longer occurs', 'entries no longer occur')} on the scanned pages (--prune-baseline removes them)`);
+    if (baseline.notScanned > 0) parts.push(`${plural(baseline.notScanned, 'entry is', 'entries are')} for pages not scanned in this run`);
+    if (parts.length > 0) lines.push(`Baseline: ${parts.join('; ')}.`);
+  }
+  const why =
+    exitCode === EXIT_ERROR
+      ? 'the run is not complete'
+      : exitCode === EXIT_FAILURES
+        ? baseline
+          ? '"fail" findings that the baseline does not record'
+          : '"fail" findings'
+        : baseline
+          ? 'no "fail" finding that the baseline does not record'
+          : 'no "fail" finding';
+  lines.push(`Exit code ${exitCode}: ${why}. These are the findings of a small set of checks, not a statement of conformance.`);
+  return lines.map((line) => `${SUMMARY_PREFIX}${line}\n`);
+}
+
 export async function main(argv: string[], io: Io = processIo, env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   let parsed;
   try {
@@ -111,7 +308,20 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
       options: {
         output: { type: 'string', short: 'o' },
         html: { type: 'string' },
+        sarif: { type: 'string' },
+        'sarif-anchor': { type: 'string' },
+        'sarif-include-info': { type: 'boolean' },
         crops: { type: 'string' },
+        urls: { type: 'string' },
+        sitemap: { type: 'string' },
+        'max-urls': { type: 'string' },
+        'any-origin': { type: 'boolean' },
+        'allow-http-errors': { type: 'boolean' },
+        'storage-state': { type: 'string' },
+        baseline: { type: 'string' },
+        'update-baseline': { type: 'boolean' },
+        'prune-baseline': { type: 'boolean' },
+        quiet: { type: 'boolean', short: 'q' },
         checks: { type: 'string' },
         config: { type: 'string' },
         'ai-base-url': { type: 'string' },
@@ -143,14 +353,42 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
     return EXIT_OK;
   }
 
-  const [command, url, ...rest] = positionals;
-  if (command !== 'scan' || !url || rest.length > 0) {
+  const [command, ...given] = positionals;
+  if (command !== 'scan' || (given.length === 0 && values.urls === undefined && values.sitemap === undefined)) {
     io.stderr(USAGE);
     return EXIT_ERROR;
   }
-  if (!URL.canParse(url)) {
-    io.stderr(`Not a valid URL: ${url}\n`);
+  for (const url of given) {
+    if (!URL.canParse(url)) {
+      io.stderr(`Not a valid URL: ${url}\n`);
+      return EXIT_ERROR;
+    }
+  }
+  // One address given alone: the report of one page, as it always was. Anything else is a run.
+  const single = given.length === 1 && values.urls === undefined && values.sitemap === undefined;
+  if ((values['update-baseline'] || values['prune-baseline']) && values.baseline === undefined) {
+    io.stderr('--update-baseline and --prune-baseline need --baseline <file>.\n');
     return EXIT_ERROR;
+  }
+  if ((values['sarif-anchor'] !== undefined || values['sarif-include-info']) && values.sarif === undefined) {
+    io.stderr('--sarif-anchor and --sarif-include-info need --sarif <file>.\n');
+    return EXIT_ERROR;
+  }
+  let anchor: string | null = null;
+  if (values['sarif-anchor'] !== undefined) {
+    anchor = anchorUri(values['sarif-anchor']);
+    if (anchor === null) {
+      io.stderr(`--sarif-anchor takes the path of a file from the root of the repository, without "..": ${values['sarif-anchor']}\n`);
+      return EXIT_ERROR;
+    }
+  }
+  let maxUrls: number | undefined;
+  if (values['max-urls'] !== undefined) {
+    maxUrls = Number(values['max-urls']);
+    if (!Number.isInteger(maxUrls) || maxUrls < 1) {
+      io.stderr(`--max-urls takes a whole number of at least 1: ${values['max-urls']}\n`);
+      return EXIT_ERROR;
+    }
   }
 
   let fromFile: ConfigInput = {};
@@ -200,10 +438,39 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   else if (baseUrl !== undefined || model !== undefined) adjudication.provider = 'openai-compatible';
   else if (adjudication.provider === undefined && (adjudication.baseUrl || adjudication.model)) adjudication.provider = 'openai-compatible';
 
-  const input: ConfigInput = { ...fromFile, adjudication, ...(checks ? { checks: checks as CheckId[] } : {}) };
-  const settings = resolveConfig(input).adjudication;
-  // Whatever is printed below that this program did not write itself goes through this.
-  const secrets = secretsOf(settings, env);
+  const run: Partial<RunConfig> = { ...fromFile.run };
+  if (maxUrls !== undefined) run.maxUrls = maxUrls;
+  if (values['any-origin']) run.sameOrigin = false;
+  if (values['allow-http-errors']) run.httpErrorIsFailure = false;
+
+  const input: ConfigInput = { ...fromFile, adjudication, run, ...(checks ? { checks: checks as CheckId[] } : {}) };
+  const config = resolveConfig(input);
+  const settings = config.adjudication;
+  const limits = config.run;
+
+  // The files a run depends on are read before anything is scanned: a baseline that cannot be
+  // used, or a storage state that is not one, stops here and not after minutes of scanning.
+  let baseline: Baseline | null = null;
+  let storageSecrets: string[] = [];
+  try {
+    if (values.baseline !== undefined) {
+      baseline = await readBaselineFile(values.baseline);
+      if (baseline === null) {
+        if (!values['update-baseline']) throw new FileError(`The baseline file ${values.baseline} does not exist. Nothing was scanned. Write it with --baseline ${values.baseline} --update-baseline.`);
+        baseline = emptyBaseline(config.baseline);
+      } else if (fromFile.baseline !== undefined && JSON.stringify(resolveBaselineConfig(fromFile.baseline)) !== JSON.stringify(resolveBaselineConfig(baseline.urlKey))) {
+        io.stderr(`The baseline file ${values.baseline} was written with other "baseline" settings than the config file gives: those of the baseline file are used, so that its entries keep their pages.\n`);
+      }
+    }
+    if (values['storage-state'] !== undefined) storageSecrets = await readStorageState(values['storage-state']);
+  } catch (error) {
+    if (!(error instanceof FileError)) throw error;
+    io.stderr(`${error.message}\n`);
+    return EXIT_ERROR;
+  }
+
+  // Whatever is printed or written below that this program did not write itself goes through this.
+  const secrets = [...secretsOf(settings, env), ...storageSecrets];
   const safe = (text: string): string => redact(text, secrets);
   const withModel = settings.provider !== 'none';
   /** Where a setting of the model came from, for the messages below. */
@@ -230,6 +497,19 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
     io.stderr(`${safe(error.message)}\n`);
     return EXIT_ERROR;
   }
+
+  // The pages of the run. A sitemap is fetched here, from the site under test, without the
+  // stored session: the only request of a scan that is not made by the browser or to the model.
+  let targets;
+  try {
+    targets = await collectTargets({ positionals: given, ...(values.urls !== undefined ? { urlsFile: values.urls } : {}), ...(values.sitemap !== undefined ? { sitemap: values.sitemap } : {}) }, limits);
+  } catch (error) {
+    if (!(error instanceof InputError)) throw error;
+    io.stderr(`${safe(error.message)}\n`);
+    return EXIT_ERROR;
+  }
+  for (const note of targets.notes) io.stderr(`${safe(note)}\n`);
+
   if (withModel) {
     // Said every time a model is asked, on stderr, whether flags, a file or the environment
     // alone switched it on: where page content goes is not something to find out later.
@@ -244,32 +524,105 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
     );
   }
 
+  /** One page, in a browser context of its own: nothing a page stores reaches the next one. */
+  const scanPage = async (browser: Browser, url: string): Promise<{ result: ScanResult; crops: Record<string, Png> }> => {
+    const context = await browser.newContext(values['storage-state'] !== undefined ? { storageState: values['storage-state'] } : {});
+    try {
+      const page = await context.newPage();
+      const response = await page.goto(url, { waitUntil: 'load', timeout: limits.navigationTimeoutMs });
+      if (limits.httpErrorIsFailure && response !== null && response.status() >= 400) {
+        throw new Error(`The page answered with HTTP status ${response.status()}; an error page is not scanned in place of the page (--allow-http-errors scans it).`);
+      }
+      const scanner = new A11yVision({ page }).options(input);
+      if (withModel) {
+        scanner.withAdjudication({}, { env, ...(values['no-ai-cache'] ? {} : { cacheFile: values['ai-cache'] ?? DEFAULT_CACHE_FILE }) });
+      }
+      const { result, crops, adjudication: stats } = await scanner.analyzeWithEvidence();
+      if (stats) io.stderr(`${safe(describeStats(stats))}\n`);
+      if (result.environment.navigatedFrom !== undefined) {
+        io.stderr(`The page went from ${safe(result.environment.navigatedFrom)} to ${safe(result.url)} while it was being read. The findings are those of ${safe(result.url)}.\n`);
+      }
+      return { result, crops };
+    } finally {
+      await context.close();
+    }
+  };
+
+  const started = new Date().toISOString();
+  const report: Run = { tool: { name: TOOL_NAME, version: TOOL_VERSION }, timestamp: started, pages: [], errors: [] };
+  if (!single) report.input = { otherOrigin: targets.otherOrigin, overLimit: targets.overLimit, duplicates: targets.duplicates };
+  const crops: Record<string, Png>[] = [];
+
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'load' });
-    const scanner = new A11yVision({ page }).options(input);
-    if (withModel) {
-      scanner.withAdjudication({}, { env, ...(values['no-ai-cache'] ? {} : { cacheFile: values['ai-cache'] ?? DEFAULT_CACHE_FILE }) });
+    for (const [index, url] of targets.urls.entries()) {
+      if (!single && !values.quiet) io.stderr(`${SUMMARY_PREFIX}Page ${index + 1} of ${targets.urls.length}: ${safe(url)}\n`);
+      try {
+        const scanned = await scanPage(browser, url);
+        report.pages.push({ requestedUrl: url, result: scanned.result, ...(single ? {} : { cropsDir: pageDirectory(index, targets.urls.length, url) }) });
+        crops.push(scanned.crops);
+      } catch (error) {
+        const message = safe((error as Error).message);
+        if (single) {
+          io.stderr(`Scan failed: ${message}\n`);
+          return EXIT_ERROR;
+        }
+        // Reported, and the run goes on: one page that is down should not hide the others.
+        report.errors.push({ url, message: firstLine(message) });
+        io.stderr(`Not scanned: ${safe(url)}: ${firstLine(message)}\n`);
+      }
     }
-    const { result, crops, adjudication: stats } = await scanner.analyzeWithEvidence();
-    if (stats) io.stderr(`${safe(describeStats(stats))}\n`);
-    if (result.environment.navigatedFrom !== undefined) {
-      io.stderr(`The page went from ${safe(result.environment.navigatedFrom)} to ${safe(result.url)} while it was being read. The findings are those of ${safe(result.url)}.\n`);
+  } finally {
+    await browser.close();
+  }
+
+  try {
+    let summary: BaselineSummary | undefined;
+    if (baseline !== null && values.baseline !== undefined) {
+      const compared = compareWithBaseline(
+        report.pages.map((page) => ({ url: page.requestedUrl, findings: page.result.findings })),
+        baseline,
+        { update: values['update-baseline'] === true, prune: values['prune-baseline'] === true },
+      );
+      report.pages.forEach((page, index) => {
+        page.result = { ...page.result, findings: compared.pages[index]!.findings };
+      });
+      summary = compared.summary;
+      report.baseline = summary;
+      if (values['update-baseline'] || values['prune-baseline']) await writeTo(values.baseline, serializeBaseline(compared.baseline));
     }
 
-    const json = `${JSON.stringify(toJsonReport(result), null, 2)}\n`;
+    const counts = countRun(report);
+    const exitCode = counts.errors > 0 ? EXIT_ERROR : counts.newFail > 0 ? EXIT_FAILURES : EXIT_OK;
+
+    // With a stored session, its values are looked for in every report before it is written.
+    const [first] = report.pages;
+    const json = safe(`${JSON.stringify(single ? toJsonReport(first!.result, summary ? { baseline: summary } : {}) : toJsonRunReport(report), null, 2)}\n`);
     if (values.output) await writeTo(values.output, json);
     else io.stdout(json);
-    if (values.html) await writeTo(values.html, toHtmlReport(result, crops));
-    if (values.crops) {
-      for (const [id, png] of Object.entries(crops)) await writeTo(join(values.crops, id), png);
+    if (values.html) await writeTo(values.html, safe(single ? toHtmlReport(first!.result, crops[0], summary ? { baseline: summary } : {}) : toHtmlRunReport(report, crops)));
+    if (values.sarif) {
+      // The same file whichever way its separators are written.
+      const forward = (path: string): string => resolve(path.replaceAll('\\', '/'));
+      const sameFile = anchor !== null && values.urls !== undefined && forward(values['sarif-anchor']!) === forward(values.urls);
+      const { sarif, omitted } = toSarifReport(report, {
+        includeInfo: values['sarif-include-info'] === true,
+        urlKey: baseline?.urlKey ?? config.baseline,
+        maxResults: limits.sarifMaxResults,
+        ...(anchor !== null ? { anchor: { uri: anchor, ...(sameFile ? { lines: targets.lines } : {}) } } : {}),
+      });
+      await writeTo(values.sarif, safe(`${JSON.stringify(sarif, null, 2)}\n`));
+      if (omitted > 0) io.stderr(`${omitted} result(s) were left out of the SARIF file, the least severe first, to stay under ${limits.sarifMaxResults} results (run.sarifMaxResults). The JSON and HTML reports have them all.\n`);
     }
-    return hasFailures(result) ? EXIT_FAILURES : EXIT_OK;
+    if (values.crops) {
+      for (const [index, page] of report.pages.entries()) {
+        for (const [id, png] of Object.entries(crops[index] ?? {})) await writeTo(join(values.crops, page.cropsDir ?? '', id), png);
+      }
+    }
+    if (!values.quiet) for (const line of summaryLines(counts, summary, exitCode)) io.stderr(line);
+    return exitCode;
   } catch (error) {
     io.stderr(`Scan failed: ${safe((error as Error).message)}\n`);
     return EXIT_ERROR;
-  } finally {
-    await browser.close();
   }
 }

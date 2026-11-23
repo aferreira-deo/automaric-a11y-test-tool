@@ -1,4 +1,4 @@
-import type { AdjudicationConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig } from './types.js';
+import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, RunConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -281,6 +281,24 @@ export const defaultConfig: Config = {
     listNoStatus: 'likely',
     groupNoStatus: 'likely',
   },
+  baseline: {
+    stripFragment: true,
+    sortQuery: false,
+    stripTrailingSlash: false,
+    dropQueryParams: [],
+  },
+  run: {
+    maxUrls: 200,
+    sameOrigin: true,
+    // What the sitemap protocol allows for one file, uncompressed.
+    maxInputBytes: 52428800,
+    maxSitemaps: 50,
+    sitemapTimeoutMs: 30000,
+    // The default of Playwright for a navigation.
+    navigationTimeoutMs: 30000,
+    httpErrorIsFailure: true,
+    sarifMaxResults: 25000,
+  },
 };
 
 export type ConfigInput = {
@@ -291,6 +309,8 @@ export type ConfigInput = {
   lists?: Partial<ListsConfig>;
   grouping?: Partial<GroupingConfig>;
   adjudication?: Partial<AdjudicationConfig>;
+  baseline?: Partial<BaselineConfig>;
+  run?: Partial<RunConfig>;
 };
 
 /**
@@ -412,5 +432,38 @@ export function resolveConfig(input: ConfigInput = {}): Config {
     lists,
     grouping,
     adjudication: resolveAdjudication(input.adjudication),
+    baseline: resolveBaselineConfig(input.baseline),
+    run: resolveRun(input.run),
+  };
+}
+
+/** The settings of the baseline key, whatever was given: booleans are booleans and the names are strings. */
+export function resolveBaselineConfig(input: Partial<BaselineConfig> = {}): BaselineConfig {
+  const base = defaultConfig.baseline;
+  const flag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
+  const names = Array.isArray(input.dropQueryParams) ? input.dropQueryParams.filter((name): name is string => typeof name === 'string' && name !== '') : base.dropQueryParams;
+  return {
+    stripFragment: flag(input.stripFragment, base.stripFragment),
+    sortQuery: flag(input.sortQuery, base.sortQuery),
+    stripTrailingSlash: flag(input.stripTrailingSlash, base.stripTrailingSlash),
+    dropQueryParams: [...new Set(names)].sort(),
+  };
+}
+
+function resolveRun(input: Partial<RunConfig> = {}): RunConfig {
+  const base = defaultConfig.run;
+  /** A whole number of at least `min`, or the default: a limit is never switched off by a bad value. */
+  const count = (value: unknown, fallback: number, min = 1): number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= min ? value : fallback;
+  return {
+    maxUrls: count(input.maxUrls, base.maxUrls),
+    sameOrigin: typeof input.sameOrigin === 'boolean' ? input.sameOrigin : base.sameOrigin,
+    maxInputBytes: count(input.maxInputBytes, base.maxInputBytes),
+    maxSitemaps: count(input.maxSitemaps, base.maxSitemaps),
+    sitemapTimeoutMs: count(input.sitemapTimeoutMs, base.sitemapTimeoutMs),
+    navigationTimeoutMs: count(input.navigationTimeoutMs, base.navigationTimeoutMs),
+    httpErrorIsFailure: typeof input.httpErrorIsFailure === 'boolean' ? input.httpErrorIsFailure : base.httpErrorIsFailure,
+    // Never above what GitHub accepts.
+    sarifMaxResults: Math.min(count(input.sarifMaxResults, base.sarifMaxResults), base.sarifMaxResults),
   };
 }

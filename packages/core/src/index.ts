@@ -3,6 +3,7 @@ export * from './types.js';
 export * from './config.js';
 export * from './fingerprint.js';
 export * from './run.js';
+export * from './baseline.js';
 export * from './adjudication.js';
 export * from './checks/headings-adjudication.js';
 export * from './checks/lists-adjudication.js';

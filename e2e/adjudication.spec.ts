@@ -58,16 +58,27 @@ function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...env, ...extra };
 }
 
+/**
+ * stderr without the summary of the run (counts by status, added in M7; e2e/ci.spec.ts tests it):
+ * the tests here are about what is said of a model, and about nothing else being said.
+ */
+function withoutSummary(stderr: string): string {
+  return stderr
+    .split('\n')
+    .filter((line) => !line.startsWith('[a11y-vision] '))
+    .join('\n');
+}
+
 async function cli(testInfo: TestInfo, args: string[], env: Record<string, string> = {}) {
   // Its own working directory: the default cache file is relative to it.
   const cwd = testInfo.outputPath('cwd');
   await mkdir(cwd, { recursive: true });
   try {
     const { stdout, stderr } = await run(process.execPath, [bin, ...args], { maxBuffer: 64 * 1024 * 1024, cwd, env: cleanEnv(env) });
-    return { code: 0, stdout, stderr, cwd };
+    return { code: 0, stdout, stderr: withoutSummary(stderr), cwd };
   } catch (error) {
     const failed = error as { code: number; stdout: string; stderr: string };
-    return { code: failed.code, stdout: failed.stdout, stderr: failed.stderr, cwd };
+    return { code: failed.code, stdout: failed.stdout, stderr: withoutSummary(failed.stderr), cwd };
   }
 }
 

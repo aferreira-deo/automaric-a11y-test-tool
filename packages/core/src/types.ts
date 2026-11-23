@@ -806,8 +806,51 @@ export interface Finding {
   evidence: Evidence;
   /** Absent when no model was involved. */
   ai?: AiEvidence;
+  /**
+   * Present only on a `fail` finding of a run that was compared with a baseline file:
+   * `baselined` when the file already records it for this page (it does not break the build, and
+   * is still a failure), `new` otherwise. See baseline.ts.
+   */
+  baseline?: BaselineState;
   message: string;
   help: string;
+}
+
+export type BaselineState = 'new' | 'baselined';
+
+/**
+ * How the address of a page is turned into the key its findings are kept under in a baseline
+ * file. Conservative by default: two addresses are the same page only where that is certain.
+ */
+export interface BaselineConfig {
+  /** Drop the fragment: it does not select another document. On by default. */
+  stripFragment: boolean;
+  /** Sort the query parameters by name (stable). Off by default: order can matter to a server. */
+  sortQuery: boolean;
+  /** Treat `/a/` as `/a`. Off by default: a server may answer the two differently. Never applied to the root path. */
+  stripTrailingSlash: boolean;
+  /** Names of query parameters left out of the key (session or campaign parameters). None by default. */
+  dropQueryParams: string[];
+}
+
+/** Limits and switches of a run over one or more pages. Read by the CLI; no check reads them. */
+export interface RunConfig {
+  /** A run scans at most this many pages. More given by hand is an error; more in a sitemap is cut, and said. */
+  maxUrls: number;
+  /** Keep only the sitemap entries on the origin of the sitemap (child sitemaps of an index likewise). */
+  sameOrigin: boolean;
+  /** Largest sitemap or URL list read, in bytes, after decompression. The sitemap protocol allows 50 MB. */
+  maxInputBytes: number;
+  /** At most this many sitemaps are read from one sitemap index. */
+  maxSitemaps: number;
+  /** Time allowed for fetching one sitemap. */
+  sitemapTimeoutMs: number;
+  /** Time allowed for a page to load before it counts as not scanned. */
+  navigationTimeoutMs: number;
+  /** A page answered with an HTTP status of 400 or more counts as not scanned: an error page is not the page that was asked for. */
+  httpErrorIsFailure: boolean;
+  /** Most results written to one SARIF run; GitHub code scanning rejects a file with more than 25,000. */
+  sarifMaxResults: number;
 }
 
 /** A finding before its fingerprint is computed. */
@@ -1637,6 +1680,8 @@ export interface Config {
   /** The grouping check reads text blocks as the headings check does, with the settings of `headings` for that part. */
   grouping: GroupingConfig;
   adjudication: AdjudicationConfig;
+  baseline: BaselineConfig;
+  run: RunConfig;
 }
 
 export interface ScanResult {
