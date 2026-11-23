@@ -13,6 +13,7 @@ import { gateSession, stopReason } from './session.js';
 import type { CdpSession, StopSignal } from './session.js';
 
 export { CollectionStoppedError } from './session.js';
+export { pageRestore } from './page.js';
 export type { CdpSession, StopSignal } from './session.js';
 
 /** How a collection is run. All optional. */
@@ -28,10 +29,26 @@ export interface CollectOptions {
    * put back, in milliseconds (see `GatedSession.release`). Defaults to `IN_FLIGHT_TIMEOUT_MS`.
    */
   inFlightTimeoutMs?: number;
+  /**
+   * After a stop, how long a step of putting the page back is waited for, in milliseconds (see
+   * `RestoreOptions.stepTimeoutMs`). Defaults to `RESTORE_STEP_TIMEOUT_MS`.
+   *
+   * Only after a stop. A collection that ran to its end waits for each step as long as it
+   * takes, as it always did: whoever called it (the CLI, a test through the Playwright wrapper)
+   * goes on with the page afterwards and relies on it being as it was, and no limit on that
+   * side would be right for every page. After a stop nobody goes on with the result, and the
+   * page not answering is the likely reason for the stop in the first place.
+   */
+  restoreStepTimeoutMs?: number;
+  /** Called when, after a stop, the page did not answer in time while it was put back: it may not be as it was. */
+  onRestoreIncomplete?: () => void;
 }
 
 /** Long enough for a capture that is being taken to come back, short enough for a stop to feel like one. */
 export const IN_FLIGHT_TIMEOUT_MS = 3000;
+
+/** Putting a page back takes milliseconds when the page answers at all. */
+export const RESTORE_STEP_TIMEOUT_MS = 2000;
 
 /** The document in the main frame: `loaderId` changes when the frame goes to another document, and not when it only changes its address. */
 interface MainDocument {
@@ -102,18 +119,18 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     // The document that is read is one that has been parsed: asked again after the wait, as
     // the page may have gone to another document while it was waited for.
     stopped();
-    let from = await mainDocument(cdp);
+    let from = await mainDocument(waiting);
     for (let round = 0; round < LOAD_ATTEMPTS; round++) {
       await waitForDocument(waiting, 'parsed', config.focus.navigationTimeoutMs);
       stopped();
-      const now = await mainDocument(cdp);
+      const now = await mainDocument(waiting);
       if (now.loaderId === from.loaderId) break;
       from = now;
     }
     let snapshot: Snapshot | undefined;
     let error: unknown;
     try {
-      snapshot = await collectOnce(cdp, config, signal, options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS);
+      snapshot = await collectOnce(cdp, config, signal, options);
     } catch (caught) {
       error = caught ?? new Error('Collection failed.');
     }
@@ -144,7 +161,7 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
   return second.snapshot;
 }
 
-async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, inFlightTimeoutMs: number): Promise<Snapshot> {
+async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<Snapshot> {
   // Everything below goes through the gate, the restoring of the page included: it is opened for that.
   const gate = gateSession(raw, signal);
   const cdp = gate.session;
@@ -185,7 +202,11 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
       const signatures: Record<string, string> = {};
       for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
       snapshot.signatures = signatures;
-    }, () => gate.release(inFlightTimeoutMs));
+    }, {
+      before: () => gate.release(options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS),
+      stepTimeoutMs: () => (signal?.aborted ? (options.restoreStepTimeoutMs ?? RESTORE_STEP_TIMEOUT_MS) : null),
+      ...(options.onRestoreIncomplete ? { onIncomplete: options.onRestoreIncomplete } : {}),
+    });
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
   }

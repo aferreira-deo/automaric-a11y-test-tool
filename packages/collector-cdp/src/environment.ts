@@ -1,7 +1,8 @@
 import type { Environment } from '@a11y-vision/core';
 import type { CdpSession } from './session.js';
 
-const WORLD_NAME = 'a11y-vision';
+/** The isolated world the collector and its in-page agent live in. */
+export const WORLD_NAME = 'a11y-vision';
 
 export interface EvaluateResponse {
   result: { value?: unknown; objectId?: string };

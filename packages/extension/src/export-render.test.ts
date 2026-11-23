@@ -152,7 +152,7 @@ describe('rendering', () => {
     strings,
     cropUrl: (id) => (id === 'focus-indicator/abc-focused.png' ? 'blob:chrome-extension://id/1' : undefined),
     maxNoteChars: 2000,
-    handlers: { onDecision: (found, decision) => void decisions.push({ finding: found, decision }), onNote: () => undefined, onHighlight: () => undefined },
+    handlers: { onDecision: (found, decision) => void decisions.push({ finding: found, decision }), onNote: () => undefined, onNoteInput: () => undefined, onHighlight: () => undefined },
   });
 
   it('shows a finding with its evidence and its controls', () => {
@@ -174,6 +174,42 @@ describe('rendering', () => {
     const note = all.find((element) => element.tagName === 'textarea')!;
     expect(all.find((element) => element.tagName === 'label')!.getAttribute('for')).toBe(note.id);
     expect(node.getAttribute('aria-labelledby')).toBe(all.find((element) => element.tagName === 'h4')!.id);
+  });
+
+  it('ties the controls of a card to its finding: each is described by the title and the selector of its own card', () => {
+    const doc = fakeDocument();
+    const first = renderFinding({ finding: finding(), entry: undefined }, context(doc)) as unknown as FakeElement;
+    const second = renderFinding({ finding: finding({ id: 'second', selector: '#next' }), entry: undefined }, context(doc)) as unknown as FakeElement;
+    const described = (node: FakeElement): string[] => {
+      const controls = node.all().filter((element) => element.tagName === 'button' || element.tagName === 'textarea');
+      expect(controls.map((element) => element.className || element.tagName)).toEqual(['confirm', 'dismiss', 'highlight', 'textarea']);
+      const ids = new Set(controls.map((element) => element.getAttribute('aria-describedby')));
+      // The four of them point at the same two elements, in the order they are read.
+      expect(ids.size).toBe(1);
+      return [...ids][0]!.split(' ');
+    };
+    const textOf = (node: FakeElement, ids: string[]): string => ids.map((id) => node.all().find((element) => element.id === id)!.textContent).join(' ');
+    expect(textOf(first, described(first))).toBe('Fail focus-indicator/no-visible-change Selector: #save');
+    expect(textOf(second, described(second))).toBe('Fail focus-indicator/no-visible-change Selector: #next');
+    // Ids of one card are not those of another.
+    expect(described(first).some((id) => described(second).includes(id))).toBe(false);
+    // The name stays the visible label: nothing replaces it.
+    for (const element of [...first.all(), ...second.all()]) expect(element.getAttribute('aria-label')).toBeNull();
+  });
+
+  it('a note is handed over while it is typed and again when its field is left', () => {
+    const doc = fakeDocument();
+    const typed: string[] = [];
+    const left: string[] = [];
+    const node = renderFinding({ finding: finding(), entry: undefined }, { ...context(doc), handlers: { ...context(doc).handlers, onNoteInput: (_found, note) => void typed.push(note), onNote: (_found, note) => void left.push(note) } }) as unknown as FakeElement;
+    const note = node.all().find((element) => element.tagName === 'textarea')!;
+    note.value = 'se';
+    note.dispatch('input');
+    note.value = 'seen';
+    note.dispatch('input');
+    note.dispatch('change');
+    expect(typed).toEqual(['se', 'seen']);
+    expect(left).toEqual(['seen']);
   });
 
   it('pressing a decision asks for it, and pressing it again takes it back', () => {
@@ -206,7 +242,7 @@ describe('rendering', () => {
     expect(container.textContent).toContain('url(javascript:alert(1))');
     // Attribute names are fixed; a value that came from the page is only ever a label or an id.
     const names = new Set(doc.created.flatMap((element) => [...element.attributes.keys()]));
-    expect([...names].sort()).toEqual(['alt', 'aria-hidden', 'aria-labelledby', 'aria-pressed', 'data-finding-id', 'data-group', 'data-status', 'for', 'loading', 'maxlength', 'rows', 'type']);
+    expect([...names].sort()).toEqual(['alt', 'aria-describedby', 'aria-hidden', 'aria-labelledby', 'aria-pressed', 'data-finding-id', 'data-group', 'data-status', 'for', 'loading', 'maxlength', 'rows', 'type']);
     // What is not a plain hex colour is never used as a colour.
     expect(doc.created.filter((element) => element.className === 'swatch').map((element) => element.style['backgroundColor'])).toEqual(['#ff00aa']);
     // No handler is ever set from a string.

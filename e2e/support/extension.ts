@@ -1,4 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test as base, chromium } from '@playwright/test';
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import type { CheckId, Finding } from '@a11y-vision/core';
+import { PANEL_TICKET_PREFIX } from '../../packages/extension/src/target.js';
 
 /**
  * The unpacked extension (packages/extension/dist) in a Chromium of its own, one per worker.
@@ -16,8 +18,10 @@ import type { CheckId, Finding } from '@a11y-vision/core';
  *
  * The side panel itself cannot be opened by a test: `chrome.sidePanel.open()` needs a user
  * gesture on the browser's own UI, which automation has no way to give. The tests open the same
- * page, `panel.html`, in a window of its own with the tab to work on named in its address
- * (`?tabId=`). Everything else is the real thing: the extension's own context, `chrome.debugger`,
+ * page, `panel.html`, in a window of its own. Which tab that panel works on is not said in its
+ * address, which anyone could write: the test leaves a ticket in `chrome.storage.session` from
+ * the service worker, as only code of the extension can, and the address carries the name of the
+ * ticket (see packages/extension/src/target.ts). Everything else is the real thing: the extension's own context, `chrome.debugger`,
  * `chrome.storage.local`, the service worker.
  */
 
@@ -48,9 +52,10 @@ function otherChromiums(): string[] {
  * Launches Chromium with the extension. The Chromium of this Playwright version comes first, or
  * the one named in A11Y_VISION_EXTENSION_CHROMIUM. A machine can refuse to run the first (Windows
  * Smart App Control blocks an unsigned chrome.dll it has not seen before): then an older build
- * that Playwright downloaded earlier is used, and the run says which, on stderr.
+ * that Playwright downloaded earlier is used. Which build runs is said once per run, in the
+ * output of the tests (see `sayBrowser`).
  */
-async function launch(): Promise<BrowserContext> {
+async function launch(): Promise<{ context: BrowserContext; executable: string; fallback: boolean }> {
   const options = {
     channel: 'chromium',
     viewport: null,
@@ -60,21 +65,37 @@ async function launch(): Promise<BrowserContext> {
     args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`, '--screen-info={1920x1200}'],
   };
   const named = process.env['A11Y_VISION_EXTENSION_CHROMIUM'];
-  if (named) return chromium.launchPersistentContext('', { ...options, executablePath: named });
+  if (named) return { context: await chromium.launchPersistentContext('', { ...options, executablePath: named }), executable: named, fallback: false };
   try {
-    return await chromium.launchPersistentContext('', options);
+    return { context: await chromium.launchPersistentContext('', options), executable: chromium.executablePath(), fallback: false };
   } catch (first) {
     for (const executablePath of otherChromiums()) {
       try {
-        const context = await chromium.launchPersistentContext('', { ...options, executablePath });
-        console.warn(`[extension tests] The Chromium of this Playwright version did not start; using ${executablePath} instead.`);
-        return context;
+        return { context: await chromium.launchPersistentContext('', { ...options, executablePath }), executable: executablePath, fallback: true };
       } catch {
         // The next one.
       }
     }
     throw first;
   }
+}
+
+/**
+ * Says which browser the extension tests run in: its version, where it is, and whether it is the
+ * build of this Playwright version or an older one that was fallen back on. Once per run,
+ * whichever worker gets there first: a file in the output directory of the run, which
+ * Playwright empties before a run, marks that it was said.
+ */
+function sayBrowser(outputDir: string, version: string, executable: string, fallback: boolean): void {
+  try {
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(join(outputDir, `.extension-browser-${process.ppid}`), `${version} ${executable}`, { flag: 'wx' });
+  } catch {
+    // Another worker of this run has said it.
+    return;
+  }
+  const which = fallback ? 'NOT the build of this Playwright version, which did not start: an older build it had downloaded' : process.env['A11Y_VISION_EXTENSION_CHROMIUM'] ? 'named in A11Y_VISION_EXTENSION_CHROMIUM' : 'the build of this Playwright version';
+  console.log(`[extension tests] Chromium under test: ${version} (${which}) at ${executable}`);
 }
 
 export interface Extension {
@@ -109,11 +130,18 @@ export interface ExtensionReport {
 export const test = base.extend<{ panelFor: (path: string, viewport?: { width: number; height: number }) => Promise<{ page: Page; panel: Page; tabId: number }> }, { extension: Extension }>({
   extension: [
     // eslint-disable-next-line no-empty-pattern
-    async ({}, use) => {
-      const context = await launch();
+    async ({}, use, workerInfo) => {
+      const { context, executable, fallback } = await launch();
       let [worker] = context.serviceWorkers();
       worker ??= await context.waitForEvent('serviceworker');
       const id = worker.url().split('/')[2]!;
+      // The full version: the user agent string only carries the major one.
+      const version = await worker.evaluate(async () => {
+        const data = (navigator as unknown as { userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ fullVersionList?: { brand: string; version: string }[] }> } }).userAgentData;
+        const list = (await data?.getHighEntropyValues(['fullVersionList']))?.fullVersionList ?? [];
+        return list.find((entry) => entry.brand === 'Chromium')?.version ?? navigator.userAgent;
+      });
+      sayBrowser(workerInfo.project.outputDir, version, executable, fallback);
       let frame: { width: number; height: number } | undefined;
       const extension: Extension = {
         context,
@@ -147,11 +175,16 @@ export const test = base.extend<{ panelFor: (path: string, viewport?: { width: n
           return { page, tabId: tab.id };
         },
         async openPanel(tabId) {
+          const ticket = randomBytes(16).toString('hex');
           const [panel] = await Promise.all([
             context.waitForEvent('page'),
             worker.evaluate(
-              (address) => (globalThis as unknown as { chrome: { windows: { create(o: object): Promise<unknown> } } }).chrome.windows.create({ url: address, type: 'popup', focused: false, width: 480, height: 900 }),
-              `panel.html?tabId=${tabId}`,
+              async ({ key, tab, address }) => {
+                const api = (globalThis as unknown as { chrome: { storage: { session: { set(items: object): Promise<void> } }; windows: { create(o: object): Promise<unknown> } } }).chrome;
+                await api.storage.session.set({ [key]: tab });
+                await api.windows.create({ url: address, type: 'popup', focused: false, width: 480, height: 900 });
+              },
+              { key: `${PANEL_TICKET_PREFIX}${ticket}`, tab: tabId, address: `panel.html?ticket=${ticket}` },
             ),
           ]);
           await panel.waitForSelector('html[data-ready="true"]');

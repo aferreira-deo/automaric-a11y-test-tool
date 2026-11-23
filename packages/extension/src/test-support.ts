@@ -91,12 +91,14 @@ export function fakeStorage(initial: Record<string, unknown> = {}): FakeStorage 
 export interface FakeTabs extends TabsApi {
   onActivated: FakeEvent<(info: { tabId: number; windowId: number }) => void>;
   onRemoved: FakeEvent<(tabId: number) => void>;
+  onUpdated: FakeEvent<(tabId: number, change: { status?: string; url?: string; title?: string }) => void>;
 }
 
 export function fakeTabs(windowId = 1): FakeTabs {
   return {
     onActivated: fakeEvent(),
     onRemoved: fakeEvent(),
+    onUpdated: fakeEvent(),
     query: () => Promise.resolve([]),
     get: (tabId) => Promise.resolve({ id: tabId, windowId }),
   };

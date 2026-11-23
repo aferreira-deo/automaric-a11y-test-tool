@@ -83,12 +83,16 @@ export function withDecision(
   const note = change.note.slice(0, limits.maxNoteChars);
   if (change.decision === null && note.trim() === '') delete entries[key];
   else entries[key] = { decision: change.decision, note, at: now.toISOString() };
-  const keys = Object.keys(entries);
-  if (keys.length > limits.maxDecisionsPerPage) {
-    keys.sort((a, b) => (entries[a]!.at < entries[b]!.at ? -1 : entries[a]!.at > entries[b]!.at ? 1 : 0));
-    for (const old of keys.slice(0, keys.length - limits.maxDecisionsPerPage)) delete entries[old];
-  }
+  capEntries(entries, limits);
   return { version: DECISIONS_VERSION, updatedAt: now.toISOString(), entries };
+}
+
+/** Beyond the limit, takes the entries changed longest ago out of `entries`. */
+function capEntries(entries: Record<string, DecisionEntry>, limits: ExtensionConfig['storage']): void {
+  const keys = Object.keys(entries);
+  if (keys.length <= limits.maxDecisionsPerPage) return;
+  keys.sort((a, b) => (entries[a]!.at < entries[b]!.at ? -1 : entries[a]!.at > entries[b]!.at ? 1 : 0));
+  for (const old of keys.slice(0, keys.length - limits.maxDecisionsPerPage)) delete entries[old];
 }
 
 export function decisionFor(page: PageDecisions | null, finding: Pick<Finding, 'id' | 'signature'>): DecisionEntry | undefined {
@@ -113,7 +117,7 @@ export class DecisionStore {
     return parsePageDecisions(stored[key], this.#limits, now);
   }
 
-  async save(key: string, page: PageDecisions): Promise<void> {
+  async #index(): Promise<Record<string, string>> {
     const stored = (await this.#area.get(INDEX_KEY))[INDEX_KEY];
     const index: Record<string, string> = {};
     if (stored !== null && typeof stored === 'object') {
@@ -121,20 +125,114 @@ export class DecisionStore {
         if (name.startsWith(PREFIX) && typeof at === 'string') index[name] = at;
       }
     }
-    if (Object.keys(page.entries).length === 0) {
-      delete index[key];
-      await this.#area.remove(key);
-      await this.#area.set({ [INDEX_KEY]: index });
-      return;
+    return index;
+  }
+
+  /**
+   * Writes the decisions of a page. With `changed` (keys of `page.entries`, as `decisionKey`
+   * gives them), only those entries are written, set or removed, onto what storage holds for
+   * the page at that moment; without it `page` replaces what is there.
+   *
+   * `chrome.storage` has no transaction, and two panels (two windows) can save at the same
+   * time. What is done about it: nothing is written from a copy older than it has to be. The
+   * page is read right before it is merged, and the index right before it is written, and in
+   * both only what this save is about is changed. What is left is the moment between such a
+   * read and its write: a save of another window that lands exactly there is overwritten in the
+   * index (the page then misses there until it is saved again, and is not counted for
+   * `maxPages`), or, for two saves of the same decision of the same page, the later write wins.
+   */
+  async save(key: string, page: PageDecisions, changed?: readonly string[]): Promise<void> {
+    let merged = page;
+    if (changed) {
+      const entries = { ...(await this.load(key, new Date(page.updatedAt))).entries };
+      for (const name of changed) {
+        const entry = page.entries[name];
+        if (entry) entries[name] = entry;
+        else delete entries[name];
+      }
+      capEntries(entries, this.#limits);
+      merged = { version: DECISIONS_VERSION, updatedAt: page.updatedAt, entries };
     }
-    index[key] = page.updatedAt;
-    // The page being saved always stays; of the others, the ones written longest ago go first.
-    const others = Object.keys(index)
-      .filter((name) => name !== key)
-      .sort((a, b) => (index[a]! < index[b]! ? -1 : index[a]! > index[b]! ? 1 : 0));
-    const dropped = others.slice(0, Math.max(0, others.length - (this.#limits.maxPages - 1)));
+    const empty = Object.keys(merged.entries).length === 0;
+    let dropped: string[] = [];
+    if (empty) await this.#area.remove(key);
+    else {
+      // The page being saved always stays; of the others, the ones written longest ago go first.
+      const known = await this.#index();
+      const others = Object.keys(known)
+        .filter((name) => name !== key)
+        .sort((a, b) => (known[a]! < known[b]! ? -1 : known[a]! > known[b]! ? 1 : 0));
+      dropped = others.slice(0, Math.max(0, others.length - (this.#limits.maxPages - 1)));
+      if (dropped.length > 0) await this.#area.remove(dropped);
+    }
+    // Read again: what another window has written to the index since is kept.
+    const index = await this.#index();
     for (const name of dropped) delete index[name];
-    if (dropped.length > 0) await this.#area.remove(dropped);
-    await this.#area.set({ [key]: page, [INDEX_KEY]: index });
+    if (empty) {
+      delete index[key];
+      await this.#area.set({ [INDEX_KEY]: index });
+    } else {
+      index[key] = merged.updatedAt;
+      await this.#area.set({ [key]: merged, [INDEX_KEY]: index });
+    }
+  }
+}
+
+/**
+ * The decisions of the page that was scanned, as a panel holds them, and their way to storage.
+ *
+ * `set` changes what is held at once, without waiting for anything: whatever is decided next is
+ * decided on top of it (a note and, in the same moment, a click on Confirm keep both). `save`
+ * writes what changed since the last save, and saves run one after the other, in the order
+ * they were asked for.
+ */
+export class DecisionSession {
+  readonly #store: DecisionStore;
+  readonly #key: string;
+  readonly #limits: ExtensionConfig['storage'];
+  #page: PageDecisions;
+  readonly #dirty = new Set<string>();
+  #queue: Promise<void> = Promise.resolve();
+
+  constructor(store: DecisionStore, key: string, page: PageDecisions, limits: ExtensionConfig['storage']) {
+    this.#store = store;
+    this.#key = key;
+    this.#page = page;
+    this.#limits = limits;
+  }
+
+  get page(): PageDecisions {
+    return this.#page;
+  }
+
+  /** True while something that was set has not reached storage. */
+  get unsaved(): boolean {
+    return this.#dirty.size > 0;
+  }
+
+  /** Sets the decision, the note, or both, of a finding; what is not given stays. Returns the entry as it now is. */
+  set(finding: Pick<Finding, 'id' | 'signature'>, change: { decision?: Decision | null; note?: string }, now: Date): DecisionEntry | undefined {
+    const current = decisionFor(this.#page, finding);
+    const next = { decision: change.decision !== undefined ? change.decision : (current?.decision ?? null), note: change.note ?? current?.note ?? '' };
+    this.#page = withDecision(this.#page, finding, next, this.#limits, now);
+    this.#dirty.add(decisionKey(finding));
+    return decisionFor(this.#page, finding);
+  }
+
+  /** Writes what changed. Rejects when storage refused; what was to be written then waits for the next save. */
+  save(): Promise<void> {
+    const run = this.#queue.then(async () => {
+      if (this.#dirty.size === 0) return;
+      const changed = [...this.#dirty];
+      this.#dirty.clear();
+      try {
+        await this.#store.save(this.#key, this.#page, changed);
+      } catch (error) {
+        for (const name of changed) this.#dirty.add(name);
+        throw error;
+      }
+    });
+    this.#queue = run.catch(() => undefined);
+    return run;
   }
 }

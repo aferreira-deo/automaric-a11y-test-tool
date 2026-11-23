@@ -1,6 +1,7 @@
 import type { Box, Config, Png, Screenshot } from '@a11y-vision/core';
 import { AGENT_GLOBAL, agentFactory } from './agent.js';
 import type { AgentHitKind, AgentOptions } from './agent.js';
+import { WORLD_NAME } from './environment.js';
 import type { PageEnvironment, World } from './environment.js';
 import type { CdpSession } from './session.js';
 
@@ -155,6 +156,35 @@ export function agentOptions(config: Config): AgentOptions {
 }
 
 /**
+ * What undoes, from outside a collection, what the collection did inside the page (focus, scroll
+ * positions, the adopted style sheet, `tabindex` values): `expression`, evaluated in the isolated
+ * world named `worldName` of the main frame. For a caller whose collection cannot finish by
+ * itself, as the extension's when its panel is closed in the middle of a scan: through the same
+ * session, `Page.createIsolatedWorld` with that name gives the world the agent is in. It does
+ * nothing on a page where no collection is under way. Emulation is not part of it: that ends
+ * with the session.
+ */
+export const pageRestore = { worldName: WORLD_NAME, expression: `globalThis.${AGENT_GLOBAL}?.cleanup()` } as const;
+
+/** How the page is put back when `body` is over. */
+export interface RestoreOptions {
+  /** Called when `body` is over, before anything is put back: a gate on `cdp` is opened here (see `gateSession`). */
+  before?: () => void | Promise<void>;
+  /**
+   * Asked once, when the restoring starts: how long a step may take, in milliseconds, or null
+   * for as long as it takes (the default).
+   *
+   * With a limit, the first step that gets no answer in time ends the waiting: the steps after
+   * it are still sent, in order, and none of them is waited for. A page that answers nothing (a
+   * dialog of its own is open, its main thread is busy) then costs one limit, not one per step,
+   * and what was sent is carried out if and when the page answers again.
+   */
+  stepTimeoutMs?: () => number | null;
+  /** Called once when a step was given up on: the page may not be as it was. */
+  onIncomplete?: () => void;
+}
+
+/**
  * Runs `body` on a stabilised page and puts the page back afterwards.
  *
  * While `body` runs the page is changed: device scale factor, reduced motion, an adopted style
@@ -178,8 +208,7 @@ export async function withStablePage<T>(
   config: Config,
   clips: Record<string, Screenshot>,
   body: (page: StablePage) => Promise<T>,
-  /** Called when `body` is over, before anything is put back: a gate on `cdp` is opened here (see `gateSession`). */
-  beforeRestore: () => void | Promise<void> = () => undefined,
+  restore: RestoreOptions = {},
 ): Promise<T> {
   const scale = config.focus.deviceScaleFactor;
   const overrideMotion = !original.reducedMotion;
@@ -286,12 +315,37 @@ export async function withStablePage<T>(
     await agent('stabilise()');
     return await body(page);
   } finally {
-    await beforeRestore();
-    if (agentReady) await agent('cleanup()').catch(() => undefined);
-    await cdp.send('CSS.disable').catch(() => undefined);
-    await cdp.send('DOM.disable').catch(() => undefined);
-    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
-    if (overrideMotion) await setMedia([]).catch(() => undefined);
-    await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => undefined);
+    await restore.before?.();
+    const limit = restore.stepTimeoutMs?.() ?? null;
+    let gaveUp = false;
+    /** One step of the restoring. It never rejects: a step that fails leaves the others to do. */
+    const step = async (send: () => Promise<unknown>): Promise<void> => {
+      const sent = send().then(
+        () => true,
+        () => true,
+      );
+      if (limit === null) {
+        await sent;
+        return;
+      }
+      // Given up on waiting: sent all the same, in order, for when the page answers again.
+      if (gaveUp) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), limit);
+      });
+      const answered = await Promise.race([sent, late]);
+      clearTimeout(timer);
+      if (!answered) {
+        gaveUp = true;
+        restore.onIncomplete?.();
+      }
+    };
+    if (agentReady) await step(() => agent('cleanup()'));
+    await step(() => cdp.send('CSS.disable'));
+    await step(() => cdp.send('DOM.disable'));
+    await step(() => cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }));
+    if (overrideMotion) await step(() => setMedia([]));
+    await step(() => cdp.send('Emulation.clearDeviceMetricsOverride'));
   }
 }

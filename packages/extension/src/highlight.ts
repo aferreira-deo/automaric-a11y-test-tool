@@ -50,17 +50,30 @@ function locate(frame: string, selector: string, join: string): Element | null {
  * it (the highlight of DevTools). The overlay is drawn by the browser, not put into the page:
  * nothing of the document is changed but its scroll position. It lasts as long as the session.
  *
- * False when the element is no longer there.
+ * `scanned` is the document the finding was found in (`ScanOutcome.document`). A tab can have
+ * gone to another page since, and a selector means nothing there, or names something else:
+ * the document in the main frame is compared first, by the id Chrome gives its loader, which
+ * changes when the frame goes to another document and not when the page only changes its
+ * address (a fragment, `history.pushState`). Nothing is looked for, scrolled or drawn in
+ * another document.
+ *
+ * `shown`, or why not: `other-document`, or `missing` when the element is no longer there.
  */
-export async function showHighlight(cdp: CdpSession, finding: Pick<Finding, 'selector' | 'frame'>, config: ExtensionConfig['highlight']): Promise<boolean> {
-  const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: { frame: { id: string } } };
+export async function showHighlight(
+  cdp: CdpSession,
+  finding: Pick<Finding, 'selector' | 'frame'>,
+  config: ExtensionConfig['highlight'],
+  scanned: { loaderId: string },
+): Promise<'shown' | 'missing' | 'other-document'> {
+  const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: { frame: { id: string; loaderId?: string } } };
+  if (frameTree.frame.loaderId !== scanned.loaderId) return 'other-document';
   const { executionContextId } = (await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: HIGHLIGHT_WORLD })) as { executionContextId: number };
   const { result, exceptionDetails } = (await cdp.send('Runtime.evaluate', {
     expression: `(${locate.toString()})(${JSON.stringify(finding.frame)}, ${JSON.stringify(finding.selector)}, ${JSON.stringify(JOIN)})`,
     contextId: executionContextId,
     returnByValue: false,
   })) as { result: { objectId?: string; subtype?: string }; exceptionDetails?: unknown };
-  if (exceptionDetails || !result.objectId || result.subtype === 'null') return false;
+  if (exceptionDetails || !result.objectId || result.subtype === 'null') return 'missing';
   // The overlay belongs to the DOM domain: it has to be enabled first.
   await cdp.send('DOM.enable');
   await cdp.send('Overlay.enable');
@@ -68,7 +81,7 @@ export async function showHighlight(cdp: CdpSession, finding: Pick<Finding, 'sel
     objectId: result.objectId,
     highlightConfig: { showInfo: false, borderColor: config.border, contentColor: config.content },
   });
-  return true;
+  return 'shown';
 }
 
 /** Takes the overlay away. The scroll position stays where the highlight left it. */

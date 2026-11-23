@@ -1,7 +1,6 @@
 import { adjudicateFindings } from '@a11y-vision/adjudicators';
 import type { Adjudicator, AdjudicationStats, VerdictCache } from '@a11y-vision/adjudicators';
 import { collectSnapshot } from '@a11y-vision/collector-cdp';
-import type { CdpSession } from '@a11y-vision/collector-cdp';
 import { buildResult } from '@a11y-vision/core';
 import type { Config, Png, ScanResult, Snapshot } from '@a11y-vision/core';
 import type { ChromeApi } from './chrome-api.js';
@@ -10,6 +9,7 @@ import { createDebuggerSession, DebuggerAttachError, DebuggerDetachedError } fro
 import type { DebuggerSession } from './debugger-session.js';
 import { watchInterference } from './interference.js';
 import type { InterferenceKind } from './interference.js';
+import { viewportSettled } from './viewport.js';
 
 /** Why a scan ended without a result. */
 export type StopKind = InterferenceKind | 'user' | 'detached-by-user' | 'detached' | 'cannot-attach' | 'panel-closed';
@@ -21,6 +21,12 @@ export class ScanStopped extends Error {
     readonly kind: StopKind,
     /** What Chrome said, for `cannot-attach`. */
     readonly detail = '',
+    /**
+     * True when the page did not answer in time while it was being put back, through a session
+     * that was still there: it may not be as it was. (A session that is gone is another matter,
+     * and `kind` says it.)
+     */
+    readonly restoreIncomplete = false,
   ) {
     super(`The scan was stopped (${kind}).`);
   }
@@ -48,11 +54,17 @@ export interface ScanOptions {
   onCounts?: (counts: ScanCounts) => void;
   /** Stand-ins for tests. */
   collect?: typeof collectSnapshot;
+  adjudicate?: typeof adjudicateFindings;
   now?: () => Date;
 }
 
 export interface ScanOutcome {
   result: ScanResult;
+  /**
+   * What was read: the tab, and the document in its main frame by the id Chrome gives its
+   * loader. A finding is about an element of that document and of no other (see `showHighlight`).
+   */
+  document: { tabId: number; loaderId: string };
   /** The captures the findings refer to, by the ids in `evidence.crops`. */
   crops: Record<string, Png>;
   adjudication?: AdjudicationStats;
@@ -66,35 +78,15 @@ function asStopped(reason: unknown): ScanStopped | null {
   return null;
 }
 
-const SETTLE_WORLD = 'a11y-vision-settle';
-
-/**
- * Waits until the viewport of the page has kept its size for `viewportSettleMs`: Chrome's
- * debugging bar comes up shortly after attaching and makes the page shorter, and a scan that
- * read the size before it and one that read it after would not be scans of the same viewport.
- * Asked in an isolated world: a page cannot answer for the browser.
- */
-export async function viewportSettled(cdp: CdpSession, config: ExtensionConfig['debugger'], sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): Promise<void> {
-  const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: { frame: { id: string } } };
-  const { executionContextId } = (await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: SETTLE_WORLD })) as { executionContextId: number };
-  const size = async (): Promise<unknown> =>
-    ((await cdp.send('Runtime.evaluate', { expression: "window.innerWidth + 'x' + window.innerHeight", contextId: executionContextId, returnByValue: true })) as { result?: { value?: unknown } }).result?.value;
-  let last = await size();
-  let stableFor = 0;
-  for (let waited = 0; stableFor < config.viewportSettleMs && waited < config.viewportSettleTimeoutMs; waited += config.viewportPollMs) {
-    await sleep(config.viewportPollMs);
-    const now = await size();
-    stableFor = now === last ? stableFor + config.viewportPollMs : 0;
-    last = now;
-  }
-}
+export { viewportSettled };
 
 /**
  * One scan of one tab: attach, read the page, give it back, detach, evaluate, and ask the model
  * when one is configured.
  *
  * The debugger is attached for the reading only, and detached in every case: finished, failed
- * or stopped. The model is asked afterwards, from this context (the side panel), from the
+ * or stopped, also when the page stopped answering (putting it back then has a time limit, see
+ * `interference.restoreStepTimeoutMs`, and the `ScanStopped` says that it may not be as it was). The model is asked afterwards, from this context (the side panel), from the
  * snapshot alone; the page is not involved and no request is made from it.
  */
 export async function runScan(options: ScanOptions): Promise<ScanOutcome> {
@@ -121,7 +113,22 @@ export async function runScan(options: ScanOptions): Promise<ScanOutcome> {
   });
   session.onDetached((reason) => stopWith(new ScanStopped(reason === 'canceled_by_user' ? 'detached-by-user' : reason === 'target_closed' ? 'tab-closed' : 'detached')));
 
+  /**
+   * `work`, given up on when the scan is stopped. For what is asked of the page outside the
+   * collector (which has a gate of its own): a page that stops answering in the middle of it
+   * would otherwise hold the scan where no stop could reach it.
+   */
+  const unlessStopped = <T>(work: Promise<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const onStop = (): void => reject(asStopped(stop.signal.reason) ?? new ScanStopped('user'));
+      if (stop.signal.aborted) onStop();
+      else stop.signal.addEventListener('abort', onStop, { once: true });
+      work.then(resolve, reject).finally(() => stop.signal.removeEventListener('abort', onStop));
+    });
+
   let snapshot: Snapshot;
+  let loaderId: string;
+  let restoreIncomplete = false;
   try {
     options.onPhase?.('attaching');
     try {
@@ -130,19 +137,47 @@ export async function runScan(options: ScanOptions): Promise<ScanOutcome> {
       if (error instanceof DebuggerAttachError) throw new ScanStopped('cannot-attach', error.message);
       throw error;
     }
-    await viewportSettled(session, extension.debugger);
+    await unlessStopped(viewportSettled(session, extension.debugger));
     let watch: Awaited<ReturnType<typeof watchInterference>> | undefined;
+    const watching = watchInterference(session, api.tabs, tabId, extension.interference, (kind) => stopWith(new ScanStopped(kind)));
     try {
-      watch = await watchInterference(session, api.tabs, tabId, extension.interference, (kind) => stopWith(new ScanStopped(kind)));
+      watch = await unlessStopped(watching);
       options.onPhase?.('reading');
-      snapshot = await collect(session, config, { signal: stop.signal, inFlightTimeoutMs: extension.interference.inFlightTimeoutMs });
+      snapshot = await collect(session, config, {
+        signal: stop.signal,
+        inFlightTimeoutMs: extension.interference.inFlightTimeoutMs,
+        restoreStepTimeoutMs: extension.interference.restoreStepTimeoutMs,
+        onRestoreIncomplete() {
+          restoreIncomplete = true;
+        },
+      });
+      // The document the snapshot is of: asked while the session is there.
+      ({ loaderId } = ((await unlessStopped(session.send('Page.getFrameTree'))) as { frameTree: { frame: { loaderId: string } } }).frameTree.frame);
     } finally {
       options.onPhase?.('restoring');
-      await watch?.stop();
+      if (watch) {
+        if (!(await watch.stop())) restoreIncomplete = true;
+      } else {
+        // Stopped while the watch was being set up: it is taken off again if it ever gets that far.
+        watching.then(
+          (late) => void late.stop(),
+          () => undefined,
+        );
+      }
     }
   } catch (error) {
     // What stopped the scan says more than the command that happened to fail because of it.
-    throw (stop.signal.aborted ? asStopped(stop.signal.reason) : null) ?? asStopped(error) ?? error;
+    const stopped = (stop.signal.aborted ? asStopped(stop.signal.reason) : null) ?? asStopped(error);
+    if (!stopped) throw error;
+    let { kind } = stopped;
+    // A session that ended without Chrome saying why (a command was refused as "not attached"
+    // before the event of the tab closing came): the tab is asked for, so that a closed tab is
+    // always said to be that, whichever of the two was noticed first.
+    if (kind === 'detached' && !(await api.tabs.get(tabId).then(
+      () => true,
+      () => false,
+    ))) kind = 'tab-closed';
+    throw new ScanStopped(kind, stopped.detail, restoreIncomplete);
   } finally {
     signal.removeEventListener('abort', onUserStop);
     await session.detach();
@@ -155,7 +190,7 @@ export async function runScan(options: ScanOptions): Promise<ScanOutcome> {
 
   options.onPhase?.('evaluating');
   const result = buildResult(snapshot, config, (options.now ?? (() => new Date()))());
-  const outcome: ScanOutcome = { result, crops: {} };
+  const outcome: ScanOutcome = { result, document: { tabId, loaderId }, crops: {} };
 
   if (options.adjudicator) {
     options.onPhase?.('judging');
@@ -163,8 +198,10 @@ export async function runScan(options: ScanOptions): Promise<ScanOutcome> {
       if (signal.aborted) resolve('stopped');
       else signal.addEventListener('abort', () => resolve('stopped'), { once: true });
     });
+    // The signal ends the asking itself: nothing more is sent, and what is under way is aborted.
+    // The race is for an adjudicator that does not listen to it: the scan ends at once all the same.
     const judged = await Promise.race([
-      adjudicateFindings({ snapshot, findings: result.findings, config, adjudicator: options.adjudicator, ...(options.cache ? { cache: options.cache } : {}) }),
+      (options.adjudicate ?? adjudicateFindings)({ snapshot, findings: result.findings, config, adjudicator: options.adjudicator, signal, ...(options.cache ? { cache: options.cache } : {}) }),
       stopped,
     ]);
     if (judged === 'stopped') outcome.judgingStopped = true;

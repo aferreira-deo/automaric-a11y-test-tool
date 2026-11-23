@@ -1538,11 +1538,21 @@ its captures, the measured values, the success criterion, the rule, the message 
 - **Show on the page** scrolls the element into view and has Chrome draw its DevTools highlight over it, also for
   an element in a same-origin iframe or an open shadow root. The highlight is Chrome's overlay, not something put
   into the document; it is removed after 8 seconds (`highlight.timeoutMs`), when you press the button again, or
-  when a scan starts. The scroll position stays where the highlight put it.
+  when a scan starts. The scroll position stays where the highlight put it. A finding is about the document that
+  was scanned, in the tab that was scanned: the panel keeps the tab and the id Chrome gives the loader of the
+  document in its main frame, and compares before it looks for anything. When the tab has gone to another page
+  (a change of fragment or `history.pushState` is the same document), when it is behind another tab, or when it
+  has been closed, nothing is highlighted and the panel says which of the three it is.
 - **Confirm** / **Dismiss**, and an optional note. A decision is kept for the address of the page, the id of the
   finding and the signature of the element (what it is: tag, role, a hash of its name), in `chrome.storage.local`.
   It is shown again the next time the page is scanned. When another element has taken the place the selector
-  names, the signature differs and the decision is not applied to it.
+  names, the signature differs and the decision is not applied to it. A note is written to storage 0.6 seconds
+  after the last key (`notes.saveDebounceMs`) and at once when its field is left. What the panel holds changes
+  at the key or the click itself, and saves run one after the other, so a note followed at once by Confirm keeps
+  both. A save writes only the entries that changed onto what storage holds at that moment, and reads the index
+  of pages again right before writing it, so two windows working at once keep each other's decisions;
+  `chrome.storage` has no transaction, and two saves that land within the same few milliseconds can still lose
+  an index entry or, for the same decision, leave the later one.
 - **Export**: JSON (the shape the CLI writes for one page, with your decisions under `a11yVision.review`), the HTML
   report with the captures embedded, and SARIF 2.1.0, through the reporters of the CLI. Decisions and notes are in
   the JSON only.
@@ -1563,9 +1573,13 @@ DevTools can.
 - The debugger is attached only to the tab you scan, only when you press "Scan this page" or "Show on the page",
   and detached when the scan or the highlight ends, also when it fails or is stopped. Closing the side panel in the
   middle detaches too (the service worker does it: a debugger session belongs to the extension, not to the panel
-  that started it, and would otherwise stay until the tab is closed). Detaching undoes the emulation; what the
-  scan had done inside the page (scroll positions, focus, the style sheet that stops animations) may not have been
-  put back by a panel that was closing. Reload the page after closing the panel on a running scan.
+  that started it, and would otherwise stay until the tab is closed). Before it detaches, the service worker has
+  the page undo what the scan did inside it (focus, scroll positions, the style sheet that stops animations, the
+  listeners that watch for input), by calling the scan's own clean-up in the isolated worlds the scan left it in,
+  and waits until the viewport has kept its size for 0.4 seconds (`panelClosed`), so that it does not detach in
+  the middle of a capture (see "While a scan runs"). That takes about half a second, and needs no permission
+  beyond `debugger`. It is best effort: a page that does not answer within 2 seconds is detached as it is. If a
+  page looks wrong after the panel was closed on a running scan, reload it.
 - The bar takes room above the page while it shows, and Chrome takes it away a moment after the debugger is
   detached. The page is a little shorter for that time.
 - **Cancel** on the bar ends the scan. Nothing is reported, and the page cannot be put back through a debugger
@@ -1604,11 +1618,32 @@ the page is used is not a measurement, so the scan stops, puts the page back, de
 Not noticed: a Tab press of yours in the page (it cannot be told from the scan's), and anything done inside an
 iframe of the page (the listeners are on the top document).
 
+"Scan this page" pressed twice in a row (a double click, a key that repeats) starts one scan: the second
+activation arrives before the scan has touched the page and does nothing. From the moment the debugger is about
+to be attached the button reads "Stop the scan", and stops it.
+
 After a stop the commands Chrome was still working on are waited for, 3 seconds at most
-(`interference.inFlightTimeoutMs`), before the page is put back. Without that wait a browser test left the page,
-once in some tens of stopped scans, with a viewport twice as wide; the likely cause is a capture that restores the
-emulation it found when it finishes, after the scan had already cleared it. With the wait it was not seen again
-(48 stopped scans in a row). If a page ever looks wrong after a stopped scan, reload it.
+(`interference.inFlightTimeoutMs`), before the page is put back. That wait is needed, and this is what shows it:
+scans of a page of 150 buttons were stopped at a random moment of the walk, 80 times with the wait and 80 times
+with it set to 0 (Chromium 153). Without it 26 pages were left with a wrong viewport at a device pixel ratio of
+1: 2560 px wide (the 1280 px of the window at the scale of 2 the captures are taken at), or 236 to 256 px (a
+button with its margin, at that scale). With it, none. The widths are those of the clips that were being
+captured, so the cause is taken to be this: while Chrome takes a capture of a clip it emulates a viewport of the
+size of the clip and puts the previous emulation back when it is done, and a session that is detached in the
+middle keeps the viewport of the capture. That it is the capture is inferred from the widths; it was not read in
+Chromium's source. Closing the panel on a running scan showed the same (9 of 80), until the service worker
+waited too (0 of 80).
+
+A page that stops answering while it is scanned (a dialog of its own, `alert()`, is open; its main thread is
+busy) cannot be put back. The scan itself has no time limit for that, but Stop has: each of the things that are
+asked of the page after a stop is given 2 seconds (`interference.restoreStepTimeoutMs`), the first that gets no
+answer ends the waiting, and the debugger is detached, which ends the emulation. The panel then says that the
+page did not answer and may not be as it was (scrolled, focus moved, animations switched off), and to reload it.
+In the worst case that is the 3 seconds above and twice 2 seconds. The CLI and the Playwright API keep waiting
+for a page as long as it takes after a scan that ran to its end: whoever called them goes on with the page and
+relies on it being as it was.
+
+If a page ever looks wrong after a stopped scan, reload it.
 
 ### Permissions
 
@@ -1618,7 +1653,7 @@ emulation it found when it finishes, after the scan had already cleared it. With
 | `sidePanel` | The panel. |
 | `storage` | `chrome.storage.local`: settings, decisions, the verdict cache, the API key if you give one. `storage.sync` is never used. |
 | `activeTab` | Only to show the title of the page that will be scanned, when Chrome grants it (after a click on the toolbar button). Scanning does not depend on it. |
-| optional host permission for the model endpoint | Asked for when you save model settings, for exactly the origin of the endpoint (`http://127.0.0.1:11434/*`), never at install. The manifest allows asking for `http` only on `localhost`, `*.localhost` and `127.0.0.1`, and for `https` anywhere. |
+| optional host permission for the model endpoint | Asked for when you save model settings, for exactly the origin of the endpoint (`http://127.0.0.1:11434/*`), never at install. The manifest allows asking for `http` only on `localhost`, `*.localhost` and `127.0.0.1`, and for `https` anywhere. When you save another origin, or switch the model off, the permission for the origin that was in use before is given up (`chrome.permissions.remove`), and the panel says so. |
 
 No host permissions at install, no content scripts, no `<all_urls>`, no `tabs`, no `scripting`, and no `downloads`
 permission: an export is a blob URL on a link with `download`, which downloads from an extension page without it
@@ -1626,7 +1661,12 @@ permission: an export is a blob URL on a link with `download`, which downloads f
 panel and the service worker are two bundled files, and the content security policy of the extension pages is
 `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:;` with `connect-src` limited to
 `http://localhost:*`, `http://*.localhost:*`, `http://127.0.0.1:*` and `https:`. So the browser itself refuses a
-request from the panel over plain http to another machine, whatever the code does.
+request from the panel over plain http to another machine, whatever the code does. That list of three hosts is
+written once, in `endpoint.httpHosts` (`packages/extension/src/config.ts`): the settings check reads it, and a
+unit test fails when `connect-src` or `optional_host_permissions` of the manifest say anything else.
+
+`dist/THIRD-PARTY-NOTICES.txt` carries the licence texts of the packages of others whose code is in the bundles
+(see [Development](#development)).
 
 ### Privacy: what is stored, and what leaves the machine
 
@@ -1659,7 +1699,17 @@ Statements of fact about the code in `packages/extension`:
   redact session values from a report: it never holds a storage state to redact from.
 
 **Loopback, compared with the CLI.** Both refuse an endpoint that is not `localhost`, a name under `.localhost`,
-`127.0.0.0/8` or `::1`, unless you allow remote endpoints, and then require https. The CLI goes further: it
+`127.0.0.0/8` or `::1`, unless you allow remote endpoints, and then require https. Over plain http the extension
+takes fewer forms of "this machine" than the CLI: `localhost`, a name under `.localhost` and `127.0.0.1`, and no
+other. `http://[::1]:…`, `http://127.0.0.2:…` and `http://localhost.:…` (with the dot) are refused when the
+settings are saved, with a sentence that says why and what to write instead, and again when a scan starts with
+settings saved by an earlier version. The reason is the content security policy: a host in a policy is letters,
+digits and hyphens, so an IPv6 address cannot be written in `connect-src` at all, and of the IP addresses only
+`127.0.0.1` ever matches ([CSP 3](https://www.w3.org/TR/CSP3/), section 2.3.1, "Source Lists");
+Chrome's page on [match patterns](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
+names `localhost` and `127.0.0.1` as hosts and says nothing of IPv6. Rather than accept an address the browser
+would then block as a network error without a reason, the settings refuse it. Over https all of them are
+reachable (`connect-src https:`). The CLI goes further in another way: it
 resolves the name itself, refuses it if any address is not loopback, connects to that address and uses no proxy.
 The extension cannot: it has `fetch` and nothing else. What it relies on is Chrome. Chromium's host resolver
 answers `localhost` and names under `.localhost` with loopback addresses itself, without a query on the network
@@ -1669,8 +1719,7 @@ that ground). And it does not send requests to `localhost`, `*.localhost`, `127.
 configured proxy, unless the proxy settings carry the rule `<-loopback>`
 ([net/docs/proxy.md](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md), "implicit bypass
 rules"). Those are Chrome's behaviours, not checks this code makes: the extension cannot see what a name
-resolved to, nor whether a proxy was used. Use `127.0.0.1` to leave nothing to name resolution. `http://[::1]:…` and loopback addresses other than `127.0.0.1` are accepted by
-the settings and then blocked by the content security policy above; use `127.0.0.1` or `localhost`.
+resolved to, nor whether a proxy was used. Use `127.0.0.1` to leave nothing to name resolution.
 
 Without the host permission, a request from the extension is an ordinary cross-origin request: the endpoint has to
 allow the extension's origin. Ollama allows `127.0.0.1` and `0.0.0.0` as origins by default and wants extensions
@@ -1695,6 +1744,32 @@ after a scan focus moves to the "Findings" heading. The browser tests run the to
 in both schemes, with results and settings showing, and expect no `fail` and no `likely`; they also drive a scan
 and a decision from the keyboard alone. Not tested: a screen reader, by a person.
 
+- **Which finding a control belongs to.** Every card has the same four controls: "Confirm", "Dismiss", "Show on
+  the page" and "Note (optional)". Each is tied to its card with `aria-describedby`, pointing at the title of the
+  card (status and rule) and at the line that names the element (selector, and frame when there is one). The
+  accessible name stays the visible label. That was chosen over a unique name (`aria-label` or `aria-labelledby`
+  with the finding in it) for how it reads: a screen reader says "Confirm, toggle button, not pressed", then the
+  finding, so the state comes before a CSS selector is read out, the description can be cut off with the next
+  key, and it can be turned down in the verbosity settings by someone who moves through the cards by heading
+  (each card is an `article` named by its `h4`). With the finding in the name, rule and selector would stand
+  between the label and its state on four controls of every card, and the name would no longer be what is
+  printed on the button, which is what speech input goes by. The cost: a list of buttons taken out of context
+  (the elements list of a screen reader) shows identical names; the headings are the way through the queue.
+- **Notes** are saved while they are typed, after a pause, and when the field is left. Nothing is drawn again for
+  that: the field, focus and the caret stay as they are. The save after a pause is silent, since "Note saved"
+  after every pause would talk over the typing; leaving the field announces it once. A save that fails is
+  always announced.
+- **"Show"** announces what it did in the live region of the queue: "Showing 3 of 12 findings." Focus stays on
+  the select.
+- **Reflow.** A side panel is narrow to begin with (taken here as 360 px), and zoom makes it narrower: at 400%
+  that is 90 CSS px. The decision of a card is no longer a box inside the box of the card (a rule above it
+  instead), fields and selects may shrink below the width of their content, and under 256 px (`16rem`) the page,
+  the cards and the controls give up most of their padding. A browser test lays the panel out at 360 px and at
+  90 px, with findings, the details of one of them and the settings open, and expects no horizontal scroll, no
+  element reaching past either edge, and a text column in a card of at least three quarters of the width. At
+  90 px the closed select shows only the start of its option, as a native select does; the list it opens is
+  whole.
+
 All texts are in `packages/extension/src/strings.ts`, one object, so that a translation is another object of the
 same shape. English only for now.
 
@@ -1710,8 +1785,11 @@ framework can replace `render.ts` and `panel.ts` without touching the rest.
 - No option for anything but the checks and the endpoint of the model: thresholds are the defaults of `core`. Of
   the model options of the CLI only `--ai-text-only` has a counterpart ("Send captures", switched off); votes,
   timeouts, the size of the cache and what a `no` does (`--ai-lower-on-no`) are the defaults.
-- Asking the model can be stopped with the Stop button; requests already sent are not cancelled, and their answers
-  are dropped. The findings are then those of deterministic code.
+- Asking the model can be stopped with the Stop button: no further request is sent, the requests under way are
+  aborted (the connection is closed; what the endpoint does with a request it has already received is its own
+  business), and waits between retries end. The findings are then those of deterministic code, all of them:
+  verdicts that had already come back are not applied to some findings and not to others. In the adjudicator
+  layer this is a `signal` option of `adjudicateFindings`; the CLI passes none and behaves as before.
 - Cross-origin iframes are not entered, as in the CLI (`focus-indicator/frame-not-measured`). Flat sessions and
   `Target.setAutoAttach`, which `chrome.debugger` has since Chrome 125, are not used.
 - The loopback guarantee is Chrome's, not the tool's (see above).
@@ -1741,17 +1819,34 @@ says the debugger is no longer attached.
 
 In a real Chromium with the unpacked extension loaded (`e2e/extension`, Playwright, headless): scans of fixtures of
 every check against their manifests and against the Playwright API on the same page; the page put back after a
-scan; each interference above except the Cancel button; the highlight (main document, shadow root, iframe, scroll
-into view, element gone); decisions across a new panel; the three exports; a model on a mocked endpoint (requests
-come from the extension's origin with the key, the key is in `secret.apiKey` and nowhere else, the cache); refusal
-of remote and plain-http endpoints; hostile text of a page shown as text; a `chrome://` page; the panel's own
-accessibility.
+scan; each interference above except the Cancel button; the panel closed in the middle of a scan (focus, scroll
+position and style sheets as before, the debugger detached); a page that opens a dialog in the middle of a scan,
+then Stop; the button activated twice in a row; the highlight (main document, shadow root, iframe, scroll into
+view, element gone, the tab gone to another document, another tab in front); decisions across a new panel; a
+note and a decision in the same moment; a note saved while it is typed; the three exports; a model on a mocked
+endpoint (requests come from the extension's origin with the key, the key is in `secret.apiKey` and nowhere
+else, the cache); Stop while the model is asked (no request after it); refusal of remote and plain-http
+endpoints, and of the loopback addresses the extension cannot reach; hostile text of a page shown as text; a
+`chrome://` page; the panel's own accessibility (the tool's checks on it, the keyboard, the descriptions of the
+controls of a card, the announcement of a filter, reflow at 360 and at 90 px).
+
+Not covered by a browser test: the line "Page to scan" following the tab (it shows a title only with `activeTab`,
+which a test cannot be given), and giving up a host permission (none can be granted in a test; the decision what
+to ask for and what to give up, and the calls, are unit-tested).
 
 Not exercised by any automated test, because automation cannot do it:
 
 - **The side panel as a side panel.** `chrome.sidePanel.open()` needs a user gesture on the browser's own UI. The
-  tests open `panel.html` in a window of its own with `?tabId=<id>` in its address; the page, its script and the
-  extension context are the same.
+  tests open `panel.html` in a window of its own; the page, its script and the extension context are the same,
+  and so is the bundle: there is no test build. Such a window has to be told which tab to work on, and it is not
+  told in its address, which a link, a bookmark or a page that navigates could write. The test leaves a ticket
+  in `chrome.storage.session` from the service worker (`panel-ticket:<random name>` holding the id of the tab)
+  and opens `panel.html?ticket=<random name>`; the panel takes the tab from storage, once, and removes the
+  ticket. Session storage is in memory, ends with the browser, and can be written only by the extension's own
+  contexts (not by a web page, not by a content script, of which there is none). An address without a ticket the
+  extension itself issued, `?tabId=5` included, names nothing: the panel works on the active tab of its window,
+  as the side panel does. This was chosen over a flag that builds a second bundle for tests, so that the tests
+  run the files that are shipped (`packages/extension/src/target.ts`).
 - **The Cancel button of the debugging bar.** The tests end the session from the service worker instead, which
   reaches the same code by another event.
 - **The permission prompt for the endpoint's origin.** `chrome.permissions.request` shows a dialog that a test
@@ -1801,6 +1896,20 @@ dev dependency of the extension at the version the lockfile had, so nothing new 
 two plain ES modules, not minified, without source maps; the build fails if one of them imports a Node built-in
 or contains `eval`.
 
+Code of others that is shipped. The tool has one runtime dependency, in `packages/core`: `fast-png`, which reads
+and writes the captures. It brings two of its own. All three are bundled into `dist/panel.js` of the extension:
+
+| Package | Licence | What for |
+|---|---|---|
+| [`fast-png`](https://github.com/image-js/fast-png) | MIT | PNG decoder and encoder |
+| [`iobuffer`](https://github.com/image-js/iobuffer) | MIT | byte buffers, used by `fast-png` |
+| [`fflate`](https://github.com/101arrowz/fflate) | MIT | deflate and inflate, used by `fast-png` |
+
+`build.mjs` writes `dist/THIRD-PARTY-NOTICES.txt` from what the bundler says it put into the bundles and from
+the licence files of those packages as installed, and prints their names; it fails if a bundled package has no
+licence file. The service worker bundle holds no code of others. The project itself has no licence file and no
+`license` field yet: which licence it gets is the owner's decision.
+
 The browser tests have two Playwright projects: `chromium` (everything but the extension, in the headless shell)
 and `extension` (`e2e/extension`, the unpacked extension in the full Chromium, one browser per worker, its tests
 in parallel) on two workers of the run: the tests of the CLI start browsers of their own and have little time
@@ -1813,8 +1922,10 @@ to spare (one of them takes 27 of its 30 seconds in a full run, with or without 
 - `A11Y_VISION_EXTENSION_HEADED=1` shows the windows. With a real pointer over them the scans stop, as they
   should ("the pointer is over the page").
 - `A11Y_VISION_EXTENSION_CHROMIUM=<path>` names the Chromium to run. Without it the Chromium of the installed
-  Playwright is used; if that one does not start, an older build that Playwright downloaded earlier is tried and
-  the run says which on stderr. That fallback exists because Windows Smart App Control can refuse an unsigned
+  Playwright is used; if that one does not start, an older build that Playwright downloaded earlier is tried.
+  Every run says once, in the output of the tests, which browser the extension tests ran in: its full version,
+  its path, and whether it is the build of this Playwright version, one that was named, or the fallback
+  (`[extension tests] Chromium under test: …`). That fallback exists because Windows Smart App Control can refuse an unsigned
   `chrome.dll` it has not seen before (it did, on the machine M8 was written on, for the Chromium of Playwright
   1.65.1; the headless shell was not affected).
 

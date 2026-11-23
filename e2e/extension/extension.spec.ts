@@ -1,7 +1,7 @@
 import { A11yVision } from '@a11y-vision/playwright';
 import { expect } from '@playwright/test';
 import type { Finding } from '@a11y-vision/core';
-import type { Page } from '@playwright/test';
+import type { Dialog, Page } from '@playwright/test';
 import { exported, exportedJson, scan, scanEnded, scansEnded, startScan, test } from '../support/extension.js';
 import { compareToManifest, loadFixtures } from '../support/manifest.js';
 import { startMockModel, verdict } from '../support/mock-model.js';
@@ -167,6 +167,46 @@ test('a decision is kept for the page, the finding and the element, across a rel
   await again.close();
 });
 
+const storedDecisions = async (panel: Page): Promise<{ decision: string | null; note: string }[]> => {
+  const stored = await panel.evaluate(() => (globalThis as unknown as { chrome: { storage: { local: { get(): Promise<Record<string, unknown>> } } } }).chrome.storage.local.get());
+  const key = Object.keys(stored).find((name) => name.startsWith('decisions:'));
+  return key ? Object.values((stored[key] as { entries: Record<string, { decision: string | null; note: string }> }).entries).map(({ decision, note }) => ({ decision, note })) : [];
+};
+
+test('a note followed at once by a decision keeps both', async ({ panelFor }) => {
+  const { panel } = await panelFor('/focus-indicator/outline-none.html');
+  await scan(panel, ['focus-indicator']);
+  // In one task, as a click on Confirm that also takes focus out of the note does it.
+  await panel.locator('article.finding[data-status="fail"]').first().evaluate((node: HTMLElement) => {
+    const note = node.querySelector('textarea')!;
+    note.value = 'Seen with the keyboard.';
+    note.dispatchEvent(new Event('change', { bubbles: true }));
+    node.querySelector<HTMLElement>('button.confirm')!.click();
+  });
+  await expect(panel.locator('#action-status')).toHaveText('Decision saved: Confirmed.');
+  await expect.poll(() => storedDecisions(panel)).toEqual([{ decision: 'confirmed', note: 'Seen with the keyboard.' }]);
+  expect((await exportedJson(panel)).a11yVision.review.decisions.map(({ decision, note }) => ({ decision, note }))).toEqual([{ decision: 'confirmed', note: 'Seen with the keyboard.' }]);
+});
+
+test('a note is saved while it is typed, without moving focus or replacing the field', async ({ panelFor }) => {
+  const { panel } = await panelFor('/focus-indicator/outline-none.html');
+  await scan(panel, ['focus-indicator']);
+  const note = panel.locator('article.finding[data-status="fail"]').first().locator('textarea');
+  await note.evaluate((field) => ((field as unknown as { marked: boolean }).marked = true));
+  await note.focus();
+  await panel.keyboard.type('Typed and left');
+  // No blur: the note is in storage a moment after the last key.
+  await expect.poll(() => storedDecisions(panel)).toEqual([{ decision: null, note: 'Typed and left' }]);
+  await expect(note).toBeFocused();
+  expect(await note.evaluate((field) => (field as unknown as { marked?: boolean }).marked === true && (field as HTMLTextAreaElement).selectionStart === 14)).toBe(true);
+  // Saving while typing is not announced: the announcement comes when the field is left.
+  await expect(panel.locator('#action-status')).toHaveText('');
+  await panel.keyboard.type(' there');
+  await panel.keyboard.press('Tab');
+  await expect(panel.locator('#action-status')).toHaveText('Note saved.');
+  await expect.poll(() => storedDecisions(panel)).toEqual([{ decision: null, note: 'Typed and left there' }]);
+});
+
 test.describe('highlight', () => {
   for (const [name, path, selector] of [
     ['an element of the page', '/focus-indicator/taller-than-viewport.html', null],
@@ -233,6 +273,41 @@ test.describe('highlight', () => {
     await gone.locator('button.highlight').click();
     await expect(panel.locator('#action-status')).toContainText('no longer on the page');
     await expect(gone.locator('button.highlight')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('is refused when the tab shows another document than the one that was scanned', async ({ panelFor, extension, baseURL }) => {
+    const { page, panel, tabId } = await panelFor('/focus-indicator/outline-none.html');
+    await scan(panel, ['focus-indicator']);
+    const button = panel.locator('article.finding[data-status="fail"]', { has: panel.locator('code', { hasText: '#none-button' }) }).first().locator('button.highlight');
+    // The same document under another address (a fragment) is still the page that was scanned.
+    await page.evaluate(() => history.pushState(null, '', '#later'));
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+
+    // Another document, with an element the selector of the finding names.
+    await page.goto(new URL('/_ci/ext-hostile.html', baseURL).href);
+    await page.evaluate(() => document.body.insertAdjacentHTML('afterbegin', '<button id="none-button">another page</button>'));
+    const picture = await page.screenshot();
+    await button.click();
+    await expect(panel.locator('#action-status')).toHaveText(/no longer shows the page that was scanned.*Scan again/);
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(await extension.attached(tabId)).toBe(false);
+    expect((await page.screenshot()).equals(picture)).toBe(true);
+  });
+
+  test('is refused while another tab is in front of the one that was scanned', async ({ panelFor, extension, baseURL }) => {
+    const { panel, tabId } = await panelFor('/focus-indicator/outline-none.html');
+    await scan(panel, ['focus-indicator']);
+    const other = await extension.openTab(new URL('/focus-indicator/outline-none.html', baseURL).href);
+    const button = panel.locator('article.finding[data-status="fail"]').first().locator('button.highlight');
+    await button.click();
+    await expect(panel.locator('#action-status')).toHaveText(/not the tab in front/);
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(await extension.attached(tabId)).toBe(false);
+    expect(await extension.attached(other.tabId)).toBe(false);
+    await other.page.close();
   });
 });
 
@@ -335,17 +410,60 @@ test.describe('a scan that is disturbed stops, puts the page back and reports no
     const before = await begin(panel);
     await page.close();
     await scanEnded(panel, before);
-    await expect(panel.locator('#error')).toHaveText(/because (the tab was closed|the debugger was detached)/);
+    // Whatever notices first (the session ending, the tab being removed, a command that fails), the panel says the one thing that happened.
+    await expect(panel.locator('#error')).toHaveText('The scan was stopped because the tab was closed.');
   });
 
-  test('the panel being closed: the service worker detaches the debugger', async ({ panelFor, extension }) => {
+  test('the panel being closed: the service worker puts focus, scroll and style sheets back, then detaches', async ({ panelFor, extension }) => {
     const { page, panel, tabId } = await panelFor('/_ci/ext-many.html');
+    await page.evaluate(() => {
+      window.scrollTo(0, 120);
+      document.getElementById('b3')?.focus({ preventScroll: true });
+    });
+    const state = await pageState(page);
+    expect([state.active, state.windowScroll[1]]).toEqual(['b3', 120]);
     await begin(panel);
     expect(await extension.attached(tabId)).toBe(true);
     await panel.close();
     await expect.poll(() => extension.attached(tabId)).toBe(false);
-    // Detaching ends the overrides of the scan.
-    await expect.poll(() => page.evaluate(() => window.devicePixelRatio)).toBe(1);
+    // Detaching ends the overrides of the scan; what the scan did inside the page was undone before that.
+    await restored(page, state);
+  });
+
+  test('a page that stops answering (a dialog of its own) does not hold a stopped scan', async ({ panelFor, extension }) => {
+    const { page, panel, tabId } = await panelFor('/_ci/ext-many.html');
+    const before = await begin(panel);
+    // A listener that leaves the dialog open: the page answers nothing while it shows.
+    const dialogs: Dialog[] = [];
+    page.on('dialog', (dialog) => dialogs.push(dialog));
+    await page.evaluate(() => void setTimeout(() => alert('The page asks something.'), 0));
+    await expect.poll(() => dialogs.length).toBe(1);
+    await panel.locator('#scan').click();
+    await scanEnded(panel, before);
+    // It says that the page may not be as it was: nothing could be put back through a page that does not answer.
+    await expect(panel.locator('#error')).toHaveText(/^The scan was stopped\..*did not answer.*[Rr]eload/);
+    await expect(panel.locator('#scan')).toHaveText('Scan this page');
+    await dialogs[0]!.dismiss().catch(() => undefined);
+    await expect.poll(() => extension.attached(tabId)).toBe(false);
+  });
+
+  test('Scan activated twice in a row starts one scan, and Stop stops it', async ({ panelFor, extension }) => {
+    const { panel, tabId } = await panelFor('/_ci/ext-many.html');
+    await panel.evaluate(() => {
+      const button = document.getElementById('scan')!;
+      button.click();
+      button.click();
+    });
+    await expect(panel.locator('#counts')).toHaveText(/[1-9]\d* Tab presses/);
+    // The scan is this panel's, and the button still stops it.
+    await expect(panel.locator('#scan')).toHaveText('Stop the scan');
+    await expect(panel.locator('#error')).toHaveText('');
+    expect(await extension.attached(tabId)).toBe(true);
+    await panel.locator('#scan').click();
+    await expect.poll(() => scansEnded(panel)).toBe(1);
+    await expect(panel.locator('#error')).toHaveText(/^The scan was stopped\. The page was put back/);
+    await expect(panel.locator('#scan')).toHaveText('Scan this page');
+    expect(await extension.attached(tabId)).toBe(false);
   });
 });
 
@@ -504,6 +622,57 @@ test.describe('the model', () => {
     await expect(panel.locator('#model-notice')).toHaveText(/on models\.example\.test, which is NOT this machine/);
   });
 
+  test('Stop while the model is asked: nothing more is sent', async ({ panelFor }) => {
+    const mock = await startMockModel((request) => {
+      if (request.method === 'OPTIONS') return { status: 204, headers: cors, body: '' };
+      return { ...verdict('yes'), headers: cors, delayMs: 700 };
+    });
+    try {
+      const { panel } = await panelFor('/headings/baseline.html');
+      await configure(panel, { baseUrl: mock.baseUrl, model: 'slow' });
+      await expect(panel.locator('#settings-status')).toHaveText('Model settings saved.');
+      const before = await scansEnded(panel);
+      await startScan(panel, ['headings']);
+      await expect(panel.locator('#status')).toHaveText(/Asking the model/);
+      const posts = (): number => mock.requests.filter((request) => request.method === 'POST').length;
+      await expect.poll(posts).toBeGreaterThan(0);
+      await panel.locator('#scan').click();
+      await scanEnded(panel, before);
+      await expect(panel.locator('#results-note')).toContainText('Asking the model was stopped');
+      const atStop = posts();
+      // Long enough for several more rounds of requests, had they gone on.
+      await panel.waitForTimeout(2500);
+      expect(posts()).toBe(atStop);
+      // The findings are those of deterministic code.
+      expect((await exportedJson(panel)).a11yVision.findings.every((finding) => finding.ai === undefined)).toBe(true);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  test('a loopback address the extension cannot reach over http is refused with the reason', async ({ panelFor }) => {
+    const { panel } = await panelFor('/headings/baseline.html');
+    await panel.locator('#settings > summary').click();
+    const save = async (baseUrl: string): Promise<void> => {
+      await panel.locator('#model-enabled').setChecked(true);
+      await panel.locator('#base-url').fill(baseUrl);
+      await panel.locator('#model-name').fill('m');
+      await panel.locator('#save-settings').click();
+    };
+    for (const baseUrl of ['http://[::1]:11434/v1', 'http://127.0.0.2:11434/v1', 'http://localhost.:11434/v1']) {
+      await save(baseUrl);
+      await expect(panel.locator('#settings-error'), baseUrl).toHaveText(/Over plain http this extension can only reach localhost, a name under \.localhost, or 127\.0\.0\.1/);
+      await expect(panel.locator('#model-notice')).toBeHidden();
+    }
+    // The forms it can reach.
+    for (const baseUrl of ['http://localhost:11434/v1', 'http://ai.localhost:11434/v1', 'http://127.0.0.1:11434/v1', 'https://[::1]:8443/v1']) {
+      await save(baseUrl);
+      await expect(panel.locator('#settings-error'), baseUrl).toHaveText('');
+      await expect(panel.locator('#settings-status'), baseUrl).toHaveText('Model settings saved.');
+      await expect(panel.locator('#model-notice')).toHaveText(/\(this machine\)/);
+    }
+  });
+
   test('an endpoint that does not answer leaves the findings of deterministic code', async ({ panelFor }) => {
     const { panel } = await panelFor('/headings/baseline.html');
     // A port nothing listens on.
@@ -572,5 +741,59 @@ test.describe('the panel itself', () => {
     await expect(panel.locator('#action-status')).toHaveAttribute('aria-live', 'polite');
     // No wording that a page passes or conforms.
     expect(await panel.locator('body').innerText()).not.toMatch(/\bpass(es|ed)?\b|\bcompliant\b|is accessible/i);
+  });
+
+  test('ties the controls of a card to its finding, and announces what a filter shows', async ({ panelFor }) => {
+    const { panel } = await panelFor('/focus-indicator/outline-none.html');
+    await scan(panel, ['focus-indicator']);
+    const total = await panel.locator('article.finding').count();
+    const cards = panel.locator('article.finding[data-status="fail"]');
+    const descriptions = new Set<string>();
+    for (const card of [cards.nth(0), cards.nth(1)]) {
+      const selector = (await card.locator('.where code').first().textContent())!;
+      const rule = (await card.locator('.rule').textContent())!;
+      const expected = `Fail ${rule} Selector: ${selector}`;
+      descriptions.add(expected);
+      // The name is the visible label; the finding is the description, read after name, role and state.
+      await expect(card.getByRole('button', { name: 'Confirm', exact: true })).toHaveAccessibleDescription(expected);
+      await expect(card.getByRole('button', { name: 'Dismiss', exact: true })).toHaveAccessibleDescription(expected);
+      await expect(card.getByRole('button', { name: 'Show on the page', exact: true })).toHaveAccessibleDescription(expected);
+      await expect(card.getByRole('textbox', { name: 'Note (optional)', exact: true })).toHaveAccessibleDescription(expected);
+    }
+    expect(descriptions.size).toBe(2);
+
+    await cards.nth(0).locator('button.confirm').click();
+    await panel.locator('#show').selectOption('confirmed');
+    await expect(panel.locator('#action-status')).toHaveText(`Showing 1 of ${total} findings.`);
+    await panel.locator('#show').selectOption('dismissed');
+    await expect(panel.locator('#action-status')).toHaveText(`Showing 0 of ${total} findings.`);
+    await panel.locator('#show').selectOption('all');
+    await expect(panel.locator('#action-status')).toHaveText(`Showing ${total} of ${total} findings.`);
+  });
+
+  test('reflows without a horizontal scroll bar in a 360 px panel, at 100% and at 400% zoom', async ({ panelFor }) => {
+    const { panel } = await panelFor('/focus-indicator/outline-none.html');
+    await scan(panel, ['focus-indicator', 'icon-contrast']);
+    await panel.locator('#settings > summary').click();
+    await panel.locator('article.finding details > summary').first().click();
+    // 400% zoom of a panel 360 px wide leaves the page 90 CSS px.
+    for (const width of [360, 90]) {
+      await panel.setViewportSize({ width, height: 800 });
+      const measured = await panel.evaluate(() => {
+        const root = document.scrollingElement!;
+        const beyond = [...document.querySelectorAll<HTMLElement>('body *')]
+          .filter((element) => {
+            const box = element.getBoundingClientRect();
+            return box.width > 0 && box.height > 0 && (box.right > window.innerWidth + 0.5 || box.left < -0.5);
+          })
+          .map((element) => `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${element.className ? `.${element.className}` : ''}`);
+        return { viewport: window.innerWidth, scrollWidth: root.scrollWidth, clientWidth: root.clientWidth, beyond: [...new Set(beyond)] };
+      });
+      expect(measured.viewport, `${width} px`).toBe(width);
+      expect(measured.beyond, `${width} px`).toEqual([]);
+      expect(measured.scrollWidth, `${width} px`).toBeLessThanOrEqual(measured.clientWidth);
+      // The text column of a card is not squeezed to nothing by the boxes around it.
+      expect(await panel.locator('article.finding .message').first().evaluate((node) => node.getBoundingClientRect().width), `${width} px`).toBeGreaterThanOrEqual(width * 0.75);
+    }
   });
 });

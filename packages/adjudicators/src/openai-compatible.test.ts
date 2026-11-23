@@ -184,6 +184,19 @@ describe('failures of the endpoint', () => {
     expect((await adapter({ timeoutMs: 150 }).judge(input)).problem).toBe('timeout');
   });
 
+  it('is aborted by the signal of the caller, and says that it was stopped, not that it failed', async () => {
+    mock.respond(() => ({ hang: true }));
+    const stop = new AbortController();
+    const started = Date.now();
+    setTimeout(() => stop.abort(), 100);
+    expect(await adapter({ timeoutMs: 5000 }).judge(input, { signal: stop.signal })).toEqual({ verdict: 'unsure', rationale: '', problem: 'stopped' });
+    expect(Date.now() - started).toBeLessThan(2000);
+    // And is not sent at all once the signal has fired.
+    const sent = mock.requests.length;
+    expect(await adapter().judge(input, { signal: stop.signal })).toEqual({ verdict: 'unsure', rationale: '', problem: 'stopped' });
+    expect(mock.requests.length).toBe(sent);
+  });
+
   it('reports a dropped connection and a closed port as network problems worth retrying', async () => {
     mock.respond(() => ({ drop: true }));
     expect(await adapter().judge(input)).toEqual({ verdict: 'unsure', rationale: '', problem: 'network', retryable: true });

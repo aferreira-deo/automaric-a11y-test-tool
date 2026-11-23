@@ -42,6 +42,7 @@ interface RunOptions {
   cache?: MemoryCache;
   adjudicator?: Adjudicator;
   now?: () => number;
+  signal?: AbortSignal;
 }
 
 async function run(options: RunOptions = {}) {
@@ -62,6 +63,7 @@ async function run(options: RunOptions = {}) {
     adjudicator,
     ...(options.cache ? { cache: options.cache } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
     sleep: (ms) => {
       waits.push(ms);
       return Promise.resolve();
@@ -327,6 +329,65 @@ describe('an endpoint that hangs', () => {
     const unlimited = await run({ now: () => clock, input: { adjudication: { concurrency: 1, votes: 1, pageBudgetMs: 0 } } });
     expect(mock.requests).toHaveLength(4);
     expect(unlimited.stats.stopReason).toBeNull();
+  });
+});
+
+describe('a signal that stops adjudication', () => {
+  it('sends nothing more, aborts the request under way, and leaves the findings as deterministic code reported them', async () => {
+    mock.respond(() => ({ ...verdict('yes'), delayMs: 400 }));
+    const stop = new AbortController();
+    const cache = newCache();
+    const started = Date.now();
+    setTimeout(() => stop.abort(), 100);
+    const { findings, find, stats } = await run({ cache, signal: stop.signal, input: { adjudication: { concurrency: 1 } } });
+    // It did not wait for the answer that was on its way, and asked about no other candidate.
+    expect(Date.now() - started).toBeLessThan(350);
+    expect(mock.requests).toHaveLength(1);
+    expect(stats).toMatchObject({ calls: 1, judged: 0, stopped: 4, stopReason: 'aborted', changed: 0, problems: {} });
+    expect(describeStats(stats)).toContain('stopped by the caller; 4 candidate(s) were not asked about');
+    expect(statuses(findings)).toEqual(DETERMINISTIC);
+    for (const selector of CANDIDATES) expect(find(selector).ai).toMatchObject({ verdict: 'unsure', problems: ['stopped'] });
+    expect(cache.toJSON().entries).toEqual({});
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(mock.requests).toHaveLength(1);
+  });
+
+  it('that has already fired sends nothing at all', async () => {
+    const stop = new AbortController();
+    stop.abort();
+    const { stats } = await run({ signal: stop.signal });
+    expect(mock.requests).toHaveLength(0);
+    expect(stats).toMatchObject({ calls: 0, stopped: 4, stopReason: 'aborted' });
+  });
+
+  it('ends a wait between retries', async () => {
+    mock.respond(() => ({ status: 503 }));
+    const stop = new AbortController();
+    const scan = candidateScan({ adjudication: { provider: 'openai-compatible', baseUrl: mock.baseUrl, model: 'm', timeoutMs: 2000, retryBaseDelayMs: 60000, retryMaxDelayMs: 60000, concurrency: 1 } });
+    const started = Date.now();
+    setTimeout(() => stop.abort(), 150);
+    // The real wait, not the one of the tests: a minute, unless the signal ends it.
+    const out = await adjudicateFindings({ snapshot: scan.snapshot, findings: scan.result.findings, config: scan.config, adjudicator: createAdjudicator(scan.config.adjudication, {})!, signal: stop.signal });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(out.stats.stopReason).toBe('aborted');
+    expect(mock.requests).toHaveLength(1);
+  });
+
+  it('is not passed to an adjudicator when there is none: a call is what it was', async () => {
+    const seen: unknown[][] = [];
+    const adjudicator: Adjudicator = {
+      provider: 'p',
+      model: 'm',
+      promptVersion: '1',
+      cacheIdentity: 'x',
+      judge: (...args: unknown[]) => {
+        seen.push(args);
+        return Promise.resolve({ verdict: 'unsure', rationale: '' });
+      },
+    };
+    await run({ adjudicator });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((args) => args.length === 1)).toBe(true);
   });
 });
 

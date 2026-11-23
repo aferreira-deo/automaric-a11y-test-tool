@@ -1,7 +1,8 @@
 import { defaultConfig } from '@a11y-vision/core';
 import { describe, expect, it } from 'vitest';
 import { extensionConfig } from './config.js';
-import { decisionFor, decisionKey, DecisionStore, emptyPageDecisions, pageStorageKey, parsePageDecisions, withDecision } from './decisions.js';
+import type { StorageArea } from './chrome-api.js';
+import { decisionFor, decisionKey, DecisionSession, DecisionStore, emptyPageDecisions, pageStorageKey, parsePageDecisions, withDecision } from './decisions.js';
 import { fakeStorage } from './test-support.js';
 
 const limits = extensionConfig.storage;
@@ -118,5 +119,121 @@ describe('DecisionStore', () => {
     const store = new DecisionStore(area, limits);
     await store.save('decisions:a', withDecision(emptyPageDecisions(now), finding, { decision: 'confirmed', note: '' }, limits, now));
     expect(area.items['decisions-index']).toEqual({ 'decisions:a': now.toISOString() });
+  });
+});
+
+/** Storage whose calls take a moment each, as the real one does, and that can have something done to it between two calls. */
+function slowStorage(initial: Record<string, unknown> = {}) {
+  const area = fakeStorage(initial);
+  let inSet = 0;
+  let overlapped = false;
+  const hooks: { afterGet?: (keys: unknown) => void } = {};
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 2));
+  const slow: StorageArea = {
+    async get(keys) {
+      await pause();
+      const value = await area.get(keys);
+      hooks.afterGet?.(keys);
+      return value;
+    },
+    async set(items) {
+      if (inSet++ > 0) overlapped = true;
+      await pause();
+      await area.set(items);
+      inSet--;
+    },
+    async remove(keys) {
+      await pause();
+      await area.remove(keys);
+    },
+  };
+  return { area, slow, hooks, overlapped: () => overlapped };
+}
+
+describe('DecisionSession', () => {
+  const key = 'decisions:https://example.test/a';
+  const entriesOf = (area: { items: Record<string, unknown> }): Record<string, { decision: string | null; note: string; at: string }> =>
+    (area.items[key] as { entries: Record<string, { decision: string | null; note: string; at: string }> }).entries;
+
+  it('a note followed at once by a decision keeps both: what is held changes before anything is awaited', async () => {
+    const { area, slow, overlapped } = slowStorage();
+    const session = new DecisionSession(new DecisionStore(slow, limits), key, emptyPageDecisions(now), limits);
+    // As the panel does on a change of the note and a click on Confirm in the same task.
+    expect(session.set(finding, { note: 'seen with the keyboard' }, now)).toMatchObject({ decision: null, note: 'seen with the keyboard' });
+    const first = session.save();
+    expect(session.set(finding, { decision: 'confirmed' }, later)).toEqual({ decision: 'confirmed', note: 'seen with the keyboard', at: later.toISOString() });
+    const second = session.save();
+    await Promise.all([first, second]);
+    expect(entriesOf(area)).toEqual({ [decisionKey(finding)]: { decision: 'confirmed', note: 'seen with the keyboard', at: later.toISOString() } });
+    // One save after the other, never two at a time.
+    expect(overlapped()).toBe(false);
+    expect(session.unsaved).toBe(false);
+  });
+
+  it('saves in the order of the changes, however many are asked for at once', async () => {
+    const { area, slow } = slowStorage();
+    const session = new DecisionSession(new DecisionStore(slow, limits), key, emptyPageDecisions(now), limits);
+    const saves: Promise<void>[] = [];
+    for (const note of ['a', 'ab', 'abc', 'abcd']) {
+      session.set(finding, { note }, now);
+      saves.push(session.save());
+    }
+    session.set(other, { decision: 'dismissed' }, later);
+    saves.push(session.save());
+    await Promise.all(saves);
+    expect(Object.values(entriesOf(area)).map(({ note, decision }) => [decision, note])).toEqual([
+      [null, 'abcd'],
+      ['dismissed', ''],
+    ]);
+  });
+
+  it('keeps what could not be saved, says so, and writes it with the next save', async () => {
+    const area = fakeStorage();
+    let fail = true;
+    const flaky: StorageArea = { get: (keys) => area.get(keys), remove: (keys) => area.remove(keys), set: (items) => (fail ? Promise.reject(new Error('QUOTA_BYTES quota exceeded')) : area.set(items)) };
+    const session = new DecisionSession(new DecisionStore(flaky, limits), key, emptyPageDecisions(now), limits);
+    session.set(finding, { decision: 'confirmed' }, now);
+    await expect(session.save()).rejects.toThrow('QUOTA_BYTES');
+    expect(session.unsaved).toBe(true);
+    expect(decisionFor(session.page, finding)?.decision).toBe('confirmed');
+    fail = false;
+    session.set(other, { note: 'later' }, later);
+    await session.save();
+    expect(Object.keys(entriesOf(area)).sort()).toEqual([decisionKey(finding), decisionKey(other)].sort());
+    expect(session.unsaved).toBe(false);
+  });
+
+  it('writes only what it changed: a decision another window stored for the same page meanwhile stays', async () => {
+    const area = fakeStorage();
+    const store = new DecisionStore(area, limits);
+    const mine = new DecisionSession(store, key, emptyPageDecisions(now), limits);
+    const theirs = new DecisionSession(store, key, emptyPageDecisions(now), limits);
+    theirs.set(other, { decision: 'dismissed', note: 'theirs' }, now);
+    await theirs.save();
+    mine.set(finding, { decision: 'confirmed' }, later);
+    await mine.save();
+    expect(Object.keys(entriesOf(area)).sort()).toEqual([decisionKey(finding), decisionKey(other)].sort());
+    // Taking a decision back removes that one and no other.
+    mine.set(finding, { decision: null }, later);
+    await mine.save();
+    expect(Object.keys(entriesOf(area))).toEqual([decisionKey(other)]);
+  });
+});
+
+describe('DecisionStore, with another window writing at the same time', () => {
+  it('reads the index again right before it writes it, and changes only its own page in it', async () => {
+    const { area, slow, hooks } = slowStorage({ 'decisions-index': { 'decisions:old': '2025-01-01T00:00:00.000Z' }, 'decisions:old': { version: 1, updatedAt: '2025-01-01T00:00:00.000Z', entries: {} } });
+    const store = new DecisionStore(slow, limits);
+    let reads = 0;
+    hooks.afterGet = (keys) => {
+      // Right after this save has first read the index, another window saves a page of its own.
+      if (keys === 'decisions-index' && ++reads === 1) {
+        area.items['decisions:theirs'] = { version: 1, updatedAt: later.toISOString(), entries: { x: { decision: 'confirmed', note: '', at: later.toISOString() } } };
+        area.items['decisions-index'] = { ...(area.items['decisions-index'] as object), 'decisions:theirs': later.toISOString() };
+      }
+    };
+    await store.save('decisions:mine', withDecision(emptyPageDecisions(now), finding, { decision: 'confirmed', note: '' }, limits, now));
+    expect(area.items['decisions-index']).toEqual({ 'decisions:old': '2025-01-01T00:00:00.000Z', 'decisions:theirs': later.toISOString(), 'decisions:mine': now.toISOString() });
+    expect(Object.keys(area.items).sort()).toEqual(['decisions-index', 'decisions:mine', 'decisions:old', 'decisions:theirs']);
   });
 });

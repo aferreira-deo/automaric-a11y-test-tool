@@ -6,7 +6,7 @@
  * their own (`./node`, loaded on first use), which uses no proxy and connects to loopback
  * addresses only. What is asked, and what an answer may change, is decided in `@a11y-vision/core`.
  */
-export type { Adjudicator, JudgeInput, JudgeResult } from './types.js';
+export type { Adjudicator, JudgeInput, JudgeOptions, JudgeResult } from './types.js';
 export { buildPrompt, cleanRationale, parseVerdict, PROMPT_VERSION, randomNonce, SYSTEM_PROMPT, VERDICT_SCHEMA } from './prompt.js';
 export type { ParsedVerdict, Prompt } from './prompt.js';
 export { chatCompletionsBody, createOpenAiCompatibleAdjudicator, OPENAI_COMPATIBLE } from './openai-compatible.js';

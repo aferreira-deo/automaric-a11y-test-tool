@@ -14,8 +14,11 @@ import type { ExtensionConfig } from './config.js';
  */
 export type InterferenceKind = 'input' | 'pointer-over-page' | 'hidden' | 'navigation' | 'tab-closed';
 
-const WATCH_WORLD = 'a11y-vision-watch';
+/** The isolated world the watch lives in. Named, so that the service worker can reach it too (see `background-core.ts`). */
+export const WATCH_WORLD = 'a11y-vision-watch';
 const WATCH_GLOBAL = '__a11yVisionWatch';
+/** Evaluated in `WATCH_WORLD`: takes the listeners of the watch off the page, if they are there. */
+export const watchStopExpression = `globalThis[${JSON.stringify(WATCH_GLOBAL)}]?.stop()`;
 
 /**
  * Runs in an isolated world of the page: the page's scripts cannot see it or set its flag.
@@ -54,8 +57,12 @@ function installWatch(name: string, watchInput: boolean, watchHidden: boolean): 
 }
 
 export interface InterferenceWatch {
-  /** Stops watching and takes the listeners off the page. */
-  stop(): Promise<void>;
+  /**
+   * Stops watching and takes the listeners off the page. The page is given `restoreStepTimeoutMs`
+   * to answer: false when it did not (the listeners then stay until the page answers again;
+   * they only set a flag nobody reads any more).
+   */
+  stop(): Promise<boolean>;
 }
 
 interface Evaluated {
@@ -160,9 +167,18 @@ export async function watchInterference(
         tabs.onActivated.removeListener(onActivated);
         tabs.onRemoved.removeListener(onRemoved);
       }
-      await cdp
-        .send('Runtime.evaluate', { expression: `globalThis[${JSON.stringify(WATCH_GLOBAL)}]?.stop()`, contextId, returnByValue: true })
-        .catch(() => undefined);
+      const taken = cdp.send('Runtime.evaluate', { expression: watchStopExpression, contextId, returnByValue: true }).then(
+        () => true,
+        // Refused, or the session is over: an answer all the same, and nothing is left to wait for.
+        () => true,
+      );
+      let limit: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<false>((resolve) => {
+        limit = setTimeout(() => resolve(false), config.restoreStepTimeoutMs);
+      });
+      const answered = await Promise.race([taken, late]);
+      clearTimeout(limit);
+      return answered;
     },
   };
 }

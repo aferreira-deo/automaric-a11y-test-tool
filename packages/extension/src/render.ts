@@ -85,6 +85,9 @@ export function applyStaticText(doc: Document, strings: Strings): void {
 
 export interface FindingHandlers {
   onDecision(finding: Finding, decision: Decision | null): void;
+  /** The note as it is while it is typed, at every change of it. */
+  onNoteInput(finding: Finding, note: string): void;
+  /** The note when its field is left after it was changed. */
   onNote(finding: Finding, note: string): void;
   onHighlight(finding: Finding, button: HTMLButtonElement): void;
 }
@@ -172,7 +175,7 @@ export function renderFinding(item: FindingItem, context: RenderContext, heading
     title.append(doc.createTextNode(' '), h(doc, 'span', { class: 'verdict', text: format(strings.modelSaid, { verdict }) }));
   }
 
-  const where = h(doc, 'p', { class: 'where' }, h(doc, 'span', { class: 'label', text: `${strings.selectorLabel}: ` }), h(doc, 'code', { text: selector }));
+  const where = h(doc, 'p', { class: 'where', id: `${id}-where` }, h(doc, 'span', { class: 'label', text: `${strings.selectorLabel}: ` }), h(doc, 'code', { text: selector }));
   if (typeof finding.frame === 'string' && finding.frame !== '') {
     where.append(doc.createTextNode(' '), h(doc, 'span', { class: 'label', text: `${strings.frameLabel}: ` }), h(doc, 'code', { text: finding.frame }));
   }
@@ -200,11 +203,20 @@ export function renderFinding(item: FindingItem, context: RenderContext, heading
   }
   const details = h(doc, 'details', {}, h(doc, 'summary', { text: strings.detailsSummary }), list);
 
-  const confirm = h(doc, 'button', { class: 'confirm', text: strings.confirmButton, attrs: { type: 'button', 'aria-pressed': 'false' } });
-  const dismiss = h(doc, 'button', { class: 'dismiss', text: strings.dismissButton, attrs: { type: 'button', 'aria-pressed': 'false' } });
-  const note = h(doc, 'textarea', { id: `${id}-note`, attrs: { rows: '2', maxlength: String(context.maxNoteChars) } });
+  // Every card has the same four controls with the same four names. What tells one "Confirm"
+  // from the next is the finding, so each control is described by the title of its card and by
+  // the line that names the element (`aria-describedby`). The name stays the visible label,
+  // short and the same on every card: a screen reader says "Confirm, toggle button, not
+  // pressed" and then the finding, so the state is heard before a selector is read out, the
+  // description can be cut short by the next key, and speech input still takes "click Confirm".
+  // Put into the name instead, rule and selector would stand between the label and the state,
+  // four times on every card.
+  const about = `${id}-title ${id}-where`;
+  const confirm = h(doc, 'button', { class: 'confirm', text: strings.confirmButton, attrs: { type: 'button', 'aria-pressed': 'false', 'aria-describedby': about } });
+  const dismiss = h(doc, 'button', { class: 'dismiss', text: strings.dismissButton, attrs: { type: 'button', 'aria-pressed': 'false', 'aria-describedby': about } });
+  const note = h(doc, 'textarea', { id: `${id}-note`, attrs: { rows: '2', maxlength: String(context.maxNoteChars), 'aria-describedby': about } });
   note.value = entry?.note ?? '';
-  const highlight = h(doc, 'button', { class: 'highlight', text: strings.highlightButton, attrs: { type: 'button', 'aria-pressed': 'false' } });
+  const highlight = h(doc, 'button', { class: 'highlight', text: strings.highlightButton, attrs: { type: 'button', 'aria-pressed': 'false', 'aria-describedby': about } });
   const decision = h(
     doc,
     'fieldset',
@@ -219,6 +231,7 @@ export function renderFinding(item: FindingItem, context: RenderContext, heading
   const pressed = (button: HTMLElement): boolean => button.getAttribute('aria-pressed') === 'true';
   confirm.addEventListener('click', () => handlers.onDecision(finding, pressed(confirm) ? null : 'confirmed'));
   dismiss.addEventListener('click', () => handlers.onDecision(finding, pressed(dismiss) ? null : 'dismissed'));
+  note.addEventListener('input', () => handlers.onNoteInput(finding, note.value));
   note.addEventListener('change', () => handlers.onNote(finding, note.value));
   highlight.addEventListener('click', () => handlers.onHighlight(finding, highlight));
 

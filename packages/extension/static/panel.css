@@ -101,6 +101,18 @@ fieldset {
   border: 1px solid var(--line);
   margin: 0.5rem 0;
   padding: 0.5rem 0.75rem;
+  /* By default a fieldset is never narrower than its content, whatever holds it. */
+  min-width: 0;
+}
+/* The decision of a card sits inside the border of the card: a rule above it, not a box within the box. */
+fieldset.decision {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.6rem 0 0;
+  padding: 0.3rem 0 0;
+}
+fieldset.decision legend {
+  padding: 0 0.4rem 0 0;
 }
 legend {
   font-weight: 600;
@@ -141,6 +153,8 @@ textarea {
   border-radius: 0.2rem;
   padding: 0.35rem 0.5rem;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 2.25rem;
 }
 button {
@@ -177,6 +191,8 @@ button[aria-pressed='true']::before {
 }
 .toolbar .field {
   flex: 1 1 9rem;
+  /* A select is as wide as its longest option: the field may be narrower than that. */
+  min-width: 0;
   margin: 0;
 }
 ul.findings {
@@ -283,6 +299,42 @@ dd {
 }
 .decision-state {
   font-weight: 600;
+}
+/* A narrow panel, or a wider one zoomed in: at 400% a panel of 360 px is 90 CSS px wide. The
+   boxes then give nearly all of their padding to the text, so that a card keeps a column to
+   read in and nothing has to scroll sideways. */
+@media (max-width: 16rem) {
+  body {
+    padding: 0.25rem;
+  }
+  fieldset {
+    padding: 0.25rem;
+  }
+  fieldset.decision {
+    padding: 0.25rem 0 0;
+  }
+  .finding {
+    padding: 0.25rem;
+    border-left-width: 0.25rem;
+  }
+  .notice {
+    padding: 0.25rem;
+    border-left-width: 0.25rem;
+  }
+  button,
+  input[type='text'],
+  input[type='url'],
+  input[type='password'],
+  select,
+  textarea {
+    padding: 0.25rem;
+  }
+  .check,
+  .buttons,
+  .toolbar,
+  .crops {
+    gap: 0.25rem;
+  }
 }
 [hidden] {
   display: none !important;

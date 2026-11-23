@@ -47,6 +47,46 @@ export interface ExtensionConfig {
     stopOnHidden: boolean;
     /** After a stop, how long the commands Chrome is still working on are waited for before the page is put back. */
     inFlightTimeoutMs: number;
+    /**
+     * After a stop, how long a step of putting the page back is waited for. A page that does not
+     * answer (a dialog of its own is open, its main thread is busy) costs this once; the
+     * debugger is then detached, which ends the emulation, and the panel says to reload.
+     */
+    restoreStepTimeoutMs: number;
+  };
+  panelClosed: {
+    /**
+     * When a panel goes away while attached, the service worker asks the page to undo what the
+     * scan did inside it (focus, scroll positions, the style sheet) before it detaches. It
+     * goes on after this long whether the page answered or not.
+     */
+    restoreTimeoutMs: number;
+    /**
+     * It then waits, before it detaches, until the viewport has kept its size and scale for this
+     * long: a capture the panel had asked for may still be under way, and detaching in the
+     * middle of one leaves the page with the viewport of the capture (see `viewport.ts`).
+     */
+    viewportSettleMs: number;
+    viewportPollMs: number;
+    /** That wait is given up after this long (a capture of a hidden tab never ends), and the debugger is detached. */
+    viewportSettleTimeoutMs: number;
+  };
+  notes: {
+    /** A note is written to storage this long after the last key, and at once when its field is left. */
+    saveDebounceMs: number;
+  };
+  endpoint: {
+    /**
+     * The hosts a model endpoint may have over plain http: the only source of that list. The
+     * settings check refuses any other, and `static/manifest.json` has to say the same in its
+     * `connect-src` and its `optional_host_permissions` (a unit test compares them).
+     * `*.name` is every name under `name`. Over https any host is reachable.
+     *
+     * Why not every loopback address: a host in a content security policy is letters, digits
+     * and hyphens (CSP 3, section 2.3.1, `host-char`), so `[::1]` cannot be written there, and
+     * of the IP addresses only 127.0.0.1 ever matches (same section).
+     */
+    httpHosts: readonly string[];
   };
   highlight: {
     /** The highlight is removed, and the debugger detached, after this long. */
@@ -88,7 +128,11 @@ export const extensionConfig: ExtensionConfig = {
     stopOnPointerOverPage: true,
     stopOnHidden: true,
     inFlightTimeoutMs: 3000,
+    restoreStepTimeoutMs: 2000,
   },
+  panelClosed: { restoreTimeoutMs: 2000, viewportSettleMs: 400, viewportPollMs: 50, viewportSettleTimeoutMs: 3000 },
+  notes: { saveDebounceMs: 600 },
+  endpoint: { httpHosts: ['localhost', '*.localhost', '127.0.0.1'] },
   highlight: {
     timeoutMs: 8000,
     border: { r: 199, g: 0, b: 199, a: 1 },

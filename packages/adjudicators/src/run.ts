@@ -30,9 +30,9 @@ export interface AdjudicationStats {
   /**
    * Why adjudication stopped before every candidate was asked about, or null when it did not:
    * `failures` after `maxConsecutiveFailures` requests in a row got no answer (timeout, network),
-   * `budget` when `pageBudgetMs` ran out.
+   * `budget` when `pageBudgetMs` ran out, `aborted` when the signal of the caller fired.
    */
-  stopReason: 'failures' | 'budget' | null;
+  stopReason: 'failures' | 'budget' | 'aborted' | null;
   /** `maxConsecutiveFailures` as it was in force, for the line that says why adjudication stopped. */
   failureLimit: number;
 }
@@ -43,6 +43,13 @@ export interface AdjudicateOptions {
   config: Config;
   adjudicator: Adjudicator;
   cache?: VerdictCache;
+  /**
+   * Stops adjudication when it fires: nothing more is sent, the requests under way are aborted
+   * and waits between retries end. The promise then resolves soon, with every candidate that has
+   * no verdict yet left as deterministic code reported it (`stopped`). Without a signal nothing
+   * changes: requests end by their answer or their timeout.
+   */
+  signal?: AbortSignal;
   /** For tests: waits between retries. */
   sleep?: (ms: number) => Promise<void>;
   /** For tests: the clock the time budget of the page is measured with, in milliseconds. */
@@ -50,6 +57,24 @@ export interface AdjudicateOptions {
 }
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** `sleep(ms)`, ended early when the signal fires. */
+function interruptible(sleep: (ms: number) => Promise<void>, signal: AbortSignal | undefined): (ms: number) => Promise<void> {
+  if (!signal) return sleep;
+  return (ms) =>
+    new Promise((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+      const done = (): void => {
+        signal.removeEventListener('abort', done);
+        resolve();
+      };
+      signal.addEventListener('abort', done, { once: true });
+      void sleep(ms).then(done, done);
+    });
+}
 
 /** Runs `tasks` with at most `limit` in flight. Tasks never reject here: each one catches what it does. */
 async function pool(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
@@ -86,6 +111,8 @@ function toVote(result: JudgeResult): Vote {
  *   is sent for this page. Requests in flight end by themselves. The candidates not yet asked
  *   about keep their status and get the problem `stopped`. An endpoint that hangs costs that many
  *   timeouts, not one for every candidate.
+ * - Stopping: with `signal`, the caller can end it at any moment. Requests under way are aborted
+ *   then, and their candidates are `stopped` like the ones never asked about.
  * - Cache: a verdict is stored when every vote was a valid answer, and found again by a key that
  *   changes with the candidate, its capture, the model and the prompt. Failures are not stored.
  *   Two candidates of one page with the same key are judged once. An entry is checked again when
@@ -93,9 +120,10 @@ function toVote(result: JudgeResult): Vote {
  *   from, and a finding says when its verdict was read from the cache (`ai.fromCache`).
  */
 export async function adjudicateFindings(options: AdjudicateOptions): Promise<{ findings: Finding[]; stats: AdjudicationStats }> {
-  const { snapshot, findings, config, adjudicator, cache } = options;
+  const { snapshot, findings, config, adjudicator, cache, signal } = options;
   const settings = config.adjudication;
-  const sleep = options.sleep ?? wait;
+  const sleep = interruptible(options.sleep ?? wait, signal);
+  const notAsked: Vote = { verdict: 'unsure', confidence: 'low', rationale: '', problem: 'stopped' };
   const now = options.now ?? Date.now;
   const startedAt = now();
   const all = judgements(snapshot, findings, config);
@@ -137,6 +165,8 @@ export async function adjudicateFindings(options: AdjudicateOptions): Promise<{ 
   let failuresInARow = 0;
   /** Sets `stopReason` when the time for the page is up; true once adjudication has stopped for either reason. */
   const hasStopped = (): boolean => {
+    // The caller's stop comes first: it is the reason whatever else has happened since.
+    if (signal?.aborted) stats.stopReason = 'aborted';
     if (stats.stopReason === null && settings.pageBudgetMs > 0 && now() - startedAt >= settings.pageBudgetMs) stats.stopReason = 'budget';
     return stats.stopReason !== null;
   };
@@ -147,14 +177,21 @@ export async function adjudicateFindings(options: AdjudicateOptions): Promise<{ 
     for (let attempt = 0; ; attempt++) {
       // Nothing is sent once adjudication has stopped: a retry that was waiting keeps the failure
       // it had, and a vote that was never asked for says so.
-      if (hasStopped()) return last ? toVote(last) : { verdict: 'unsure', confidence: 'low', rationale: '', problem: 'stopped' };
+      if (hasStopped()) return last && stats.stopReason !== 'aborted' ? toVote(last) : notAsked;
       stats.calls++;
       let result: JudgeResult;
       try {
-        result = await adjudicator.judge({ check: request.check, question: request.question, crops: request.crop ? [request.crop] : [], context: request.context });
+        const input = { check: request.check, question: request.question, crops: request.crop ? [request.crop] : [], context: request.context };
+        result = await (signal ? adjudicator.judge(input, { signal }) : adjudicator.judge(input));
       } catch {
         // An adapter is not supposed to throw. If one does, that is a failed call like any other.
         result = { verdict: 'unsure', rationale: '', problem: 'network' };
+      }
+      // Stopped by the caller while this was under way: whatever came back is not used, and is
+      // neither a failure of the endpoint nor a verdict.
+      if (signal?.aborted) {
+        stats.stopReason = 'aborted';
+        return notAsked;
       }
       // No answer at all, as opposed to an answer that is an error or cannot be used: the sign
       // of an endpoint that hangs or is gone.
@@ -231,7 +268,9 @@ export function describeStats(stats: AdjudicationStats): string {
   const stopped =
     stats.stopReason === null
       ? ''
-      : `; stopped ${stats.stopReason === 'failures' ? `after ${limit} in a row got no answer` : 'when the time allowed for the page ran out'}; ${stats.stopped} candidate(s) were not asked about`;
+      : `; stopped ${
+          stats.stopReason === 'failures' ? `after ${limit} in a row got no answer` : stats.stopReason === 'budget' ? 'when the time allowed for the page ran out' : 'by the caller'
+        }; ${stats.stopped} candidate(s) were not asked about`;
   const problems = Object.entries(stats.problems)
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([problem, count]) => `${problem}: ${count}`)

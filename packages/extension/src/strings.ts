@@ -40,6 +40,8 @@ export const en = {
   navigatedFrom: 'The page went on from {from} while it was read; what is shown is the page it ended on.',
 
   stoppedUser: 'The scan was stopped. The page was put back and nothing is reported.',
+  stoppedNotRestored:
+    'The scan was stopped. The page did not answer while it was being put back, so it may not be as it was: it may be scrolled, focus may have moved and animations may still be switched off. Nothing is reported. Reload the page before you scan it again.',
   stoppedInput: 'The scan was stopped because the page was used while it was being read (a click, a key, the wheel or the pointer moving over it). The page was put back and nothing is reported. Scan again and leave the page alone until it is over.',
   stoppedPointer: 'The scan was stopped because the pointer is over the page: what is under it is drawn in its hover state, and that would be measured. Move the pointer off the page, onto this panel for instance, and scan again.',
   stoppedHidden: 'The scan was stopped because the tab was hidden. A hidden tab is not drawn, so nothing can be captured. The page was put back. Keep the tab in front and scan again.',
@@ -63,6 +65,7 @@ export const en = {
   showConfirmed: 'Confirmed',
   showDismissed: 'Dismissed',
   nothingShown: 'No finding matches what is selected under "Show".',
+  filterShown: 'Showing {shown} of {total} findings.',
   groupCount: '{title} ({count})',
 
   statusFail: 'Fail',
@@ -128,6 +131,9 @@ export const en = {
   highlightOff: 'The highlight was removed.',
   highlightMissing: 'The element is no longer on the page where the finding places it. Nothing was highlighted.',
   highlightFailed: 'The element could not be highlighted: {detail}',
+  highlightPageChanged: 'The tab no longer shows the page that was scanned, so nothing was highlighted. Scan again to work on the page it shows now.',
+  highlightTabHidden: 'The page that was scanned is not the tab in front, so nothing was highlighted. Go back to its tab and try again.',
+  highlightTabGone: 'The tab that was scanned has been closed. Nothing was highlighted.',
 
   exportHeading: 'Export',
   exportJson: 'Download JSON',
@@ -159,6 +165,7 @@ export const en = {
   permissionDenied:
     'Access to {pattern} was not given. Requests will only work if the endpoint itself allows requests from this extension (CORS).',
   permissionPending: 'Chrome is asking whether this extension may access {pattern}.',
+  permissionRemoved: 'This extension gave up its access to {pattern}, which is no longer the endpoint in use.',
   modelOnLocal: 'A model is asked: text and captures of the page go to the model {model} on {host} (this machine).',
   modelOnRemote: 'A model is asked: text and captures of the page go to the model {model} on {host}, which is NOT this machine.',
   endpointMissing: 'Give the base URL of the endpoint. None is assumed.',
@@ -169,6 +176,8 @@ export const en = {
   endpointQuery: 'The base URL must not have a query string or a fragment.',
   endpointRemoteNotAllowed: 'This endpoint is not on this machine. Page text and captures would be sent there, so it has to be allowed explicitly with the checkbox below.',
   endpointRemoteHttp: 'An endpoint that is not on this machine has to be an https URL: over plain http the page text, the captures and the key would travel unencrypted.',
+  endpointHttpLoopbackForm:
+    'Over plain http this extension can only reach localhost, a name under .localhost, or 127.0.0.1. Chrome does not let an extension name another address of this machine (such as [::1], 127.0.0.2 or "localhost." with a dot at the end) in its content security policy, so a request to it would be blocked. Use http://127.0.0.1:<port>/v1 or http://localhost:<port>/v1.',
 } as const;
 
 export type StringKey = keyof typeof en;

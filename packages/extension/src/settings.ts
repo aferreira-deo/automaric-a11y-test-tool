@@ -2,7 +2,7 @@ import { AdjudicationConfigError, createAdjudicator, isLoopbackHost, redact } fr
 import type { Adjudicator } from '@a11y-vision/adjudicators';
 import { resolveAdjudication } from '@a11y-vision/core';
 import type { AdjudicationConfig, CheckId } from '@a11y-vision/core';
-import type { StorageArea } from './chrome-api.js';
+import type { PermissionsApi, StorageArea } from './chrome-api.js';
 import type { ExtensionConfig } from './config.js';
 
 /** The checks the panel offers, in the order it lists them. */
@@ -77,7 +77,8 @@ export type EndpointProblem =
   | 'endpointCredentials'
   | 'endpointQuery'
   | 'endpointRemoteNotAllowed'
-  | 'endpointRemoteHttp';
+  | 'endpointRemoteHttp'
+  | 'endpointHttpLoopbackForm';
 
 export type EndpointCheck =
   | {
@@ -90,12 +91,34 @@ export type EndpointCheck =
     }
   | { ok: false; problem: EndpointProblem };
 
+type HttpHosts = ExtensionConfig['endpoint'];
+
+/** Whether `hostname` (as `URL` gives it: lower case, an IPv4 address in its usual form) is one of the hosts reachable over plain http. */
+export function httpHostAllowed(hostname: string, endpoint: HttpHosts): boolean {
+  return endpoint.httpHosts.some((host) => (host.startsWith('*.') ? hostname.endsWith(host.slice(1)) && hostname.length > host.length - 1 : hostname === host));
+}
+
+/** `connect-src` of the content security policy of the extension pages: the http hosts on any port, and https anywhere. */
+export function connectSources(endpoint: HttpHosts): string[] {
+  return [...endpoint.httpHosts.map((host) => `http://${host}:*`), 'https:'];
+}
+
+/** `optional_host_permissions` of the manifest: what a permission may be asked for. A match pattern without a port is every port. */
+export function hostPermissionPatterns(endpoint: HttpHosts): string[] {
+  return [...endpoint.httpHosts.map((host) => `http://${host}/*`), 'https://*/*'];
+}
+
 /**
  * Whether the endpoint may be used, by the rules of the CLI: this machine over http or https,
  * another machine only when allowed and only over https. Said here so that the panel can show a
  * sentence of its own; `createAdjudicator` enforces the same rules again when a scan starts.
+ *
+ * One rule more than the CLI has: over plain http the host has to be one the extension can
+ * reach at all (`endpoint.httpHosts`). `[::1]`, `localhost.` and `127.0.0.2` are this machine
+ * too, but the content security policy of the extension pages cannot name them, and a request
+ * to them would fail as a network error that says nothing.
  */
-export function checkEndpoint(model: Pick<ModelSettings, 'baseUrl' | 'model' | 'allowRemote'>): EndpointCheck {
+export function checkEndpoint(model: Pick<ModelSettings, 'baseUrl' | 'model' | 'allowRemote'>, endpoint: HttpHosts): EndpointCheck {
   if (model.baseUrl.trim() === '') return { ok: false, problem: 'endpointMissing' };
   if (model.model.trim() === '') return { ok: false, problem: 'modelMissing' };
   let url: URL;
@@ -110,8 +133,43 @@ export function checkEndpoint(model: Pick<ModelSettings, 'baseUrl' | 'model' | '
   const local = isLoopbackHost(url.hostname);
   if (!local && !model.allowRemote) return { ok: false, problem: 'endpointRemoteNotAllowed' };
   if (!local && url.protocol !== 'https:') return { ok: false, problem: 'endpointRemoteHttp' };
+  if (url.protocol === 'http:' && !httpHostAllowed(url.hostname, endpoint)) return { ok: false, problem: 'endpointHttpLoopbackForm' };
   // `url.host` carries the port when it is not the default one: the pattern is this origin and no other.
   return { ok: true, local, host: url.hostname, pattern: `${url.protocol}//${url.host}/*` };
+}
+
+/** What saving model settings does to host permissions: the pattern to ask for, and the one to give up. */
+export interface PermissionChange {
+  request: string | null;
+  remove: string | null;
+}
+
+/**
+ * The host permission is for the origin of the endpoint in use, and for nothing else: when the
+ * origin changes, or the model is switched off, the one that was asked for before is given up.
+ * `before` counts whether or not the model was on: an access left from an earlier save goes too.
+ */
+export function endpointPermissionChange(before: ModelSettings, after: ModelSettings, endpoint: HttpHosts): PermissionChange {
+  const patternOf = (model: ModelSettings): string | null => {
+    const checked = checkEndpoint(model, endpoint);
+    return checked.ok ? checked.pattern : null;
+  };
+  const request = after.enabled ? patternOf(after) : null;
+  const held = patternOf(before);
+  return { request, remove: held !== null && held !== request ? held : null };
+}
+
+/**
+ * Carries a `PermissionChange` out. To be called inside the click that saves: Chrome shows its
+ * question only then. Nothing here rejects; `granted` and `removed` are null when there was
+ * nothing to ask for or to give up, and false when Chrome said no or failed.
+ */
+export function applyPermissionChange(permissions: PermissionsApi, change: PermissionChange): { granted: Promise<boolean> | null; removed: Promise<boolean> | null } {
+  const no = (): boolean => false;
+  const { request, remove } = change;
+  const granted = request === null ? null : permissions.contains({ origins: [request] }).then((has) => has || permissions.request({ origins: [request] })).catch(no);
+  const removed = remove === null ? null : permissions.remove({ origins: [remove] }).catch(no);
+  return { granted, removed };
 }
 
 /** The settings of the adjudicator layer for these settings; `provider: 'none'` when the model is off. */

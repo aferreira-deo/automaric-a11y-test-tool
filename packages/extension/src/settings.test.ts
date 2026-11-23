@@ -1,9 +1,26 @@
 import { AdjudicationConfigError } from '@a11y-vision/adjudicators';
 import { describe, expect, it } from 'vitest';
 import { extensionConfig } from './config.js';
-import { adjudicationFor, API_KEY_STORAGE_KEY, buildAdjudicator, checkEndpoint, defaultSettings, parseSettings, safeMessage, SETTINGS_KEY, SettingsStore } from './settings.js';
-import type { ModelSettings } from './settings.js';
+import { readFileSync } from 'node:fs';
+import {
+  adjudicationFor,
+  API_KEY_STORAGE_KEY,
+  applyPermissionChange,
+  buildAdjudicator,
+  checkEndpoint,
+  connectSources,
+  defaultSettings,
+  endpointPermissionChange,
+  hostPermissionPatterns,
+  parseSettings,
+  safeMessage,
+  SETTINGS_KEY,
+  SettingsStore,
+} from './settings.js';
+import type { EndpointCheck, ModelSettings } from './settings.js';
 import { fakeStorage } from './test-support.js';
+
+const check = (model: Pick<ModelSettings, 'baseUrl' | 'model' | 'allowRemote'>): EndpointCheck => checkEndpoint(model, extensionConfig.endpoint);
 
 const KEY = 'sk-unit-0123456789-SECRET';
 const local: ModelSettings = { enabled: true, baseUrl: 'http://127.0.0.1:11434/v1', model: 'some-model', allowRemote: false, sendImages: true };
@@ -30,28 +47,156 @@ describe('settings', () => {
 
 describe('checkEndpoint', () => {
   it('takes an endpoint on this machine over http or https, and gives the pattern of exactly its origin', () => {
-    expect(checkEndpoint(local)).toEqual({ ok: true, local: true, host: '127.0.0.1', pattern: 'http://127.0.0.1:11434/*' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://localhost:1234/v1' })).toMatchObject({ ok: true, local: true, pattern: 'http://localhost:1234/*' });
-    expect(checkEndpoint({ ...local, baseUrl: 'https://ollama.localhost/v1' })).toMatchObject({ ok: true, local: true, pattern: 'https://ollama.localhost/*' });
+    expect(check(local)).toEqual({ ok: true, local: true, host: '127.0.0.1', pattern: 'http://127.0.0.1:11434/*' });
+    expect(check({ ...local, baseUrl: 'http://localhost:1234/v1' })).toMatchObject({ ok: true, local: true, pattern: 'http://localhost:1234/*' });
+    expect(check({ ...local, baseUrl: 'https://ollama.localhost/v1' })).toMatchObject({ ok: true, local: true, pattern: 'https://ollama.localhost/*' });
   });
 
   it('refuses another machine unless allowed, and plain http to another machine always', () => {
-    expect(checkEndpoint({ ...local, baseUrl: 'https://api.example.test/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://192.168.1.10:11434/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://0.0.0.0:11434/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://localhost.example.test/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://api.example.test/v1', allowRemote: true })).toEqual({ ok: false, problem: 'endpointRemoteHttp' });
-    expect(checkEndpoint({ ...local, baseUrl: 'https://api.example.test/v1', allowRemote: true })).toEqual({ ok: true, local: false, host: 'api.example.test', pattern: 'https://api.example.test/*' });
+    expect(check({ ...local, baseUrl: 'https://api.example.test/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
+    expect(check({ ...local, baseUrl: 'http://192.168.1.10:11434/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
+    expect(check({ ...local, baseUrl: 'http://0.0.0.0:11434/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
+    expect(check({ ...local, baseUrl: 'http://localhost.example.test/v1' })).toEqual({ ok: false, problem: 'endpointRemoteNotAllowed' });
+    expect(check({ ...local, baseUrl: 'http://api.example.test/v1', allowRemote: true })).toEqual({ ok: false, problem: 'endpointRemoteHttp' });
+    expect(check({ ...local, baseUrl: 'https://api.example.test/v1', allowRemote: true })).toEqual({ ok: true, local: false, host: 'api.example.test', pattern: 'https://api.example.test/*' });
   });
 
   it('refuses what is not a plain base URL, and settings that are incomplete', () => {
-    expect(checkEndpoint({ ...local, baseUrl: '' })).toEqual({ ok: false, problem: 'endpointMissing' });
-    expect(checkEndpoint({ ...local, model: ' ' })).toEqual({ ok: false, problem: 'modelMissing' });
-    expect(checkEndpoint({ ...local, baseUrl: 'localhost:11434' })).toEqual({ ok: false, problem: 'endpointScheme' });
-    expect(checkEndpoint({ ...local, baseUrl: 'not a url' })).toEqual({ ok: false, problem: 'endpointInvalid' });
-    expect(checkEndpoint({ ...local, baseUrl: 'file:///etc/passwd' })).toEqual({ ok: false, problem: 'endpointScheme' });
-    expect(checkEndpoint({ ...local, baseUrl: `http://user:${KEY}@localhost/v1` })).toEqual({ ok: false, problem: 'endpointCredentials' });
-    expect(checkEndpoint({ ...local, baseUrl: 'http://localhost/v1?key=1' })).toEqual({ ok: false, problem: 'endpointQuery' });
+    expect(check({ ...local, baseUrl: '' })).toEqual({ ok: false, problem: 'endpointMissing' });
+    expect(check({ ...local, model: ' ' })).toEqual({ ok: false, problem: 'modelMissing' });
+    expect(check({ ...local, baseUrl: 'localhost:11434' })).toEqual({ ok: false, problem: 'endpointScheme' });
+    expect(check({ ...local, baseUrl: 'not a url' })).toEqual({ ok: false, problem: 'endpointInvalid' });
+    expect(check({ ...local, baseUrl: 'file:///etc/passwd' })).toEqual({ ok: false, problem: 'endpointScheme' });
+    expect(check({ ...local, baseUrl: `http://user:${KEY}@localhost/v1` })).toEqual({ ok: false, problem: 'endpointCredentials' });
+    expect(check({ ...local, baseUrl: 'http://localhost/v1?key=1' })).toEqual({ ok: false, problem: 'endpointQuery' });
+  });
+});
+
+describe('the hosts an endpoint may have over plain http', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../static/manifest.json', import.meta.url), 'utf8')) as {
+    optional_host_permissions: string[];
+    content_security_policy: { extension_pages: string };
+  };
+  const connectSrc = manifest.content_security_policy.extension_pages
+    .split(';')
+    .map((directive) => directive.trim().split(/\s+/))
+    .find(([name]) => name === 'connect-src')!
+    .slice(1);
+
+  it('are one list: the manifest says what the configuration says, in its policy and in the permissions it may ask for', () => {
+    expect(connectSrc).toEqual(connectSources(extensionConfig.endpoint));
+    expect(manifest.optional_host_permissions).toEqual(hostPermissionPatterns(extensionConfig.endpoint));
+    expect(connectSources({ httpHosts: ['localhost', '*.localhost', '127.0.0.1'] })).toEqual(['http://localhost:*', 'http://*.localhost:*', 'http://127.0.0.1:*', 'https:']);
+    expect(hostPermissionPatterns({ httpHosts: ['localhost', '*.localhost', '127.0.0.1'] })).toEqual(['http://localhost/*', 'http://*.localhost/*', 'http://127.0.0.1/*', 'https://*/*']);
+  });
+
+  /** Whether the policy of the manifest lets a request to `url` out: a host source matches by scheme, host (exactly, or under `*.`) and port. */
+  const policyAllows = (url: URL): boolean =>
+    connectSrc.some((source) => {
+      if (source === 'https:') return url.protocol === 'https:';
+      const match = /^(https?):\/\/(\*\.)?([a-z0-9.-]+):\*$/.exec(source);
+      if (!match) throw new Error(`A source the test does not know: ${source}`);
+      const [, scheme, wildcard, host] = match;
+      return url.protocol === `${scheme}:` && (wildcard ? url.hostname.endsWith(`.${host}`) : url.hostname === host);
+    });
+
+  it('are what the settings check takes, for every way of writing this machine: what the policy would block is refused, with the reason', () => {
+    const forms = [
+      'http://localhost:11434/v1',
+      'http://LOCALHOST:11434/v1',
+      'http://localhost/v1',
+      'http://ai.localhost:8080/v1',
+      'http://a.b.localhost:8080/v1',
+      'http://127.0.0.1:11434/v1',
+      'http://127.1:11434/v1',
+      'http://localhost.:11434/v1',
+      'http://ai.localhost.:11434/v1',
+      'http://127.0.0.2:11434/v1',
+      'http://127.255.255.254/v1',
+      'http://[::1]:11434/v1',
+      'http://[0:0:0:0:0:0:0:1]:11434/v1',
+      'https://localhost:8443/v1',
+      'https://127.0.0.2:8443/v1',
+      'https://[::1]:8443/v1',
+      'https://localhost.:8443/v1',
+    ];
+    const taken: string[] = [];
+    for (const baseUrl of forms) {
+      const result = check({ ...local, baseUrl });
+      expect(result.ok, baseUrl).toBe(policyAllows(new URL(baseUrl)));
+      if (result.ok) taken.push(baseUrl);
+      else expect(result.problem, baseUrl).toBe('endpointHttpLoopbackForm');
+    }
+    expect(taken).toEqual([
+      'http://localhost:11434/v1',
+      'http://LOCALHOST:11434/v1',
+      'http://localhost/v1',
+      'http://ai.localhost:8080/v1',
+      'http://a.b.localhost:8080/v1',
+      'http://127.0.0.1:11434/v1',
+      'http://127.1:11434/v1',
+      'https://localhost:8443/v1',
+      'https://127.0.0.2:8443/v1',
+      'https://[::1]:8443/v1',
+      'https://localhost.:8443/v1',
+    ]);
+    // Every one of them is this machine, and says so.
+    for (const baseUrl of taken) expect(check({ ...local, baseUrl })).toMatchObject({ local: true });
+  });
+});
+
+describe('the host permission of the endpoint', () => {
+  const remote: ModelSettings = { ...local, baseUrl: 'https://api.example.test/v1', allowRemote: true };
+  const change = (before: ModelSettings, after: ModelSettings) => endpointPermissionChange(before, after, extensionConfig.endpoint);
+
+  it('is asked for the origin in use, and given up for the one that no longer is', () => {
+    const off = { ...local, enabled: false, baseUrl: '', model: '' };
+    expect(change(off, local)).toEqual({ request: 'http://127.0.0.1:11434/*', remove: null });
+    // Saved again unchanged, or with another model or path on the same origin: nothing is given up.
+    expect(change(local, local)).toEqual({ request: 'http://127.0.0.1:11434/*', remove: null });
+    expect(change(local, { ...local, model: 'another', baseUrl: 'http://127.0.0.1:11434/other/v1' })).toEqual({ request: 'http://127.0.0.1:11434/*', remove: null });
+    // Another origin: a port is one.
+    expect(change(local, { ...local, baseUrl: 'http://127.0.0.1:8080/v1' })).toEqual({ request: 'http://127.0.0.1:8080/*', remove: 'http://127.0.0.1:11434/*' });
+    expect(change(remote, local)).toEqual({ request: 'http://127.0.0.1:11434/*', remove: 'https://api.example.test/*' });
+    // The model switched off: nothing is asked, and the access goes.
+    expect(change(remote, { ...remote, enabled: false })).toEqual({ request: null, remove: 'https://api.example.test/*' });
+    // Off before and off now, with the address still in the form: still given up (it may be left from an earlier version).
+    expect(change({ ...remote, enabled: false }, { ...remote, enabled: false })).toEqual({ request: null, remove: 'https://api.example.test/*' });
+    // Nothing usable before: nothing to give up.
+    expect(change({ ...local, baseUrl: 'not a url' }, local)).toEqual({ request: 'http://127.0.0.1:11434/*', remove: null });
+    expect(change(off, off)).toEqual({ request: null, remove: null });
+  });
+
+  it('is removed through chrome.permissions, for that origin and no other; asking is skipped when it is held', async () => {
+    const calls: [string, string[]][] = [];
+    const held = new Set(['https://api.example.test/*']);
+    const permissions = {
+      contains: ({ origins }: { origins: string[] }) => (calls.push(['contains', origins]), Promise.resolve(origins.every((origin) => held.has(origin)))),
+      request: ({ origins }: { origins: string[] }) => (calls.push(['request', origins]), Promise.resolve(true)),
+      remove: ({ origins }: { origins: string[] }) => (calls.push(['remove', origins]), Promise.resolve(origins.every((origin) => held.delete(origin)))),
+    };
+    const moved = applyPermissionChange(permissions, change(remote, local));
+    expect(await moved.granted).toBe(true);
+    expect(await moved.removed).toBe(true);
+    expect(calls).toEqual([
+      ['contains', ['http://127.0.0.1:11434/*']],
+      ['remove', ['https://api.example.test/*']],
+      ['request', ['http://127.0.0.1:11434/*']],
+    ]);
+    expect([...held]).toEqual([]);
+
+    calls.length = 0;
+    held.add('https://api.example.test/*');
+    const kept = applyPermissionChange(permissions, change(remote, remote));
+    expect(await kept.granted).toBe(true);
+    expect(kept.removed).toBeNull();
+    expect(calls).toEqual([['contains', ['https://api.example.test/*']]]);
+
+    // A browser that refuses is not an error of the settings.
+    const failing = { contains: () => Promise.reject(new Error('no')), request: () => Promise.reject(new Error('no')), remove: () => Promise.reject(new Error('no')) };
+    const failed = applyPermissionChange(failing, change(remote, local));
+    expect(await failed.granted).toBe(false);
+    expect(await failed.removed).toBe(false);
   });
 });
 

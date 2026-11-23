@@ -40,11 +40,18 @@ export interface GatedSession {
    *
    * After a stop, the commands that were under way are waited for first, `timeoutMs` at most.
    * Their callers were already told that the collection stopped, but Chrome is still working on
-   * them, and putting the page back while it does went wrong in a browser test: once in some
-   * tens of stopped scans the page was left with a viewport twice as wide, at a device pixel
-   * ratio of 1. The likely cause, not proven: a capture changes the emulation of the page while
-   * it is taken and puts back what it found when it is done, so an override cleared meanwhile
-   * comes back. With this wait it was not seen again.
+   * them, and putting the page back and detaching while it does leaves the page changed.
+   *
+   * What was measured, in Chromium 153 through the extension, stopping scans of a page of 150
+   * buttons at a random moment of the walk, 80 times each way: without this wait 26 pages were
+   * left with a wrong viewport at a device pixel ratio of 1, either 2560 px wide (the 1280 px
+   * of the window at the scale of 2 the captures are taken at) or 236 to 256 px (a button and
+   * its margin, at that scale); with the wait, none. Those widths are the sizes of the clips
+   * that were being captured, in device pixels. So: while Chrome takes a capture of a clip it
+   * emulates a viewport of the size of the clip, and puts back the emulation it found when the
+   * capture is done; a session whose emulation is cleared, and which is detached, in the middle
+   * of that keeps the viewport of the capture. That it is the capture is an inference from the
+   * widths, not something read in Chromium's source; that the wait is needed is measured.
    * The wait has a limit because some answers never come (a capture of a hidden tab).
    */
   release(timeoutMs: number): Promise<void>;

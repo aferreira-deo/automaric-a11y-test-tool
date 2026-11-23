@@ -45,8 +45,11 @@ export interface Tab {
 
 export interface TabsApi {
   query(query: { active?: boolean; lastFocusedWindow?: boolean; currentWindow?: boolean }): Promise<Tab[]>;
+  /** Rejects when there is no such tab. */
   get(tabId: number): Promise<Tab>;
   onActivated: ChromeEvent<(info: { tabId: number; windowId: number }) => void>;
+  /** Fired for every tab, with or without a permission for it; the address and the title are in `change` only with one. */
+  onUpdated: ChromeEvent<(tabId: number, change: { status?: string; url?: string; title?: string }) => void>;
   onRemoved: ChromeEvent<(tabId: number) => void>;
 }
 
@@ -76,7 +79,8 @@ export interface SidePanelApi {
 
 export interface ChromeApi {
   debugger: DebuggerApi;
-  storage: { local: StorageArea };
+  /** `session` is kept in memory until the browser closes, and is open to the extension's own contexts only. */
+  storage: { local: StorageArea; session?: StorageArea };
   tabs: TabsApi;
   permissions: PermissionsApi;
   runtime: RuntimeApi;

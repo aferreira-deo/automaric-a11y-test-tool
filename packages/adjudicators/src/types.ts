@@ -25,6 +25,15 @@ export interface JudgeResult {
   retryable?: boolean;
 }
 
+/** How one request is made. */
+export interface JudgeOptions {
+  /**
+   * Fires when the caller no longer wants the answer: the request is aborted, and the result
+   * says `stopped`. Without it a request ends by its answer or by its timeout, as it always did.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * One interface for every provider. `judge` sends ONE request and never throws: every failure is
  * a result with a `problem`. Votes, retries, the cap on calls and the cache are handled by the
@@ -39,5 +48,5 @@ export interface Adjudicator {
   readonly promptVersion: string;
   /** What tells this endpoint and its settings from another, for the cache key. It is hashed, never shown. */
   readonly cacheIdentity: string;
-  judge(input: JudgeInput): Promise<JudgeResult>;
+  judge(input: JudgeInput, options?: JudgeOptions): Promise<JudgeResult>;
 }

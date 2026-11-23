@@ -167,8 +167,13 @@ export function createOpenAiCompatibleAdjudicator(options: OpenAiCompatibleOptio
       settings.maxOutputTokens,
       settings.maxTokensField,
     ]),
-    async judge(input) {
+    async judge(input, call) {
+      const stop = call?.signal;
+      // Asked to stop before anything was sent: nothing is.
+      if (stop?.aborted) return failed('stopped');
       const controller = new AbortController();
+      const onStop = (): void => controller.abort();
+      stop?.addEventListener('abort', onStop, { once: true });
       let timedOut = false;
       // The limit covers the whole exchange, the reading of the body included.
       const timer = setTimeout(() => {
@@ -193,9 +198,12 @@ export function createOpenAiCompatibleAdjudicator(options: OpenAiCompatibleOptio
         return readCompletion(text, settings.maxRationaleChars);
       } catch {
         // The error is dropped on purpose: its text can hold the URL, and is of no use in a report.
+        // Stopped by the caller: not a failure of the endpoint, and nothing to try again.
+        if (stop?.aborted) return failed('stopped');
         return timedOut ? failed('timeout') : failed('network', true);
       } finally {
         clearTimeout(timer);
+        stop?.removeEventListener('abort', onStop);
       }
     },
   };
