@@ -19,7 +19,19 @@ export interface AgentOptions {
   headings: AgentHeadingsOptions;
   lists: AgentListsOptions;
   grouping: AgentGroupingOptions;
+  selector: AgentSelectorOptions;
 }
+
+/** SelectorConfig, as the agent needs it; documented there. */
+export interface AgentSelectorOptions {
+  unstableIdPattern: string;
+  stableAttributes: string[];
+  signatureMaxTextChars: number;
+  signatureAttributes: string[];
+}
+
+/** What an element is, for its signature: the key of `Snapshot.signatures`, its tag, its `role` attribute, and the text that is hashed. */
+export type AgentSignature = [key: string, tag: string, role: string, material: string];
 
 /** Subset of GroupingConfig the agent needs; documented there. */
 export interface AgentGroupingOptions {
@@ -465,6 +477,8 @@ export interface Agent {
    * point at inside the capture, or -1 for all of it.
    */
   prepareGrouping(blocks: number[], controls: number[], target: number): Promise<AgentHeadingPrepared>;
+  /** What every element a selector was made for is, as it was when its selector was first made. */
+  signatures(): AgentSignature[];
   cleanup(): void;
 }
 
@@ -485,6 +499,20 @@ export function agentFactory(options: AgentOptions): Agent {
     'audio[controls],video[controls]';
   const TEXT_INPUT_TYPES = ['text', 'search', 'url', 'tel', 'email', 'password', 'number'];
   const JOIN = ' >>> ';
+  /** Between a frame and a selector in the key of a signature: `signatureKey` of the core. */
+  const KEY_JOIN = '\u0000';
+  /** Attributes whose value is an address: only its path is part of a signature. */
+  const ADDRESS_ATTRIBUTES = ['href', 'src', 'action'];
+  /** Inputs whose `value` is their label. */
+  const LABEL_VALUE_TYPES = ['button', 'submit', 'reset'];
+  const unstableValue = ((): RegExp | null => {
+    try {
+      return options.selector.unstableIdPattern === '' ? null : new RegExp(options.selector.unstableIdPattern, 'u');
+    } catch {
+      return null;
+    }
+  })();
+  const signatures = new Map<string, AgentSignature>();
 
   const elements = new Map<number, Element>();
   const keys = new WeakMap<Element, number>();
@@ -639,20 +667,16 @@ export function agentFactory(options: AgentOptions): Agent {
     return element;
   }
 
-  function selectorWithin(element: Element): string {
-    const root = element.getRootNode() as Document | ShadowRoot;
-    const uniqueId = (candidate: Element): string | null => {
-      if (!candidate.id) return null;
-      const selector = '#' + CSS.escape(candidate.id);
-      return root.querySelectorAll(selector).length === 1 ? selector : null;
-    };
+  /** A value that can be expected to be the same on the next visit, and that can be written into a selector. */
+  function stableValue(value: string | null): value is string {
+    // eslint-disable-next-line no-control-regex -- a control character cannot be written in a quoted string of a selector
+    return value !== null && value !== '' && !/[\u0000-\u001f\u007f]/.test(value) && !(unstableValue !== null && unstableValue.test(value));
+  }
+
+  /** The path of positions from `element` up to `stop` (not included), or up to the root. */
+  function positions(element: Element, stop: Element | null): string[] {
     const parts: string[] = [];
-    for (let current: Element | null = element; current; current = current.parentElement) {
-      const id = uniqueId(current);
-      if (id) {
-        parts.unshift(id);
-        break;
-      }
+    for (let current: Element | null = element; current && current !== stop; current = current.parentElement) {
       const tag = current.localName;
       let index = 1;
       let twins = 0;
@@ -664,7 +688,102 @@ export function agentFactory(options: AgentOptions): Agent {
       }
       parts.unshift(index === 1 && twins === 0 ? tag : tag + ':nth-of-type(' + index + ')');
     }
-    return parts.join(' > ');
+    return parts;
+  }
+
+  /**
+   * The selector of an element inside its document or shadow root. It starts at the nearest
+   * element, the element itself or one that holds it, that can be named on its own: by an id
+   * that is unique and not generated (`selector.unstableIdPattern`), or else by one of
+   * `selector.stableAttributes` when exactly one element has that value. From there it goes down
+   * by position. With nothing to start from, it is the path of positions from the root.
+   *
+   * What is returned finds this element and no other: that is checked, and a selector that does
+   * not is replaced by the path of positions.
+   */
+  function selectorWithin(element: Element): string {
+    const root = element.getRootNode() as Document | ShadowRoot;
+    const only = (selector: string, candidate: Element): boolean => {
+      try {
+        const found = root.querySelectorAll(selector);
+        return found.length === 1 && found[0] === candidate;
+      } catch {
+        return false;
+      }
+    };
+    const named = (candidate: Element): string | null => {
+      // The attribute, not the property: a form with a control named "id" gives that control.
+      const id = candidate.getAttribute('id');
+      if (stableValue(id)) {
+        const selector = '#' + CSS.escape(id);
+        if (only(selector, candidate)) return selector;
+      }
+      for (const name of options.selector.stableAttributes) {
+        const value = candidate.getAttribute(name);
+        if (!stableValue(value)) continue;
+        const selector = candidate.localName + '[' + name + '="' + value.replace(/["\\]/g, '\\$&') + '"]';
+        if (only(selector, candidate)) return selector;
+      }
+      return null;
+    };
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      const anchor = named(current);
+      if (!anchor) continue;
+      const selector = [anchor, ...positions(element, current)].join(' > ');
+      if (only(selector, element)) return selector;
+      break;
+    }
+    return positions(element, null).join(' > ');
+  }
+
+  /** The text of an element with white space collapsed, when it is at most `max` characters; null when it is longer. */
+  function shortText(element: Element, max: number): string | null {
+    const walker = element.ownerDocument.createTreeWalker(element, 4);
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement?.localName;
+      if (parent === 'script' || parent === 'style') continue;
+      text = (text + ' ' + (node.nodeValue ?? '')).replace(/\s+/g, ' ');
+      if (text.trim().length > max) return null;
+    }
+    return text.trim();
+  }
+
+  /**
+   * What tells this element from another one of its kind, as text to be hashed: its own text when
+   * it is short, the text of its labels, and the attributes of `selector.signatureAttributes`.
+   * Nothing that a visit changes: no id, no class, no state, no value typed into a field.
+   */
+  function signatureMaterial(element: Element): string {
+    const max = options.selector.signatureMaxTextChars;
+    const parts = ['text=' + (shortText(element, max) ?? '')];
+    for (const name of options.selector.signatureAttributes) {
+      let value = element.getAttribute(name);
+      if (value === null) continue;
+      if (ADDRESS_ATTRIBUTES.includes(name)) {
+        try {
+          value = new URL(value, element.baseURI).pathname;
+        } catch {
+          value = '';
+        }
+      }
+      parts.push(name + '=' + value);
+    }
+    if (element.localName === 'input' && LABEL_VALUE_TYPES.includes((element.getAttribute('type') ?? '').toLowerCase())) {
+      parts.push('value=' + (element.getAttribute('value') ?? ''));
+    }
+    const labels: Element[] = [];
+    try {
+      for (const label of (element as HTMLInputElement).labels ?? []) labels.push(label);
+      for (const id of (element.getAttribute('aria-labelledby') ?? '').split(/\s+/)) {
+        const label = id === '' ? null : (element.getRootNode() as Document | ShadowRoot).getElementById(id);
+        if (label) labels.push(label);
+      }
+    } catch {
+      // No labels to read.
+    }
+    for (const label of labels) parts.push('label=' + (shortText(label, max) ?? ''));
+    return parts.join('\u0001');
   }
 
   /** Selector that crosses shadow boundaries: host selectors, then the element, joined with " >>> ". */
@@ -673,7 +792,11 @@ export function agentFactory(options: AgentOptions): Agent {
     for (let host = hostOf(element.getRootNode()); host; host = hostOf(host.getRootNode())) {
       parts.unshift(selectorWithin(host));
     }
-    return parts.join(JOIN);
+    const selector = parts.join(JOIN);
+    // What the element is, kept the first time it is named: a check may change it afterwards.
+    const key = frameOf(element) + KEY_JOIN + selector;
+    if (!signatures.has(key)) signatures.set(key, [key, element.localName, element.getAttribute('role') ?? '', signatureMaterial(element)]);
+    return selector;
   }
 
   function frameOf(element: Element): string {
@@ -3722,6 +3845,10 @@ export function agentFactory(options: AgentOptions): Agent {
     markHeading,
     frameReadable,
     renderAll,
+
+    signatures() {
+      return [...signatures.values()];
+    },
     headingSurvey,
     prepareHeading,
     markList,

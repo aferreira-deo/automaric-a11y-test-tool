@@ -145,6 +145,12 @@ export function agentOptions(config: Config): AgentOptions {
       clipMarginCssPx: config.grouping.clipMarginCssPx,
       maxLabelTargets: config.grouping.maxLabelTargets,
     },
+    selector: {
+      unstableIdPattern: config.selector.unstableIdPattern,
+      stableAttributes: config.selector.stableAttributes,
+      signatureMaxTextChars: config.selector.signatureMaxTextChars,
+      signatureAttributes: config.selector.signatureAttributes,
+    },
   };
 }
 

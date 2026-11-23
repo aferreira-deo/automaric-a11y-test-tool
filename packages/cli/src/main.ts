@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { AdjudicationConfigError, createAdjudicator, describeStats, isLoopbackHost, redact, secretsOf } from '@a11y-vision/adjudicators';
+import { AdjudicationConfigError, createAdjudicator, describeStats, isLoopbackHost, secretsOf } from '@a11y-vision/adjudicators';
 import { verifyEndpoint } from '@a11y-vision/adjudicators/node';
 import {
   BaselineError,
@@ -22,7 +22,10 @@ import { countRun, toHtmlReport, toHtmlRunReport, toJsonReport, toJsonRunReport,
 import type { Run, RunCounts } from '@a11y-vision/reporters';
 import { chromium } from 'playwright';
 import type { Browser } from 'playwright';
-import { collectTargets, InputError } from './inputs.js';
+import { checkedAddress, collectTargets, InputError } from './inputs.js';
+import { cleanResult, collectSecrets, redactText } from './redaction.js';
+import { publicUrl, scrubAddresses } from './urls.js';
+import type { PageTarget } from './urls.js';
 
 export const EXIT_OK = 0;
 /** At least one `fail` finding that no baseline records. */
@@ -39,8 +42,6 @@ export const ENV_KEY_ENV = `${ENV_PREFIX}AI_KEY_ENV`;
 export const DEFAULT_CACHE_FILE = join(`.${TOOL_NAME}`, 'verdicts.json');
 /** What every line of the summary of a run starts with on stderr, so that it can be told from the rest. */
 export const SUMMARY_PREFIX = `[${TOOL_NAME}] `;
-/** A value of a storage state shorter than this is not searched for in what is written: it would match by chance. */
-const MIN_SECRET_CHARS = 8;
 
 const USAGE = `Usage: ${TOOL_NAME} scan <url>... [options]
        ${TOOL_NAME} scan --urls <file> [options]
@@ -57,14 +58,25 @@ other, and a page that cannot be loaded is reported and does not stop the run.
                         sitemap are left out
       --max-urls <n>    Most pages in one run (default: ${defaultConfig.run.maxUrls}). More given by hand is
                         an error; a longer sitemap is cut, and the cut is said
-      --any-origin      Keep sitemap entries on other origins
+      --any-origin      Keep sitemap entries on other origins, and scan a page
+                        of a sitemap that ends on another origin than its own
+      --allow-file-urls Also take file: addresses on the command line. Without
+                        it only http(s) addresses are scanned; other schemes
+                        (data:, javascript:, chrome: ...) never are
       --allow-http-errors
                         Scan a page that answers with HTTP status 400 or more
                         instead of counting it as not scanned
       --storage-state <file>
                         Playwright storage state (cookies, local storage) for
                         every page: scans a signed-in session. The file holds
-                        session secrets: keep it out of the repository
+                        session secrets: keep it out of the repository. Its
+                        values are replaced in the texts of every report;
+                        captures are images of the page and can show them
+
+A user name and password in an address (https://user:password@host/) are given
+to the browser and written nowhere. The values of query parameters that carry
+a secret (token, key, code ...: run.redactQueryParams) are written as
+"redacted", and such parameters are not part of the key of a page.
 
 Reports
   -o, --output <file>   Write the JSON report to a file instead of stdout
@@ -84,21 +96,23 @@ Reports
                         or to one directory per page in it for several pages
   -q, --quiet           No summary and no progress on stderr
 
-Baseline. Only "fail" findings are recorded, per page and finding id.
+Baseline. Only "fail" findings are recorded, per page: where the element is
+(its selector) and what it is (its signature, a hash).
       --baseline <file> Compare with this file: a "fail" it records is still
                         reported, marked, and does not set exit code 1
       --update-baseline Add the "fail" findings of this run to the file
-                        (created when missing); entries of pages that were not
-                        scanned are kept
-      --prune-baseline  Remove the entries that no longer occur on the pages
-                        that were scanned
+                        (created when missing). Nothing is taken out: entries
+                        of pages and checks that did not run are kept
+      --prune-baseline  Remove the entries that no longer occur. Only entries
+                        whose check ran, on a page that was scanned and did
+                        not end on another address, are removed
 
 Checks
       --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
                         available: ${registeredChecks().join(', ')})
       --config <file>   JSON file with settings (checks, focus, icon, headings,
-                        lists, grouping, adjudication, baseline, run); the
-                        options given here win over it
+                        lists, grouping, adjudication, baseline, run,
+                        selector); the options given here win over it
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -153,6 +167,24 @@ async function writeTo(file: string, content: string | Uint8Array): Promise<void
   await writeFile(file, content);
 }
 
+/**
+ * Writes a file so that it is either the old one or the new one, never half of one: the content
+ * goes to a file beside it, which then takes its place. A run that is stopped while it writes a
+ * baseline leaves the baseline as it was. When the content cannot be moved into place, the file
+ * beside it is removed and the error is passed on.
+ */
+export async function writeAtomic(file: string, content: string): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const beside = `${file}.${process.pid}.tmp`;
+  try {
+    await writeFile(beside, content, { flag: 'wx' });
+    await rename(beside, file);
+  } catch (error) {
+    await rm(beside, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function readConfigFile(file: string): Promise<ConfigInput> {
   let value: unknown;
   try {
@@ -162,7 +194,7 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`The config file ${file} has to hold a JSON object.`);
   const input = value as Record<string, unknown>;
-  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'adjudication', 'baseline', 'run']) {
+  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'adjudication', 'baseline', 'run', 'selector']) {
     const part = input[section];
     if (part !== undefined && (part === null || typeof part !== 'object' || Array.isArray(part))) {
       throw new Error(`"${section}" in the config file ${file} has to be an object.`);
@@ -208,7 +240,7 @@ async function readBaselineFile(file: string): Promise<Baseline | null> {
  * that have to stay out of everything this program writes. What the file holds is never part of
  * a message: a JSON parser quotes what it could not read, so its message is not passed on.
  */
-async function readStorageState(file: string): Promise<string[]> {
+async function readStorageState(file: string, minSecretChars: number): Promise<string[]> {
   let text: string;
   try {
     text = await readFile(file, 'utf8');
@@ -225,16 +257,7 @@ async function readStorageState(file: string): Promise<string[]> {
   if (state === null || typeof state !== 'object' || (state.cookies !== undefined && !Array.isArray(state.cookies)) || (state.origins !== undefined && !Array.isArray(state.origins))) {
     throw new FileError(`The storage state file ${file} is not a Playwright storage state (an object with "cookies" and "origins").`);
   }
-  const secrets = new Set<string>();
-  const keep = (candidate: unknown): void => {
-    if (typeof candidate === 'string' && candidate.length >= MIN_SECRET_CHARS) secrets.add(candidate);
-  };
-  for (const cookie of (state.cookies ?? []) as { value?: unknown }[]) keep(cookie?.value);
-  for (const origin of (state.origins ?? []) as { localStorage?: unknown }[]) {
-    if (Array.isArray(origin?.localStorage)) for (const item of origin.localStorage as { value?: unknown }[]) keep(item?.value);
-  }
-  // Longest first: a value that holds another is replaced whole.
-  return [...secrets].sort((a, b) => b.length - a.length);
+  return collectSecrets(state, minSecretChars);
 }
 
 /** A directory name for the captures of one page: its place in the run, then what can be read of its address. */
@@ -283,6 +306,9 @@ export function summaryLines(counts: RunCounts, baseline: BaselineSummary | unde
     if (baseline.pruned > 0) parts.push(`${plural(baseline.pruned, 'entry', 'entries')} removed`);
     if (baseline.stale - baseline.pruned > 0) parts.push(`${plural(baseline.stale - baseline.pruned, 'entry no longer occurs', 'entries no longer occur')} on the scanned pages (--prune-baseline removes them)`);
     if (baseline.notScanned > 0) parts.push(`${plural(baseline.notScanned, 'entry is', 'entries are')} for pages not scanned in this run`);
+    if (baseline.unverified > 0) {
+      parts.push(`${plural(baseline.unverified, 'entry was', 'entries were')} not looked for (the check did not run, or the page ended on another address) and ${baseline.unverified === 1 ? 'is' : 'are'} kept`);
+    }
     if (parts.length > 0) lines.push(`Baseline: ${parts.join('; ')}.`);
   }
   const why =
@@ -316,6 +342,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         sitemap: { type: 'string' },
         'max-urls': { type: 'string' },
         'any-origin': { type: 'boolean' },
+        'allow-file-urls': { type: 'boolean' },
         'allow-http-errors': { type: 'boolean' },
         'storage-state': { type: 'string' },
         baseline: { type: 'string' },
@@ -358,11 +385,13 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
     io.stderr(USAGE);
     return EXIT_ERROR;
   }
-  for (const url of given) {
-    if (!URL.canParse(url)) {
-      io.stderr(`Not a valid URL: ${url}\n`);
-      return EXIT_ERROR;
-    }
+  // What is not an address that is scanned stops here, before anything is read or opened.
+  try {
+    for (const url of given) checkedAddress(url, values['allow-file-urls'] === true);
+  } catch (error) {
+    if (!(error instanceof InputError)) throw error;
+    io.stderr(`${error.message}\n`);
+    return EXIT_ERROR;
   }
   // One address given alone: the report of one page, as it always was. Anything else is a run.
   const single = given.length === 1 && values.urls === undefined && values.sitemap === undefined;
@@ -462,16 +491,20 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         io.stderr(`The baseline file ${values.baseline} was written with other "baseline" settings than the config file gives: those of the baseline file are used, so that its entries keep their pages.\n`);
       }
     }
-    if (values['storage-state'] !== undefined) storageSecrets = await readStorageState(values['storage-state']);
+    if (values['storage-state'] !== undefined) storageSecrets = await readStorageState(values['storage-state'], limits.minSecretChars);
   } catch (error) {
     if (!(error instanceof FileError)) throw error;
     io.stderr(`${error.message}\n`);
     return EXIT_ERROR;
   }
 
-  // Whatever is printed or written below that this program did not write itself goes through this.
+  // Whatever is printed or written below that this program did not write itself goes through
+  // this: addresses lose their credentials and secret query values, and the values of the model
+  // key and of the stored session are replaced. It is applied to texts, before a report is made
+  // of them, and never to a serialised report.
   const secrets = [...secretsOf(settings, env), ...storageSecrets];
-  const safe = (text: string): string => redact(text, secrets);
+  const shown = (url: string): string => publicUrl(url, limits.redactQueryParams);
+  const safe = (text: string): string => redactText(scrubAddresses(text, limits.redactQueryParams), secrets);
   const withModel = settings.provider !== 'none';
   /** Where a setting of the model came from, for the messages below. */
   const origin = (option: 'ai-base-url' | 'ai-model', variable: string): string =>
@@ -502,7 +535,15 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   // stored session: the only request of a scan that is not made by the browser or to the model.
   let targets;
   try {
-    targets = await collectTargets({ positionals: given, ...(values.urls !== undefined ? { urlsFile: values.urls } : {}), ...(values.sitemap !== undefined ? { sitemap: values.sitemap } : {}) }, limits);
+    targets = await collectTargets(
+      {
+        positionals: given,
+        allowFileUrls: values['allow-file-urls'] === true,
+        ...(values.urls !== undefined ? { urlsFile: values.urls } : {}),
+        ...(values.sitemap !== undefined ? { sitemap: values.sitemap } : {}),
+      },
+      limits,
+    );
   } catch (error) {
     if (!(error instanceof InputError)) throw error;
     io.stderr(`${safe(error.message)}\n`);
@@ -525,19 +566,36 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   }
 
   /** One page, in a browser context of its own: nothing a page stores reaches the next one. */
-  const scanPage = async (browser: Browser, url: string): Promise<{ result: ScanResult; crops: Record<string, Png> }> => {
-    const context = await browser.newContext(values['storage-state'] !== undefined ? { storageState: values['storage-state'] } : {});
+  const scanPage = async (browser: Browser, target: PageTarget): Promise<{ result: ScanResult; crops: Record<string, Png> }> => {
+    // A user name and password of the address go to the browser here, for that origin, and nowhere else.
+    const context = await browser.newContext({
+      ...(values['storage-state'] !== undefined ? { storageState: values['storage-state'] } : {}),
+      ...(target.credentials ? { httpCredentials: target.credentials } : {}),
+    });
+    /** A page of a sitemap is held to its origin: a redirect must not send the scan elsewhere. */
+    const heldToOrigin = (address: string): void => {
+      if (!target.fromSitemap || !limits.sameOrigin || !URL.canParse(address)) return;
+      const { origin } = new URL(address);
+      if (origin !== new URL(target.address).origin) {
+        throw new Error(`The page ended on another origin (${origin}) than the one of the sitemap entry, and was not scanned there (--any-origin scans it).`);
+      }
+    };
     try {
       const page = await context.newPage();
-      const response = await page.goto(url, { waitUntil: 'load', timeout: limits.navigationTimeoutMs });
+      const response = await page.goto(target.address, { waitUntil: 'load', timeout: limits.navigationTimeoutMs });
       if (limits.httpErrorIsFailure && response !== null && response.status() >= 400) {
         throw new Error(`The page answered with HTTP status ${response.status()}; an error page is not scanned in place of the page (--allow-http-errors scans it).`);
       }
+      heldToOrigin(page.url());
       const scanner = new A11yVision({ page }).options(input);
       if (withModel) {
         scanner.withAdjudication({}, { env, ...(values['no-ai-cache'] ? {} : { cacheFile: values['ai-cache'] ?? DEFAULT_CACHE_FILE }) });
       }
-      const { result, crops, adjudication: stats } = await scanner.analyzeWithEvidence();
+      const { result: read, crops, adjudication: stats } = await scanner.analyzeWithEvidence();
+      // The page may have gone on to another document while it was read.
+      heldToOrigin(read.url);
+      // From here on, the texts that came from the page hold no session value and no credentials.
+      const result = cleanResult(read, safe, shown);
       if (stats) io.stderr(`${safe(describeStats(stats))}\n`);
       if (result.environment.navigatedFrom !== undefined) {
         io.stderr(`The page went from ${safe(result.environment.navigatedFrom)} to ${safe(result.url)} while it was being read. The findings are those of ${safe(result.url)}.\n`);
@@ -555,11 +613,13 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
 
   const browser = await chromium.launch();
   try {
-    for (const [index, url] of targets.urls.entries()) {
-      if (!single && !values.quiet) io.stderr(`${SUMMARY_PREFIX}Page ${index + 1} of ${targets.urls.length}: ${safe(url)}\n`);
+    for (const [index, target] of targets.pages.entries()) {
+      // The address as it may be written: the one that is opened stays in `target`.
+      const url = safe(target.url);
+      if (!single && !values.quiet) io.stderr(`${SUMMARY_PREFIX}Page ${index + 1} of ${targets.pages.length}: ${url}\n`);
       try {
-        const scanned = await scanPage(browser, url);
-        report.pages.push({ requestedUrl: url, result: scanned.result, ...(single ? {} : { cropsDir: pageDirectory(index, targets.urls.length, url) }) });
+        const scanned = await scanPage(browser, target);
+        report.pages.push({ requestedUrl: url, result: scanned.result, ...(single ? {} : { cropsDir: pageDirectory(index, targets.pages.length, url) }) });
         crops.push(scanned.crops);
       } catch (error) {
         const message = safe((error as Error).message);
@@ -569,7 +629,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         }
         // Reported, and the run goes on: one page that is down should not hide the others.
         report.errors.push({ url, message: firstLine(message) });
-        io.stderr(`Not scanned: ${safe(url)}: ${firstLine(message)}\n`);
+        io.stderr(`Not scanned: ${url}: ${firstLine(message)}\n`);
       }
     }
   } finally {
@@ -579,28 +639,32 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   try {
     let summary: BaselineSummary | undefined;
     if (baseline !== null && values.baseline !== undefined) {
+      // An entry is only known to be gone when its check ran on the page that was asked for.
       const compared = compareWithBaseline(
-        report.pages.map((page) => ({ url: page.requestedUrl, findings: page.result.findings })),
+        report.pages.map((page) => ({ url: page.requestedUrl, findings: page.result.findings, checks: config.checks, finalUrl: page.result.url })),
         baseline,
-        { update: values['update-baseline'] === true, prune: values['prune-baseline'] === true },
+        { update: values['update-baseline'] === true, prune: values['prune-baseline'] === true, redactQueryParams: limits.redactQueryParams },
       );
+      for (const moved of compared.moved) {
+        io.stderr(`The page ${moved.url} ended on ${moved.finalUrl}: what the baseline records for ${moved.url} was not looked for there, and is kept as it is.\n`);
+      }
       report.pages.forEach((page, index) => {
         page.result = { ...page.result, findings: compared.pages[index]!.findings };
       });
       summary = compared.summary;
       report.baseline = summary;
-      if (values['update-baseline'] || values['prune-baseline']) await writeTo(values.baseline, serializeBaseline(compared.baseline));
+      if (values['update-baseline'] || values['prune-baseline']) await writeAtomic(values.baseline, serializeBaseline(compared.baseline));
     }
 
     const counts = countRun(report);
     const exitCode = counts.errors > 0 ? EXIT_ERROR : counts.newFail > 0 ? EXIT_FAILURES : EXIT_OK;
 
-    // With a stored session, its values are looked for in every report before it is written.
+    // Nothing is replaced in a serialised report: the texts in it were cleaned when the page was read.
     const [first] = report.pages;
-    const json = safe(`${JSON.stringify(single ? toJsonReport(first!.result, summary ? { baseline: summary } : {}) : toJsonRunReport(report), null, 2)}\n`);
+    const json = `${JSON.stringify(single ? toJsonReport(first!.result, summary ? { baseline: summary } : {}) : toJsonRunReport(report), null, 2)}\n`;
     if (values.output) await writeTo(values.output, json);
     else io.stdout(json);
-    if (values.html) await writeTo(values.html, safe(single ? toHtmlReport(first!.result, crops[0], summary ? { baseline: summary } : {}) : toHtmlRunReport(report, crops)));
+    if (values.html) await writeTo(values.html, single ? toHtmlReport(first!.result, crops[0], summary ? { baseline: summary } : {}) : toHtmlRunReport(report, crops));
     if (values.sarif) {
       // The same file whichever way its separators are written.
       const forward = (path: string): string => resolve(path.replaceAll('\\', '/'));
@@ -609,9 +673,10 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         includeInfo: values['sarif-include-info'] === true,
         urlKey: baseline?.urlKey ?? config.baseline,
         maxResults: limits.sarifMaxResults,
+        redactQueryParams: limits.redactQueryParams,
         ...(anchor !== null ? { anchor: { uri: anchor, ...(sameFile ? { lines: targets.lines } : {}) } } : {}),
       });
-      await writeTo(values.sarif, safe(`${JSON.stringify(sarif, null, 2)}\n`));
+      await writeTo(values.sarif, `${JSON.stringify(sarif, null, 2)}\n`);
       if (omitted > 0) io.stderr(`${omitted} result(s) were left out of the SARIF file, the least severe first, to stay under ${limits.sarifMaxResults} results (run.sarifMaxResults). The JSON and HTML reports have them all.\n`);
     }
     if (values.crops) {

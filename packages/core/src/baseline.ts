@@ -8,22 +8,32 @@ import type { BaselineConfig, BaselineState, Finding } from './types.js';
  *
  * What an entry is: one `fail` finding on one page. The page is the address that was asked for,
  * turned into a key by `pageKey` with the settings kept in the file. The finding is its id (the
- * fingerprint of rule, success criterion, frame and selector), and the rule, criterion, frame and
- * selector themselves: an entry only covers a finding where all five are equal, so a failure of
- * another rule on the same element is never covered, and neither is a hash collision.
+ * fingerprint of rule, success criterion, frame and selector), the check, rule, criterion, frame
+ * and selector themselves, and the signature of the element (`Finding.signature`): an entry only
+ * covers a finding where all of them are equal. A failure of another rule on the same element is
+ * never covered, neither is a hash collision, and neither is another element that has taken the
+ * place of the one that was recorded: a selector that is a path of positions says where an
+ * element is, and the signature says what it is.
  *
  * Only `fail` findings are recorded. A finding that was `likely` when the file was written and
  * is `fail` now is therefore new.
+ *
+ * Version 2 added `check` and `signature` to an entry. A file of version 1 cannot say which
+ * element an entry is about, so it is refused and not converted.
  */
-export const BASELINE_VERSION = 1;
+export const BASELINE_VERSION = 2;
 
 export interface BaselineEntry {
   id: string;
+  /** The check that reported it: an entry is only looked for on a run where this check ran. */
+  check: string;
   rule: string;
   /** Success criterion number, or an empty string. */
   sc: string;
   frame: string;
   selector: string;
+  /** `Finding.signature`: what the element is. A hash; no text of the page. */
+  signature: string;
 }
 
 export interface BaselinePage {
@@ -44,6 +54,17 @@ export interface Baseline {
 export interface BaselineInput {
   url: string;
   findings: Finding[];
+  /**
+   * The checks that ran on the page. An entry of another check is not known to be gone when no
+   * finding matches it. Left out: every check is taken to have run.
+   */
+  checks?: readonly string[];
+  /**
+   * The address the page ended on. When it is not the page that was asked for (another origin or
+   * path, after the settings of the key), the entries of the page are not known to be gone: a
+   * session that is over sends to a sign-in page, which has none of the failures. Left out: `url`.
+   */
+  finalUrl?: string;
 }
 
 export interface BaselineSummary {
@@ -55,6 +76,12 @@ export interface BaselineSummary {
   stale: number;
   /** Entries for pages that this run did not scan; nothing is known about them. */
   notScanned: number;
+  /**
+   * Entries for pages of this run that no `fail` finding matches, and that were not looked for:
+   * their check did not run, or the page ended on another address than the one asked for. Never
+   * counted as stale and never pruned.
+   */
+  unverified: number;
   /** Entries added to the file by this run. */
   added: number;
   /** Stale entries taken out of the file by this run. */
@@ -72,8 +99,13 @@ function compare(a: string, b: string): number {
  * The key of a page in a baseline, from its absolute address as `new URL(x).href` writes it
  * (scheme and host in lower case, default port left out: that part is the caller's, since `URL`
  * is not available here). Works on the text: nothing is decoded or encoded again.
+ *
+ * A user name and a password in the address are never part of a key. `alsoDrop` names further
+ * query parameters to leave out, compared without regard to case: those whose value is a secret
+ * (`RunConfig.redactQueryParams`).
  */
-export function pageKey(href: string, options: BaselineConfig): string {
+export function pageKey(given: string, options: BaselineConfig, alsoDrop: readonly string[] = []): string {
+  const href = withoutUserinfo(given);
   const hashAt = href.indexOf('#');
   const fragment = hashAt === -1 ? '' : href.slice(hashAt);
   const withoutFragment = hashAt === -1 ? href : href.slice(0, hashAt);
@@ -88,35 +120,69 @@ export function pageKey(href: string, options: BaselineConfig): string {
     // The root path stays: "https://host/" is how the address of a site is written.
     if (pathStart !== -1 && path.length > pathStart + 1 && path.endsWith('/')) path = path.replace(/\/+$/, '');
   }
-  if (hadQuery && (options.dropQueryParams.length > 0 || options.sortQuery)) {
+  const emptyQuery = query === '';
+  const normalises = options.dropQueryParams.length > 0 || options.sortQuery;
+  if (hadQuery && (normalises || alsoDrop.length > 0)) {
     const dropped = new Set(options.dropQueryParams);
+    const secret = new Set(alsoDrop.map((name) => name.toLowerCase()));
     let parts = query.split('&').filter((part) => part !== '');
     const nameOf = (part: string): string => {
       const equals = part.indexOf('=');
       return equals === -1 ? part : part.slice(0, equals);
     };
-    parts = parts.filter((part) => !dropped.has(nameOf(part)));
+    parts = parts.filter((part) => !dropped.has(nameOf(part)) && !secret.has(nameOf(part).toLowerCase()));
     if (options.sortQuery) {
       // Stable, and by name only: the order of two values of one parameter is kept.
       parts = parts.map((part, index) => ({ part, index })).sort((a, b) => compare(nameOf(a.part), nameOf(b.part)) || a.index - b.index).map(({ part }) => part);
     }
     query = parts.join('&');
   }
-  const keepQuery = hadQuery && (query !== '' || (options.dropQueryParams.length === 0 && !options.sortQuery));
+  // A bare "?" stays when nothing was asked of the query.
+  const keepQuery = hadQuery && (query !== '' || (emptyQuery && !normalises));
   return path + (keepQuery ? `?${query}` : '') + (options.stripFragment ? '' : fragment);
 }
 
+/** The address without the user name and password it may carry between the scheme and the host. */
+export function withoutUserinfo(href: string): string {
+  const schemeEnd = href.indexOf('://');
+  if (schemeEnd === -1) return href;
+  const start = schemeEnd + 3;
+  let end = href.length;
+  for (const char of ['/', '?', '#']) {
+    const at = href.indexOf(char, start);
+    if (at !== -1 && at < end) end = at;
+  }
+  const at = href.lastIndexOf('@', end - 1);
+  return at >= start ? href.slice(0, start) + href.slice(at + 1) : href;
+}
+
+/** The key of a page without its query and fragment: which document of which origin it is. */
+function placeOf(href: string, options: BaselineConfig): string {
+  const key = pageKey(href, options);
+  const cut = key.search(/[?#]/);
+  return cut === -1 ? key : key.slice(0, cut);
+}
+
 function entryOf(finding: Finding): BaselineEntry {
-  return { id: finding.id, rule: finding.rule, sc: finding.wcag?.sc ?? '', frame: finding.frame, selector: finding.selector };
+  return {
+    id: finding.id,
+    check: finding.check,
+    rule: finding.rule,
+    sc: finding.wcag?.sc ?? '',
+    frame: finding.frame,
+    selector: finding.selector,
+    signature: typeof finding.signature === 'string' ? finding.signature : '',
+  };
 }
 
 function sameEntry(a: BaselineEntry, b: BaselineEntry): boolean {
-  return a.id === b.id && a.rule === b.rule && a.sc === b.sc && a.frame === b.frame && a.selector === b.selector;
+  return a.id === b.id && a.check === b.check && a.rule === b.rule && a.sc === b.sc && a.frame === b.frame && a.selector === b.selector && a.signature === b.signature;
 }
 
 function sortEntries(entries: BaselineEntry[]): BaselineEntry[] {
   return entries.sort(
-    (a, b) => compare(a.rule, b.rule) || compare(a.frame, b.frame) || compare(a.selector, b.selector) || compare(a.sc, b.sc) || compare(a.id, b.id),
+    (a, b) =>
+      compare(a.rule, b.rule) || compare(a.frame, b.frame) || compare(a.selector, b.selector) || compare(a.sc, b.sc) || compare(a.signature, b.signature) || compare(a.id, b.id),
   );
 }
 
@@ -133,7 +199,11 @@ export function parseBaseline(value: unknown): Baseline {
   if (!isRecord(value)) throw new BaselineError('it does not hold a JSON object');
   if (value['version'] !== BASELINE_VERSION) {
     const found = typeof value['version'] === 'number' || typeof value['version'] === 'string' ? JSON.stringify(value['version']) : 'none';
-    throw new BaselineError(`it has format version ${found}, and this version of ${TOOL_NAME} reads version ${BASELINE_VERSION}; write it again with --update-baseline after moving the old file away`);
+    const older = typeof value['version'] === 'number' && value['version'] < BASELINE_VERSION;
+    const why = older ? ' (an older format does not record which element an entry is about, so its entries cannot be carried over)' : '';
+    throw new BaselineError(
+      `it has format version ${found}, and this version of ${TOOL_NAME} reads version ${BASELINE_VERSION}${why}; move the old file away and write a new one with --update-baseline`,
+    );
   }
   const urlKey = value['urlKey'];
   if (
@@ -161,15 +231,18 @@ export function parseBaseline(value: unknown): Baseline {
         !isRecord(entry) ||
         typeof entry['id'] !== 'string' ||
         entry['id'] === '' ||
+        typeof entry['check'] !== 'string' ||
+        entry['check'] === '' ||
         typeof entry['rule'] !== 'string' ||
         entry['rule'] === '' ||
         typeof entry['sc'] !== 'string' ||
         typeof entry['frame'] !== 'string' ||
-        typeof entry['selector'] !== 'string'
+        typeof entry['selector'] !== 'string' ||
+        typeof entry['signature'] !== 'string'
       ) {
-        throw new BaselineError('one of its entries lacks "id", "rule", "sc", "frame" or "selector"');
+        throw new BaselineError('one of its entries lacks "id", "check", "rule", "sc", "frame", "selector" or "signature"');
       }
-      findings.push({ id: entry['id'], rule: entry['rule'], sc: entry['sc'], frame: entry['frame'], selector: entry['selector'] });
+      findings.push({ id: entry['id'], check: entry['check'], rule: entry['rule'], sc: entry['sc'], frame: entry['frame'], selector: entry['selector'], signature: entry['signature'] });
     }
     pages.push({ url: page['url'], findings });
   }
@@ -193,7 +266,7 @@ export function emptyBaseline(urlKey: BaselineConfig): Baseline {
 
 /**
  * The text of a baseline file. The same content always gives the same bytes: pages by key,
- * entries by rule, frame and selector, no date and nothing of the run. A change of the file in a
+ * entries by rule, frame, selector and signature, no date and nothing of the run. A change of the file in a
  * review is then a change of what is accepted.
  */
 export function serializeBaseline(baseline: Baseline): string {
@@ -201,7 +274,9 @@ export function serializeBaseline(baseline: Baseline): string {
     .filter((page) => page.findings.length > 0)
     .map((page) => ({
       url: page.url,
-      findings: sortEntries(page.findings.map((entry) => ({ id: entry.id, rule: entry.rule, sc: entry.sc, frame: entry.frame, selector: entry.selector }))),
+      findings: sortEntries(
+        page.findings.map((entry) => ({ id: entry.id, check: entry.check, rule: entry.rule, sc: entry.sc, frame: entry.frame, selector: entry.selector, signature: entry.signature })),
+      ),
     }))
     .sort((a, b) => compare(a.url, b.url));
   const { stripFragment, sortQuery, stripTrailingSlash, dropQueryParams } = baseline.urlKey;
@@ -220,28 +295,50 @@ export interface BaselineComparison {
   /** The file as it should be written, when it is: see `update` and `prune`. */
   baseline: Baseline;
   summary: BaselineSummary;
+  /** The pages that ended on another address than the one asked for, for a message. */
+  moved: { url: string; finalUrl: string }[];
+}
+
+export interface BaselineOptions {
+  /** The `fail` findings the file does not record are added to it, and marked `baselined`. */
+  update?: boolean;
+  /** Entries that are known to be gone are taken out. */
+  prune?: boolean;
+  /** Query parameters left out of every key on top of those of the file: `RunConfig.redactQueryParams`. */
+  redactQueryParams?: readonly string[];
 }
 
 /**
  * Compares the pages of a run with a baseline.
  *
- * - `update`: the `fail` findings the file does not record are added to it, and marked `baselined`.
- * - `prune`: entries for pages of this run that no `fail` finding matches are taken out.
+ * An entry that no `fail` finding matches is known to be gone (`stale`, and pruned when asked)
+ * only when it was looked for: its check ran on its page, and the page that was read is the one
+ * that was asked for. A run of some checks, or a page that sent the browser to a sign-in page,
+ * says nothing about the other entries: they are counted as `unverified` and always kept.
+ * Neither `update` nor `prune` ever takes out an entry of a page or a check that did not run.
  *
  * Entries for pages this run did not scan (not asked for, or not loaded) are never touched and
  * never counted as stale: nothing is known about them. Several addresses of a run with one key
  * are one page here: an entry is matched when any of them has the finding.
  */
-export function compareWithBaseline(pages: BaselineInput[], baseline: Baseline, options: { update?: boolean; prune?: boolean } = {}): BaselineComparison {
+export function compareWithBaseline(pages: BaselineInput[], baseline: Baseline, options: BaselineOptions = {}): BaselineComparison {
+  const alsoDrop = options.redactQueryParams ?? [];
   const recorded = new Map<string, BaselineEntry[]>(baseline.pages.map((page) => [page.url, page.findings]));
-  const scanned = new Map<string, BaselineEntry[]>();
-  const summary: BaselineSummary = { new: 0, baselined: 0, stale: 0, notScanned: 0, added: 0, pruned: 0 };
+  /** Per key: the failures found, and the checks that looked on the page that was asked for (null: all of them). */
+  const scanned = new Map<string, { failing: BaselineEntry[]; looked: Set<string> | null }>();
+  const summary: BaselineSummary = { new: 0, baselined: 0, stale: 0, notScanned: 0, unverified: 0, added: 0, pruned: 0 };
+  const moved: BaselineComparison['moved'] = [];
 
   const marked = pages.map((page) => {
-    const key = pageKey(page.url, baseline.urlKey);
+    const key = pageKey(page.url, baseline.urlKey, alsoDrop);
     const entries = recorded.get(key) ?? [];
-    const failing = scanned.get(key) ?? [];
-    scanned.set(key, failing);
+    const state = scanned.get(key) ?? { failing: [], looked: new Set<string>() };
+    scanned.set(key, state);
+    const landed = page.finalUrl === undefined || placeOf(page.finalUrl, baseline.urlKey) === placeOf(page.url, baseline.urlKey);
+    if (!landed) moved.push({ url: page.url, finalUrl: page.finalUrl! });
+    else if (page.checks === undefined) state.looked = null;
+    else if (state.looked !== null) for (const check of page.checks) state.looked.add(check);
+    const { failing } = state;
     const findings = page.findings.map((finding) => {
       // Only a `fail` is ever looked up; anything else carries no mark.
       if (finding.status !== 'fail') {
@@ -252,33 +349,40 @@ export function compareWithBaseline(pages: BaselineInput[], baseline: Baseline, 
       const entry = entryOf(finding);
       const known = entries.some((candidate) => sameEntry(candidate, entry));
       if (!failing.some((candidate) => sameEntry(candidate, entry))) failing.push(entry);
-      const state: BaselineState = known || options.update ? 'baselined' : 'new';
-      if (state === 'new') summary.new += 1;
+      const mark: BaselineState = known || options.update ? 'baselined' : 'new';
+      if (mark === 'new') summary.new += 1;
       else summary.baselined += 1;
-      return { ...finding, baseline: state };
+      return { ...finding, baseline: mark };
     });
-    return { url: page.url, findings };
+    return { ...page, findings };
   });
 
   const next: BaselinePage[] = [];
   for (const [key, entries] of recorded) {
-    const failing = scanned.get(key);
-    if (!failing) {
+    const state = scanned.get(key);
+    if (!state) {
       summary.notScanned += entries.length;
       next.push({ url: key, findings: [...entries] });
       continue;
     }
     const kept: BaselineEntry[] = [];
     for (const entry of entries) {
-      const still = failing.some((candidate) => sameEntry(candidate, entry));
-      if (!still) summary.stale += 1;
-      if (still || !options.prune) kept.push(entry);
-      else summary.pruned += 1;
+      const still = state.failing.some((candidate) => sameEntry(candidate, entry));
+      const lookedFor = state.looked === null || state.looked.has(entry.check);
+      if (still) kept.push(entry);
+      else if (!lookedFor) {
+        summary.unverified += 1;
+        kept.push(entry);
+      } else {
+        summary.stale += 1;
+        if (options.prune) summary.pruned += 1;
+        else kept.push(entry);
+      }
     }
     next.push({ url: key, findings: kept });
   }
   if (options.update) {
-    for (const [key, failing] of scanned) {
+    for (const [key, { failing }] of scanned) {
       let page = next.find((candidate) => candidate.url === key);
       if (!page) {
         page = { url: key, findings: [] };
@@ -291,7 +395,7 @@ export function compareWithBaseline(pages: BaselineInput[], baseline: Baseline, 
       }
     }
   }
-  return { pages: marked, baseline: { ...baseline, pages: next.filter((page) => page.findings.length > 0) }, summary };
+  return { pages: marked, baseline: { ...baseline, pages: next.filter((page) => page.findings.length > 0) }, summary, moved };
 }
 
 /**

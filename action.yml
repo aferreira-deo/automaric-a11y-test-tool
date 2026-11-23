@@ -53,7 +53,9 @@ inputs:
     required: false
     default: ''
   upload-sarif:
-    description: Upload the SARIF file to GitHub code scanning. The calling job needs the permission security-events write.
+    description: >-
+      Upload the SARIF file to GitHub code scanning. The calling job needs the permission security-events write.
+      Skipped on a pull request from a fork, which cannot have it.
     required: false
     default: 'false'
   fail-on-findings:
@@ -134,14 +136,27 @@ runs:
         INPUT_SARIF_ANCHOR: ${{ inputs.sarif-anchor }}
       run: node "$GITHUB_ACTION_PATH/scripts/action-scan.mjs"
 
+    # A pull request from a fork runs with a read-only token: it has no security-events permission, and the
+    # upload would fail the job for a reason that is not a finding. It is skipped there, and said.
     - name: Upload SARIF to code scanning
-      if: inputs.upload-sarif == 'true' && steps.scan.outputs.sarif-file != ''
+      if: >-
+        inputs.upload-sarif == 'true' && steps.scan.outputs.sarif-file != '' &&
+        (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
       uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
       with:
         sarif_file: ${{ steps.scan.outputs.sarif-file }}
         category: a11y-vision
 
+    - name: SARIF upload skipped
+      if: >-
+        inputs.upload-sarif == 'true' && github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository
+      shell: bash
+      run: echo "::notice::The SARIF file was not uploaded to code scanning. A pull request from a fork has no security-events permission. The reports are in the output directory."
+
+    # Always: whatever happened to the upload, the outcome of the scan is what the job ends with.
     - name: Result
+      if: always()
       shell: bash
       env:
         EXIT_CODE: ${{ steps.scan.outputs.exit-code }}

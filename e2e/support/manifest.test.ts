@@ -12,6 +12,7 @@ function finding(overrides: Partial<Finding>): Finding {
     wcag: { sc: '2.4.7', level: 'AA' },
     selector: '#a',
     frame: '',
+    signature: '',
     box: null,
     evidence: { crops: [], colors: {}, ratios: {}, flags: [] },
     message: '',

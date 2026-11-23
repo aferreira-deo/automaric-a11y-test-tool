@@ -1,11 +1,13 @@
 import { gzipSync } from 'node:zlib';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { defaultConfig } from '@a11y-vision/core';
-import { collectTargets, InputError, parseUrlList, readSitemap } from './inputs.js';
-import { pageDirectory, summaryLines } from './main.js';
+import { checkedAddress, collectTargets, InputError, parseUrlList, readSitemap } from './inputs.js';
+import { pageDirectory, summaryLines, writeAtomic } from './main.js';
 import { parseSitemap, SitemapError } from './sitemap.js';
 
 const NS = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"';
@@ -57,7 +59,11 @@ describe('parseSitemap', () => {
   });
 
   it('refuses deep nesting instead of following it', () => {
-    expect(() => parseSitemap(`<urlset>${'<a>'.repeat(40)}`, 10)).toThrow(/nested more than/);
+    expect(() => parseSitemap(`<urlset>${'<a>'.repeat(40)}`, 10)).toThrow(/nested more than 16 deep \(run\.sitemapMaxDepth\)/);
+    // The depth is a setting.
+    const nested = `<urlset><url><a><b><loc>https://example.test/</loc></b></a></url></urlset>`;
+    expect(parseSitemap(nested, 10, 5).total).toBe(0);
+    expect(() => parseSitemap(nested, 10, 4)).toThrow(/nested more than 4 deep/);
   });
 
   it('reads a large sitemap in time that grows with its size', () => {
@@ -108,7 +114,8 @@ describe('sitemaps and lists from files', () => {
   it('cuts at the limit and says how many were left', async () => {
     const path = file('long.xml', urlset(...Array.from({ length: 9 }, (_, index) => `https://example.test/${index}`)));
     const targets = await collectTargets({ positionals: ['https://example.test/first'], sitemap: path }, { ...limits, maxUrls: 4 });
-    expect(targets.urls).toEqual(['https://example.test/first', 'https://example.test/0', 'https://example.test/1', 'https://example.test/2']);
+    expect(targets.pages.map((page) => page.url)).toEqual(['https://example.test/first', 'https://example.test/0', 'https://example.test/1', 'https://example.test/2']);
+    expect(targets.pages.map((page) => page.fromSitemap)).toEqual([false, true, true, true]);
     expect(targets.overLimit).toBe(6);
     expect(targets.notes.join('\n')).toContain('6 were NOT scanned');
   });
@@ -124,12 +131,106 @@ describe('sitemaps and lists from files', () => {
   it('gives each address once, in the order given, and refuses more by hand than the limit', async () => {
     const list = file('urls.txt', 'https://example.test/b\nhttps://example.test/a\nhttps://example.test/b\n');
     const targets = await collectTargets({ positionals: ['https://example.test/a'], urlsFile: list }, limits);
-    expect(targets.urls).toEqual(['https://example.test/a', 'https://example.test/b']);
+    expect(targets.pages.map((page) => page.url)).toEqual(['https://example.test/a', 'https://example.test/b']);
     expect(targets.duplicates).toBe(2);
     expect([...targets.lines]).toEqual([['https://example.test/b', 1], ['https://example.test/a', 2]]);
     await expect(collectTargets({ positionals: [], urlsFile: list }, { ...limits, maxUrls: 1 })).rejects.toThrow(/2 addresses were given and a run scans at most 1/);
     await expect(collectTargets({ positionals: [], urlsFile: join(dir, 'missing.txt') }, limits)).rejects.toThrow(InputError);
     await expect(collectTargets({ positionals: [], urlsFile: file('empty.txt', '# nothing\n') }, limits)).rejects.toThrow(/holds no address/);
+  });
+});
+
+describe('addresses given by hand', () => {
+  const limits = { ...defaultConfig.run };
+
+  it('takes http(s), a file only when that is asked for, and no other scheme', () => {
+    expect(checkedAddress('HTTPS://Example.test/a', false)).toBe('https://example.test/a');
+    expect(() => checkedAddress('file:///etc/passwd', false)).toThrow(/not an http\(s\) address.*--allow-file-urls/);
+    expect(checkedAddress('file:///tmp/page.html', true)).toBe('file:///tmp/page.html');
+    for (const address of ['data:text/html,<p>x</p>', 'javascript:alert(1)', 'view-source:https://example.test/', 'chrome://version', 'about:blank', 'ftp://example.test/', 'blob:https://example.test/1']) {
+      expect(() => checkedAddress(address, false), address).toThrow(InputError);
+      expect(() => checkedAddress(address, true), address).toThrow(/is not an http\(s\) address/);
+    }
+    expect(() => checkedAddress('not an address', true)).toThrow(/Not a valid URL/);
+    // What is refused is named without its password.
+    expect(() => checkedAddress('ftp://user:hunter2secret@example.test/', false)).toThrow(/^ftp:\/\/example\.test\/ is not/);
+  });
+
+  it('keeps the credentials and the secret query values of an address apart from what is written', async () => {
+    const targets = await collectTargets({ positionals: ['https://us%40er:p%3Ass@example.test/a?x=1&token=abc', 'https://example.test/b'] }, limits);
+    expect(targets.pages).toEqual([
+      {
+        url: 'https://example.test/a?x=1&token=redacted',
+        address: 'https://example.test/a?x=1&token=abc',
+        credentials: { username: 'us@er', password: 'p:ss', origin: 'https://example.test' },
+        fromSitemap: false,
+      },
+      { url: 'https://example.test/b', address: 'https://example.test/b', fromSitemap: false },
+    ]);
+    await expect(collectTargets({ positionals: ['file:///tmp/a.html'] }, limits)).rejects.toThrow(InputError);
+    expect((await collectTargets({ positionals: ['file:///tmp/a.html'], allowFileUrls: true }, limits)).pages[0]!.address).toBe('file:///tmp/a.html');
+  });
+});
+
+describe('a sitemap that is fetched', () => {
+  const limits = { ...defaultConfig.run };
+  const NS_ = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"';
+
+  it('is held to the origin it was served from, also after a redirect, and to the origin of its index', async () => {
+    const hosts: string[] = [];
+    const server = createServer((request, response) => {
+      const { port } = server.address() as AddressInfo;
+      const here = `http://${request.headers.host}`;
+      const there = here.includes('127.0.0.1') ? `http://localhost:${port}` : `http://127.0.0.1:${port}`;
+      hosts.push(`${request.headers.host} ${request.url}`);
+      const xml = (body: string): void => void response.writeHead(200, { 'content-type': 'application/xml' }).end(body);
+      if (request.url === '/moved.xml') response.writeHead(302, { location: `${there}/sitemap.xml` }).end();
+      else if (request.url === '/sitemap.xml') xml(urlset(`${here}/a`, `${there}/b`));
+      else if (request.url === '/index.xml') xml(`<sitemapindex ${NS_}><sitemap><loc>${here}/sitemap.xml</loc></sitemap><sitemap><loc>${here}/moved.xml</loc></sitemap></sitemapindex>`);
+      else response.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const asked = `http://127.0.0.1:${port}`;
+      const served = `http://localhost:${port}`;
+      // Asked for on one origin, served from another: the entries on the second are the ones kept.
+      const moved = await readSitemap(`${asked}/moved.xml`, limits, 10);
+      expect(moved.urls).toEqual([`${served}/a`]);
+      expect(moved.otherOrigin).toBe(1);
+      expect(moved.notes.join('\n')).toContain(`was served from ${served} after a redirect`);
+      expect(moved.notes.join('\n')).toContain(`on another origin than ${served}`);
+      // No redirect: as before.
+      expect((await readSitemap(`${asked}/sitemap.xml`, limits, 10)).urls).toEqual([`${asked}/a`]);
+      // A sitemap of an index that is served from elsewhere is not read.
+      const index = await readSitemap(`${asked}/index.xml`, limits, 10);
+      expect(index.urls).toEqual([`${asked}/a`]);
+      expect(index.notes.join('\n')).toContain('was served from another origin');
+      expect((await readSitemap(`${asked}/index.xml`, { ...limits, sameOrigin: false }, 10)).urls).toEqual([`${asked}/a`, `${served}/b`, `${served}/a`, `${asked}/b`]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+describe('writeAtomic', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'a11y-vision-atomic-'));
+
+  it('replaces the file whole and leaves nothing beside it', async () => {
+    const file = join(dir, 'nested', 'baseline.json');
+    await writeAtomic(file, 'one\n');
+    await writeAtomic(file, 'two\n');
+    expect(readFileSync(file, 'utf8')).toBe('two\n');
+    expect(readdirSync(join(dir, 'nested'))).toEqual(['baseline.json']);
+  });
+
+  it('leaves what was there, and nothing else, when the new content cannot take its place', async () => {
+    // A directory where the file should be: the content is written beside it and cannot be moved in.
+    const target = join(dir, 'taken');
+    mkdirSync(join(target, 'kept'), { recursive: true });
+    await expect(writeAtomic(target, 'new\n')).rejects.toThrow();
+    expect(existsSync(join(target, 'kept'))).toBe(true);
+    expect(readdirSync(dir).filter((name) => name.includes('.tmp'))).toEqual([]);
   });
 });
 
@@ -147,7 +248,10 @@ describe('summaryLines', () => {
   const counts = { pages: 3, errors: 0, fail: 5, likely: 4, advisory: 2, info: 30, newFail: 2, baselinedFail: 3 };
 
   it('gives counts by status, and with a baseline the new and the recorded fails', () => {
-    const lines = summaryLines(counts, { new: 2, baselined: 3, stale: 1, notScanned: 4, added: 0, pruned: 0 }, 1).join('');
+    const lines = summaryLines(counts, { new: 2, baselined: 3, stale: 1, notScanned: 4, unverified: 0, added: 0, pruned: 0 }, 1).join('');
+    expect(lines).not.toContain('not looked for');
+    const partial = summaryLines(counts, { new: 0, baselined: 3, stale: 0, notScanned: 0, unverified: 2, added: 0, pruned: 0 }, 0).join('');
+    expect(partial).toContain('Baseline: 2 entries were not looked for (the check did not run, or the page ended on another address) and are kept.');
     expect(lines).toContain('[a11y-vision] 3 pages scanned.\n');
     expect(lines).toContain('Findings: 5 fail (2 new, 3 in the baseline), 4 likely, 2 advisory, 30 info.');
     expect(lines).toContain('1 entry no longer occurs on the scanned pages (--prune-baseline removes them); 4 entries are for pages not scanned in this run.');

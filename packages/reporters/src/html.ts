@@ -1,6 +1,6 @@
 import { TOOL_NAME } from '@a11y-vision/core';
 import type { BaselineSummary, Finding, Png, ScanResult, Status } from '@a11y-vision/core';
-import { countRun } from './run.js';
+import { countRun, inputNote } from './run.js';
 import type { Run } from './run.js';
 
 const STATUS_ORDER: Status[] = ['fail', 'likely', 'advisory', 'info'];
@@ -183,7 +183,10 @@ function baselineNote(summary: BaselineSummary | undefined): string {
   if (!summary) return '';
   const stale = summary.stale > 0 ? ` ${num(summary.stale)} entr(y/ies) of the baseline no longer occur on the pages that were scanned.` : '';
   const unknown = summary.notScanned > 0 ? ` ${num(summary.notScanned)} entr(y/ies) are for pages that were not scanned in this run.` : '';
-  return `<p>A baseline file was used. ${num(summary.new)} Fail finding(s) are new: they are not in the baseline. ${num(summary.baselined)} Fail finding(s) are in the baseline: they were recorded earlier and do not break a build, and they are still failures, listed with the others and marked &quot;In the baseline&quot;.${stale}${unknown}</p>\n`;
+  // Optional on purpose: a summary made by an earlier version has no such count.
+  const unverified = (summary.unverified as number | undefined) ?? 0;
+  const notLooked = unverified > 0 ? ` ${num(unverified)} entr(y/ies) were not looked for: their check did not run, or their page ended on another address than the one that was asked for.` : '';
+  return `<p>A baseline file was used. ${num(summary.new)} Fail finding(s) are new: they are not in the baseline. ${num(summary.baselined)} Fail finding(s) are in the baseline: they were recorded earlier and do not break a build, and they are still failures, listed with the others and marked &quot;In the baseline&quot;.${stale}${unknown}${notLooked}</p>\n`;
 }
 
 function environmentNote(result: ScanResult): string {
@@ -292,11 +295,12 @@ ${sections}</section>`;
     })
     .join('\n');
   const all = run.pages.flatMap((page) => page.result.findings);
+  const cut = inputNote(run.input);
   return documentOf(
     `${escape(TOOL_NAME)} evidence report: ${counts.pages} page(s)`,
     `<h1>Evidence report</h1>
 <p class="note">Run of ${escape(run.timestamp)} with ${escape(run.tool.name)} ${escape(run.tool.version)}: ${counts.pages} page(s) scanned, ${counts.errors} not scanned.</p>
-${modelNote(all)}${baselineNote(run.baseline)}${SCOPE_NOTE}
+${modelNote(all)}${baselineNote(run.baseline)}${cut === '' ? '' : `<p><strong>${escape(cut)}</strong></p>\n`}${SCOPE_NOTE}
 ${errors}<section><h2>Pages</h2>
 <table>
 <caption>Findings by page and status</caption>

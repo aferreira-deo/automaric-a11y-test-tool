@@ -2,14 +2,16 @@ import { readFile, stat } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import type { RunConfig } from '@a11y-vision/core';
 import { parseSitemap, SitemapError } from './sitemap.js';
+import { pageTarget } from './urls.js';
+import type { PageTarget } from './urls.js';
 
 /** The list of pages cannot be made: a usage error, said before any page is opened. */
 export class InputError extends Error {}
 
 export interface Targets {
-  /** Addresses to scan, as `new URL(x).href` writes them, in the order given, each once. */
-  urls: string[];
-  /** For addresses read from the list file: the line each is on (the first one, for a repeated address). */
+  /** Pages to scan, in the order given, each address once. */
+  pages: PageTarget[];
+  /** For addresses read from the list file: the line each is on (the first one, for a repeated address), by `PageTarget.url`. */
   lines: Map<string, number>;
   otherOrigin: number;
   overLimit: number;
@@ -61,7 +63,8 @@ function maybeGunzip(bytes: Buffer, maxBytes: number, source: string): Buffer {
   }
 }
 
-async function fetchBounded(url: string, limits: RunConfig): Promise<Buffer> {
+/** The bytes of a sitemap, and the address they were served from: not the one asked for when the server redirected. */
+async function fetchBounded(url: string, limits: RunConfig): Promise<{ bytes: Buffer; servedFrom: string }> {
   let response: Response;
   try {
     response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(limits.sitemapTimeoutMs), headers: { accept: 'application/xml, text/xml, */*' } });
@@ -82,13 +85,13 @@ async function fetchBounded(url: string, limits: RunConfig): Promise<Buffer> {
     if (error instanceof InputError) throw error;
     throw new InputError(`Cannot fetch the sitemap ${url}: the answer broke off.`);
   }
-  return Buffer.concat(chunks);
+  return { bytes: Buffer.concat(chunks), servedFrom: URL.canParse(response.url) ? response.url : url };
 }
 
 function parse(bytes: Buffer, source: string, limits: RunConfig, maxLocs: number) {
   const xml = new TextDecoder('utf-8').decode(maybeGunzip(bytes, limits.maxInputBytes, source));
   try {
-    return parseSitemap(xml, maxLocs);
+    return parseSitemap(xml, maxLocs, limits.sitemapMaxDepth);
   } catch (error) {
     if (error instanceof SitemapError) throw new InputError(`${source}: ${error.message}`);
     throw error;
@@ -110,14 +113,17 @@ export interface SitemapUrls {
  *
  * With `run.sameOrigin`, entries on another origin than the sitemap are left out and counted: a
  * sitemap is content of the site, and should not be able to send the scan elsewhere. The origin
- * of a sitemap read from a file is that of its first entry.
+ * of a sitemap is that of the address it was served from, which after a redirect is not the one
+ * that was asked for; the origin of a sitemap read from a file is that of its first entry.
  */
 export async function readSitemap(source: string, limits: RunConfig, keep: number): Promise<SitemapUrls> {
   const fromWeb = /^https?:\/\//i.test(source);
   if (fromWeb && !URL.canParse(source)) throw new InputError(`Not a valid sitemap address: ${source}`);
-  const top = parse(fromWeb ? await fetchBounded(source, limits) : await readBounded(source, limits.maxInputBytes, 'the sitemap'), source, limits, Math.max(keep + 1, limits.maxSitemaps + 1));
+  const fetched = fromWeb ? await fetchBounded(source, limits) : null;
+  const top = parse(fetched ? fetched.bytes : await readBounded(source, limits.maxInputBytes, 'the sitemap'), source, limits, Math.max(keep + 1, limits.maxSitemaps + 1));
   const result: SitemapUrls = { urls: [], otherOrigin: 0, overLimit: 0, notes: [] };
-  let origin: string | null = fromWeb ? new URL(source).origin : null;
+  let origin: string | null = fetched ? new URL(fetched.servedFrom).origin : null;
+  if (fetched && origin !== new URL(source).origin) result.notes.push(`The sitemap ${source} was served from ${origin} after a redirect: that is the origin its entries are held to.`);
   let invalid = 0;
 
   /** The entry as an address when it is one that is kept. Sets the origin from the first entry of a file. */
@@ -156,7 +162,13 @@ export async function readSitemap(source: string, limits: RunConfig, keep: numbe
         result.notes.push(`The limit of pages was reached before the sitemap ${child} was read.`);
         continue;
       }
-      const parsed = parse(await fetchBounded(child, limits), child, limits, keep + 1);
+      const part = await fetchBounded(child, limits);
+      // A sitemap of the index that is served from elsewhere is not read: its entries would be held to another origin.
+      if (limits.sameOrigin && new URL(part.servedFrom).origin !== origin) {
+        result.notes.push(`The sitemap ${child} was served from another origin (${new URL(part.servedFrom).origin}) after a redirect and was not read (--any-origin reads it).`);
+        continue;
+      }
+      const parsed = parse(part.bytes, child, limits, keep + 1);
       if (parsed.kind !== 'urlset') throw new InputError(`${child}: a sitemap index inside a sitemap index, which the protocol does not have.`);
       addPages(parsed);
     }
@@ -167,51 +179,74 @@ export async function readSitemap(source: string, limits: RunConfig, keep: numbe
 }
 
 /**
+ * An address given on the command line, as `new URL` writes it. Only http(s) is opened: a scan
+ * is of a page of a site, and `data:`, `javascript:`, `view-source:`, `chrome:` and the like
+ * are not one. A `file:` address reads a file of this machine, so it is opened only when that
+ * was asked for with --allow-file-urls. The message never repeats a password.
+ */
+export function checkedAddress(raw: string, allowFileUrls: boolean): string {
+  if (!URL.canParse(raw)) throw new InputError(`Not a valid URL: ${pageless(raw)}`);
+  const url = new URL(raw);
+  if (isHttp(url)) return url.href;
+  if (url.protocol === 'file:') {
+    if (allowFileUrls) return url.href;
+    throw new InputError(`${pageless(raw)} is not an http(s) address. A file of this machine is only scanned with --allow-file-urls.`);
+  }
+  throw new InputError(`${pageless(raw)} is not an http(s) address: the scheme "${url.protocol}" is not scanned.`);
+}
+
+/** What was typed, cut short and without what stands before an "@": enough to recognise it in a message. */
+function pageless(raw: string): string {
+  const shown = raw.replace(/\/\/[^/?#\s]*@/, '//');
+  return shown.length > 120 ? `${shown.slice(0, 120)}…` : shown;
+}
+
+/**
  * The pages of a run: the addresses given on the command line, then those of the list file,
  * then those of the sitemap, each once. More than `run.maxUrls` given by hand is an error; a
  * sitemap is cut at what is left of the limit, and the cut is said.
  */
-export async function collectTargets(given: { positionals: string[]; urlsFile?: string; sitemap?: string }, limits: RunConfig): Promise<Targets> {
-  const targets: Targets = { urls: [], lines: new Map(), otherOrigin: 0, overLimit: 0, duplicates: 0, notes: [] };
+export async function collectTargets(given: { positionals: string[]; urlsFile?: string; sitemap?: string; allowFileUrls?: boolean }, limits: RunConfig): Promise<Targets> {
+  const targets: Targets = { pages: [], lines: new Map(), otherOrigin: 0, overLimit: 0, duplicates: 0, notes: [] };
   const seen = new Set<string>();
-  const add = (url: string): boolean => {
-    if (seen.has(url)) {
+  /** Adds the page of an address, unless it was given before. The address as given is never kept: see urls.ts. */
+  const add = (href: string, fromSitemap = false): PageTarget | null => {
+    if (seen.has(href)) {
       targets.duplicates += 1;
-      return false;
+      return null;
     }
-    seen.add(url);
-    targets.urls.push(url);
-    return true;
+    seen.add(href);
+    const page = pageTarget(href, limits.redactQueryParams, fromSitemap);
+    targets.pages.push(page);
+    return page;
   };
 
-  for (const raw of given.positionals) {
-    if (!URL.canParse(raw)) throw new InputError(`Not a valid URL: ${raw}`);
-    add(new URL(raw).href);
-  }
+  for (const raw of given.positionals) add(checkedAddress(raw, given.allowFileUrls === true));
   if (given.urlsFile !== undefined) {
     const text = new TextDecoder('utf-8').decode(await readBounded(given.urlsFile, limits.maxInputBytes, 'the list of addresses'));
     const listed = parseUrlList(text, given.urlsFile);
     if (listed.length === 0) throw new InputError(`The list of addresses ${given.urlsFile} holds no address.`);
     for (const { url, line } of listed) {
-      if (!targets.lines.has(url)) targets.lines.set(url, line);
+      const shown = pageTarget(url, limits.redactQueryParams).url;
+      if (!targets.lines.has(shown)) targets.lines.set(shown, line);
       add(url);
     }
   }
-  if (targets.urls.length > limits.maxUrls) {
-    throw new InputError(`${targets.urls.length} addresses were given and a run scans at most ${limits.maxUrls} (--max-urls or run.maxUrls raises the limit).`);
+  if (targets.pages.length > limits.maxUrls) {
+    throw new InputError(`${targets.pages.length} addresses were given and a run scans at most ${limits.maxUrls} (--max-urls or run.maxUrls raises the limit).`);
   }
   if (given.sitemap !== undefined) {
-    const room = limits.maxUrls - targets.urls.length;
+    const room = limits.maxUrls - targets.pages.length;
     const fromSitemap = await readSitemap(given.sitemap, limits, room);
     let added = 0;
-    for (const url of fromSitemap.urls) if (add(url)) added += 1;
+    for (const url of fromSitemap.urls) if (add(url, true)) added += 1;
     targets.otherOrigin = fromSitemap.otherOrigin;
     targets.overLimit = fromSitemap.overLimit;
     targets.notes.push(...fromSitemap.notes);
     if (fromSitemap.overLimit > 0) {
       targets.notes.push(`The sitemap lists more pages than the limit of ${limits.maxUrls} for a run: ${fromSitemap.overLimit} were NOT scanned (--max-urls or run.maxUrls raises the limit).`);
     }
-    if (added === 0 && targets.urls.length === 0) throw new InputError(`The sitemap ${given.sitemap} gave no address to scan.`);
+    if (added === 0 && targets.pages.length === 0) throw new InputError(`The sitemap ${given.sitemap} gave no address to scan.`);
   }
   return targets;
 }

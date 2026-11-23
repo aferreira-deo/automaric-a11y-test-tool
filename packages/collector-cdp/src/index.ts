@@ -1,4 +1,6 @@
+import { elementSignature } from '@a11y-vision/core';
 import type { Config, Snapshot } from '@a11y-vision/core';
+import type { AgentSignature } from './agent.js';
 import { createWorld, readEnvironment } from './environment.js';
 import { collectFocus } from './focus.js';
 import { collectGrouping } from './grouping.js';
@@ -145,6 +147,10 @@ async function collectOnce(cdp: CdpSession, config: Config): Promise<Snapshot> {
         if (lists) snapshot.lists = await collectLists(page, config, exposed.headings && exposed.lists);
         if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
+      // What each element that was named is, hashed here: the text it is made from stays in this function.
+      const signatures: Record<string, string> = {};
+      for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
+      snapshot.signatures = signatures;
     });
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };

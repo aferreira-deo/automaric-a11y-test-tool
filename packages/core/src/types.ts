@@ -713,6 +713,12 @@ export interface Snapshot {
   focus?: FocusWalk;
   /** Present when the icon-contrast check was collected. */
   icons?: IconSurvey;
+  /**
+   * What each element a selector was made for is, apart from where it is: `ElementSignature`
+   * values keyed by `signatureKey(frame, selector)`. Absent in a snapshot that was not collected
+   * by a collector that makes them; a finding then has an empty signature.
+   */
+  signatures?: Record<string, string>;
   nodes: SnapshotNode[];
   axTree: AxNode[];
   screenshots: {
@@ -802,6 +808,15 @@ export interface Finding {
   selector: string;
   /** Frame id; empty string for the main frame. */
   frame: string;
+  /**
+   * What the element is, apart from where it is: `tag|role|hash`. The tag name, the `role`
+   * attribute (empty when there is none), and a hash of what tells this element from another one
+   * of the same kind: its own text when that is short, and the attributes listed in
+   * `SelectorConfig.signatureAttributes` (of an address, the path only). A selector that is a path of positions says where an element is; when
+   * another element takes that place, the signature differs. A hash only: no text of the page is
+   * in it. Empty when the collector gave none.
+   */
+  signature: string;
   box: Box | null;
   evidence: Evidence;
   /** Absent when no model was involved. */
@@ -851,10 +866,52 @@ export interface RunConfig {
   httpErrorIsFailure: boolean;
   /** Most results written to one SARIF run; GitHub code scanning rejects a file with more than 25,000. */
   sarifMaxResults: number;
+  /** Elements nested deeper than this in a sitemap are refused instead of followed. */
+  sitemapMaxDepth: number;
+  /**
+   * A value of a storage state shorter than this is not looked for in what is written: it would
+   * match by chance (`true`, `en-GB`, a number). Such a value can therefore show in a report.
+   */
+  minSecretChars: number;
+  /**
+   * Names of query parameters whose value is replaced by `redacted` in every address that is
+   * written (reports, messages, SARIF), and that are left out of the key of a page in a baseline
+   * and of the identity of a SARIF result. Compared without regard to case. The browser still
+   * gets the address as it was given.
+   */
+  redactQueryParams: string[];
 }
 
-/** A finding before its fingerprint is computed. */
-export type FindingDraft = Omit<Finding, 'id'> & {
+/** How an element is named in a finding: its selector and its signature. Read by the collector. */
+export interface SelectorConfig {
+  /**
+   * Regular expression (`u` flag) for an `id`, or the value of one of `stableAttributes`, that is
+   * not used in a selector because it is not the same on the next visit: ids that component
+   * libraries generate (React `useId`, react-aria, MUI, Headless UI, Radix, Ember) and ids made
+   * from the content (a run of three digits or more, as in `up_48123456`). The path then goes on
+   * by position. Empty: every unique id is used.
+   */
+  unstableIdPattern: string;
+  /**
+   * Attributes that name an element when it has no usable id, in this order: `tag[attr="value"]`
+   * is used when exactly one element of the document (or shadow root) matches it.
+   */
+  stableAttributes: string[];
+  /**
+   * The text of an element is part of its signature when it is at most this long (white space
+   * collapsed). The text of a longer element (a container, a paragraph) is left out: it changes
+   * with the content, and the element is then told from another by its tag, role and attributes.
+   */
+  signatureMaxTextChars: number;
+  /**
+   * Attributes whose value is part of the signature. Of `href`, `src` and `action` only the path
+   * is taken: the query of a link often carries a session or a number that changes.
+   */
+  signatureAttributes: string[];
+}
+
+/** A finding before its fingerprint is computed and its signature is looked up. */
+export type FindingDraft = Omit<Finding, 'id' | 'signature'> & {
   /**
    * Takes the place of `rule` in the fingerprint, for a check that reports one thing under two
    * rule names depending on its status (a heading candidate): the id then survives the change.
@@ -1682,6 +1739,8 @@ export interface Config {
   adjudication: AdjudicationConfig;
   baseline: BaselineConfig;
   run: RunConfig;
+  /** How elements are named. Applies to every check. */
+  selector: SelectorConfig;
 }
 
 export interface ScanResult {

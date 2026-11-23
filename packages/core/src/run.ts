@@ -4,7 +4,7 @@ import { headingsCheck } from './checks/headings.js';
 import { iconContrastCheck } from './checks/icon-contrast.js';
 import { listsCheck } from './checks/lists.js';
 import { noopCheck } from './checks/noop.js';
-import { fingerprint } from './fingerprint.js';
+import { fingerprint, signatureKey } from './fingerprint.js';
 import { TOOL_NAME, TOOL_VERSION } from './meta.js';
 import type { Check, CheckId, Config, Finding, ScanResult, Snapshot } from './types.js';
 
@@ -44,7 +44,10 @@ export function runChecks(snapshot: Snapshot, config: Config): Finding[] {
     const check = registry.get(id);
     if (!check) throw new Error(`Unknown check "${id}". Available: ${registeredChecks().join(', ')}`);
     for (const { fingerprintRule, ...draft } of check.evaluate(snapshot, config)) {
-      findings.push({ id: fingerprint({ ...draft, rule: fingerprintRule ?? draft.rule }), ...draft });
+      const { check: checkId, rule, status, wcag, selector, frame, ...rest } = draft;
+      // What the collector said the element at this selector is; nothing when it said nothing.
+      const signature = snapshot.signatures?.[signatureKey(frame, selector)] ?? '';
+      findings.push({ id: fingerprint({ ...draft, rule: fingerprintRule ?? rule }), check: checkId, rule, status, wcag, selector, frame, signature, ...rest });
     }
   }
   return sortFindings(findings);

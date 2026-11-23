@@ -1,4 +1,4 @@
-import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, RunConfig } from './types.js';
+import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, RunConfig, SelectorConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -298,6 +298,20 @@ export const defaultConfig: Config = {
     navigationTimeoutMs: 30000,
     httpErrorIsFailure: true,
     sarifMaxResults: 25000,
+    sitemapMaxDepth: 16,
+    minSecretChars: 8,
+    // Names that say what they hold. Short on purpose: a parameter that is dropped from the key
+    // of a page makes two addresses one page.
+    redactQueryParams: ['access_token', 'api_key', 'apikey', 'auth', 'code', 'id_token', 'key', 'password', 'refresh_token', 'secret', 'sig', 'signature', 'token'],
+  },
+  selector: {
+    // React useId (:r1:, «r1», _r_1_), react-aria, Headless UI, Radix, MUI, Ember, a UUID, and
+    // any run of three digits or more.
+    unstableIdPattern:
+      '^(?:react-aria|headlessui-|radix-|mui-\\d|ember\\d+$)|:[rR][0-9a-zA-Z]*:|\\u00ab[rR][0-9a-zA-Z]*\\u00bb|^_[rR]_[0-9a-zA-Z]+_$|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-|\\d{3,}',
+    stableAttributes: ['data-testid', 'data-test', 'data-cy', 'name'],
+    signatureMaxTextChars: 200,
+    signatureAttributes: ['aria-label', 'title', 'alt', 'name', 'type', 'for', 'placeholder', 'href', 'src', 'action'],
   },
 };
 
@@ -311,6 +325,7 @@ export type ConfigInput = {
   adjudication?: Partial<AdjudicationConfig>;
   baseline?: Partial<BaselineConfig>;
   run?: Partial<RunConfig>;
+  selector?: Partial<SelectorConfig>;
 };
 
 /**
@@ -434,6 +449,35 @@ export function resolveConfig(input: ConfigInput = {}): Config {
     adjudication: resolveAdjudication(input.adjudication),
     baseline: resolveBaselineConfig(input.baseline),
     run: resolveRun(input.run),
+    selector: resolveSelector(input.selector),
+  };
+}
+
+/** A list of non-empty strings without repeats, or the default when the value is not a list. */
+function names(value: unknown, fallback: readonly string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  return [...new Set(value.filter((name): name is string => typeof name === 'string' && name.trim() !== '').map((name) => name.trim()))];
+}
+
+/**
+ * The settings for selectors and signatures, whatever was given. A pattern that is not a regular
+ * expression is put back to the default: a typo must not bring generated ids back into a baseline.
+ */
+export function resolveSelector(input: Partial<SelectorConfig> = {}): SelectorConfig {
+  const base = defaultConfig.selector;
+  let unstableIdPattern = typeof input.unstableIdPattern === 'string' ? input.unstableIdPattern : base.unstableIdPattern;
+  try {
+    new RegExp(unstableIdPattern, 'u');
+  } catch {
+    unstableIdPattern = base.unstableIdPattern;
+  }
+  // An attribute name goes into a selector as it is: only names that need no escaping are taken.
+  const attribute = /^[A-Za-z_][\w.-]*$/;
+  return {
+    unstableIdPattern,
+    stableAttributes: names(input.stableAttributes, base.stableAttributes).filter((name) => attribute.test(name)),
+    signatureMaxTextChars: atLeast(input.signatureMaxTextChars, 0, base.signatureMaxTextChars),
+    signatureAttributes: names(input.signatureAttributes, base.signatureAttributes).filter((name) => attribute.test(name)),
   };
 }
 
@@ -465,5 +509,8 @@ function resolveRun(input: Partial<RunConfig> = {}): RunConfig {
     httpErrorIsFailure: typeof input.httpErrorIsFailure === 'boolean' ? input.httpErrorIsFailure : base.httpErrorIsFailure,
     // Never above what GitHub accepts.
     sarifMaxResults: Math.min(count(input.sarifMaxResults, base.sarifMaxResults), base.sarifMaxResults),
+    sitemapMaxDepth: count(input.sitemapMaxDepth, base.sitemapMaxDepth, 3),
+    minSecretChars: count(input.minSecretChars, base.minSecretChars),
+    redactQueryParams: [...new Set(names(input.redactQueryParams, base.redactQueryParams).map((name) => name.toLowerCase()))],
   };
 }

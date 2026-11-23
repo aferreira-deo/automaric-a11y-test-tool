@@ -25,6 +25,16 @@ export interface InputNotes {
   duplicates: number;
 }
 
+/**
+ * What a reader of any report has to know about the list of pages, in words: at present, that a
+ * sitemap was cut at the limit of pages. Empty when there is nothing to say.
+ */
+export function inputNote(input: InputNotes | undefined): string {
+  return input && input.overLimit > 0
+    ? `${input.overLimit} page(s) of the sitemap were NOT scanned: the sitemap lists more pages than the limit for a run (--max-urls or run.maxUrls raises it). Nothing is known about them.`
+    : '';
+}
+
 export interface Run {
   tool: { name: string; version: string };
   /** ISO 8601, when the run started. */

@@ -40,6 +40,7 @@ const result: ScanResult = {
       wcag: { sc: '1.4.11', level: 'AA' },
       selector: 'a[title="<b>"]',
       frame: '',
+      signature: '',
       box: { x: 1, y: 2, width: 30, height: 40 },
       evidence: {
         crops: ['focus-indicator/x-focused.png', 'focus-indicator/missing.png'],
@@ -90,6 +91,7 @@ describe('toHtmlReport for icon-contrast findings', () => {
         wcag: { sc: '1.4.11', level: 'AA' },
         selector: '#menu',
         frame: '#frame',
+        signature: 'button||0123456789abcdef',
         box: { x: 1, y: 2, width: 40, height: 40 },
         evidence: {
           crops: ['icon-contrast/x.png'],
@@ -176,6 +178,7 @@ describe('toHtmlReport for headings findings', () => {
         wcag: { sc: '1.3.1', level: 'A' },
         selector: '#title',
         frame: '',
+        signature: '',
         box: { x: 1, y: 2, width: 30, height: 40 },
         evidence: {
           crops: ['headings/x.png'],
@@ -288,6 +291,7 @@ describe('toHtmlReport for findings a model judged', () => {
         wcag: { sc: '1.3.1', level: 'A' },
         selector: '#title',
         frame: '',
+        signature: '',
         box: null,
         evidence: { crops: [], colors: {}, ratios: {}, flags: [] },
         ai: ai as never,

@@ -119,7 +119,7 @@ test('--help names every option and the three exit codes, and claims nothing', a
   expect(code).toBe(0);
   expect(stderr).toBe('');
   for (const option of [
-    '--urls', '--sitemap', '--max-urls', '--any-origin', '--allow-http-errors', '--storage-state', '--output', '--html', '--sarif <file>', '--sarif-anchor',
+    '--urls', '--sitemap', '--max-urls', '--any-origin', '--allow-file-urls', '--allow-http-errors', '--storage-state', '--output', '--html', '--sarif <file>', '--sarif-anchor',
     '--sarif-include-info', '--crops', '--quiet', '--baseline <file>', '--update-baseline', '--prune-baseline', '--checks', '--config', '--no-ai', '--version',
   ]) {
     expect(stdout, option).toContain(option);
@@ -127,6 +127,8 @@ test('--help names every option and the three exit codes, and claims nothing', a
   expect(stdout).toMatch(/Exit codes:\n\s+0 .*\n(.*\n)*?\s+1 .*\n(.*\n)*?\s+2 /);
   expect(stdout).toContain('not a\nstatement of conformance');
   expect(stdout).toContain('session secrets');
+  expect(stdout).toContain('captures are images of the page and can show them');
+  expect(stdout).toContain('run.redactQueryParams');
 });
 
 test('one address keeps the single-page report, with a summary on stderr and nothing but JSON on stdout', async ({ baseURL }, testInfo) => {
@@ -333,12 +335,18 @@ test('baseline: written, compared, only a new fail breaks the build, and a file 
   expect(written.stderr).toContain('Findings: 4 fail (0 new, 4 in the baseline)');
   expect(written.stderr).toContain('Baseline: 2 entries added.');
   const first = await readFile(file, 'utf8');
-  const baseline = JSON.parse(first) as { version: number; tool: string; urlKey: unknown; pages: { url: string; findings: { id: string; rule: string; sc: string; frame: string; selector: string }[] }[] };
-  expect(baseline.version).toBe(1);
+  const baseline = JSON.parse(first) as { version: number; tool: string; urlKey: unknown; pages: { url: string; findings: { id: string; check: string; rule: string; sc: string; frame: string; selector: string; signature: string }[] }[] };
+  expect(baseline.version).toBe(2);
   expect(baseline.urlKey).toEqual({ stripFragment: true, sortQuery: false, stripTrailingSlash: false, dropQueryParams: [] });
   // The address with a fragment and the one without are one page.
   expect(baseline.pages).toEqual([
-    { url: one, findings: [expect.objectContaining({ rule: 'focus-indicator/no-visible-change', sc: '2.4.7', selector: '#none-button' }), expect.objectContaining({ selector: '#none-link' })] },
+    {
+      url: one,
+      findings: [
+        expect.objectContaining({ check: 'focus-indicator', rule: 'focus-indicator/no-visible-change', sc: '2.4.7', selector: '#none-button', signature: expect.stringMatching(/^button\|\|[0-9a-f]{16}$/) }),
+        expect.objectContaining({ selector: '#none-link', signature: expect.stringMatching(/^a\|\|[0-9a-f]{16}$/) }),
+      ],
+    },
   ]);
   expect(first).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
 
@@ -348,7 +356,7 @@ test('baseline: written, compared, only a new fail breaks the build, and a file 
   const report = JSON.parse(same.stdout) as PageReport;
   expect(report.violations[0]!.nodes.map((entry) => entry.baseline)).toEqual(['baselined', 'baselined']);
   expect(failsOf(report).map((finding) => finding.baseline)).toEqual(['baselined', 'baselined']);
-  expect(report.a11yVision.baseline).toEqual({ new: 0, baselined: 2, stale: 0, notScanned: 0, added: 0, pruned: 0 });
+  expect(report.a11yVision.baseline).toEqual({ new: 0, baselined: 2, stale: 0, notScanned: 0, unverified: 0, added: 0, pruned: 0 });
   expect(same.stderr).toContain('Exit code 0: no "fail" finding that the baseline does not record.');
   const html = await readFile(out('same.html'), 'utf8');
   expect(html.match(/<span class="verdict">In the baseline<\/span>/g)).toHaveLength(2);
@@ -382,7 +390,7 @@ test('baseline: written, compared, only a new fail breaks the build, and a file 
   expect(await readFile(file, 'utf8')).toBe(again);
 
   // Entries that no longer occur: counted, kept, and removed only with --prune-baseline. Entries of a page that was not scanned stay.
-  const stale = { ...after, pages: after.pages.map((page) => (page.url === one ? { ...page, findings: [...page.findings, { id: '0000000000000000', rule: 'focus-indicator/no-visible-change', sc: '2.4.7', frame: '', selector: '#gone' }] } : page)) };
+  const stale = { ...after, pages: after.pages.map((page) => (page.url === one ? { ...page, findings: [...page.findings, { id: '0000000000000000', check: 'focus-indicator', rule: 'focus-indicator/no-visible-change', sc: '2.4.7', frame: '', selector: '#gone', signature: '' }] } : page)) };
   await writeFile(file, `${JSON.stringify(stale, null, 2)}\n`);
   const kept = await cli(testInfo, 'scan', one, ...common);
   expect(kept.code).toBe(0);
@@ -399,12 +407,20 @@ test('baseline: written, compared, only a new fail breaks the build, and a file 
   await writeFile(file, JSON.stringify(otherRule));
   expect((await cli(testInfo, 'scan', one, ...common)).code).toBe(1);
 
+  // An entry for the same selector and another element covers nothing either.
+  const otherElement = { ...after, pages: after.pages.map((page) => ({ ...page, findings: page.findings.map((entry) => ({ ...entry, signature: 'button||0000000000000000' })) })) };
+  await writeFile(file, JSON.stringify(otherElement));
+  expect((await cli(testInfo, 'scan', one, ...common)).code).toBe(1);
+
   // A file that cannot be used: exit 2, nothing on stdout, whatever the flags, and it is not overwritten.
   for (const [content, said] of [
-    ['{ "version": 1, "pages": [', 'not valid JSON'],
+    ['{ "version": 2, "pages": [', 'not valid JSON'],
     [JSON.stringify({ ...after, version: 0 }), 'format version 0'],
-    [JSON.stringify({ ...after, version: 2 }), 'format version 2'],
-    [JSON.stringify({ version: 1, pages: [] }), '"urlKey" settings are missing'],
+    // The format before this one: refused with the reason, not read as if nothing were recorded.
+    [JSON.stringify({ ...after, version: 1 }), 'format version 1, and this version of a11y-vision reads version 2 (an older format does not record which element'],
+    [JSON.stringify({ ...after, version: 3 }), 'format version 3'],
+    [JSON.stringify({ version: 2, pages: [] }), '"urlKey" settings are missing'],
+    [JSON.stringify({ ...after, pages: after.pages.map((page) => ({ ...page, findings: page.findings.map(({ signature: _signature, ...entry }) => entry) })) }), 'lacks "id", "check", "rule", "sc", "frame", "selector" or "signature"'],
     ['[]', 'does not hold a JSON object'],
     ['', 'not valid JSON'],
   ] as const) {
@@ -530,6 +546,13 @@ test('the workflows pin every action to a commit and put no expression into a sh
     expect(text).not.toMatch(/secrets\./);
     expect(text).not.toMatch(/pull_request_target/);
   }
+  // The action: no upload to code scanning from a pull request of a fork, which has no permission for
+  // it, and the step that sets the outcome of the job runs whatever happened before it.
+  const action = await readFile(join(root, 'action.yml'), 'utf8');
+  const step = (name: string): string => new RegExp(`^ {4}- name: ${name}\\n((?: {6}.*\\n| *\\n)*)`, 'm').exec(action)?.[1] ?? '';
+  expect(step('Upload SARIF to code scanning')).toContain("github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository");
+  expect(step('SARIF upload skipped')).toContain('github.event.pull_request.head.repo.full_name != github.repository');
+  expect(step('Result')).toMatch(/^ {6}if: always\(\)$/m);
   const ci = await readFile(join(root, '.github/workflows/ci.yml'), 'utf8');
   expect(ci).toMatch(/^permissions:\n {2}contents: read\n/m);
   expect(ci).toContain('persist-credentials: false');

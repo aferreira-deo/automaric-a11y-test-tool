@@ -1,3 +1,5 @@
+import { defaultConfig } from '@a11y-vision/core';
+
 /**
  * Reads the addresses out of a sitemap or a sitemap index (sitemaps.org protocol 0.9).
  *
@@ -8,7 +10,7 @@
  * - the five predefined entities and numeric character references are the only references
  *   understood, and any other is an error;
  * - nothing is fetched, nothing is resolved, attributes are skipped unread;
- * - depth and the number of addresses kept are bounded, and the caller bounds the size.
+ * - depth (`run.sitemapMaxDepth`) and the number of addresses kept are bounded, and the caller bounds the size.
  *
  * Only `<loc>` directly inside `<url>` (of a `<urlset>`) or `<sitemap>` (of a `<sitemapindex>`)
  * is read, so the `<image:loc>` and `<xhtml:link>` of the extensions are not taken for pages.
@@ -24,7 +26,6 @@ export interface ParsedSitemap {
   total: number;
 }
 
-const MAX_DEPTH = 16;
 const PREDEFINED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
 function decode(raw: string): string {
@@ -45,7 +46,7 @@ function local(name: string): string {
   return colon === -1 ? name : name.slice(colon + 1);
 }
 
-export function parseSitemap(xml: string, maxLocs: number): ParsedSitemap {
+export function parseSitemap(xml: string, maxLocs: number, maxDepth: number = defaultConfig.run.sitemapMaxDepth): ParsedSitemap {
   const stack: string[] = [];
   const locs: string[] = [];
   let total = 0;
@@ -124,7 +125,7 @@ export function parseSitemap(xml: string, maxLocs: number): ParsedSitemap {
           kind = root as ParsedSitemap['kind'];
         }
         if (!selfClosing) {
-          if (stack.length >= MAX_DEPTH) fail(`elements nested more than ${MAX_DEPTH} deep`);
+          if (stack.length >= maxDepth) fail(`elements nested more than ${maxDepth} deep (run.sitemapMaxDepth)`);
           // `loc` without a prefix, directly in an entry of the root: the entry is `url` or `sitemap`.
           const parent = stack.length === 2 ? local(stack[1]!) : '';
           if (name === 'loc' && stack.length === 2 && parent === (kind === 'urlset' ? 'url' : 'sitemap') && !stack[1]!.includes(':')) loc = '';

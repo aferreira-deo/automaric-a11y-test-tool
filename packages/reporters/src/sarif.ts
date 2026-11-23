@@ -1,6 +1,6 @@
 import { defaultConfig, EXTENSION_KEY, fnv1a64, pageKey } from '@a11y-vision/core';
 import type { BaselineConfig, Finding, Status } from '@a11y-vision/core';
-import { statusOf } from './run.js';
+import { inputNote, statusOf } from './run.js';
 import type { Run } from './run.js';
 
 /**
@@ -43,6 +43,8 @@ export interface SarifOptions {
   urlKey?: BaselineConfig;
   /** Results beyond this are left out, least severe first, and the log says so. Defaults to what GitHub accepts. */
   maxResults?: number;
+  /** Query parameters left out of the identity of a result: `RunConfig.redactQueryParams`. Defaults to the default of that setting. */
+  redactQueryParams?: readonly string[];
 }
 
 type Level = 'error' | 'warning' | 'note' | 'none';
@@ -140,6 +142,7 @@ function tagsOf(finding: Finding): string[] {
 export function toSarifReport(run: Run, options: SarifOptions = {}): { sarif: SarifLog; omitted: number } {
   const urlKey = options.urlKey ?? defaultConfig.baseline;
   const maxResults = options.maxResults ?? defaultConfig.run.sarifMaxResults;
+  const redactQueryParams = options.redactQueryParams ?? defaultConfig.run.redactQueryParams;
 
   interface Draft {
     finding: Finding;
@@ -197,7 +200,9 @@ export function toSarifReport(run: Run, options: SarifOptions = {}): { sarif: Sa
     const selector = text(finding.selector);
     const frame = text(finding.frame);
     const element = frame === '' ? selector : `${frame} >>> ${selector}`;
-    const identity = fnv1a64(`${pageKey(requestedUrl, urlKey)}\u0000${text(finding.id)}`);
+    // The page, where the element is (the finding id) and what it is (its signature): another
+    // element that takes the place of this one is another result.
+    const identity = fnv1a64(`${pageKey(requestedUrl, urlKey, redactQueryParams)}\u0000${text(finding.id)}\u0000${text(finding.signature)}`);
     const line = options.anchor?.lines?.get(requestedUrl) ?? 1;
     const physicalLocation: SarifLocation['physicalLocation'] = options.anchor
       ? { artifactLocation: { uri: options.anchor.uri, uriBaseId: '%SRCROOT%' }, region: { startLine: line, startColumn: 1, endLine: line, endColumn: 1 } }
@@ -221,6 +226,7 @@ export function toSarifReport(run: Run, options: SarifOptions = {}): { sarif: Sa
         requestedUrl,
         selector,
         frame,
+        signature: text(finding.signature),
         ...(sc(finding) !== '' ? { wcag: sc(finding) } : {}),
         ...(finding.baseline ? { baseline: finding.baseline } : {}),
       },
@@ -231,6 +237,8 @@ export function toSarifReport(run: Run, options: SarifOptions = {}): { sarif: Sa
     level: 'error',
     message: { text: plain(`Not scanned: ${error.url}. ${error.message}`) },
   }));
+  const cut = inputNote(run.input);
+  if (cut !== '') notifications.push({ level: 'warning', message: { text: cut } });
   if (omitted > 0) {
     notifications.push({ level: 'warning', message: { text: `${omitted} result(s) were left out of this file, the least severe first, to stay under ${maxResults} results.` } });
   }
@@ -252,6 +260,7 @@ export function toSarifReport(run: Run, options: SarifOptions = {}): { sarif: Sa
             pagesScanned: run.pages.length,
             pagesNotScanned: run.errors.length,
             ...(run.baseline ? { baseline: run.baseline } : {}),
+            ...(run.input ? { input: run.input } : {}),
             note: 'Findings of a small set of accessibility checks, to assist a tester. Not a statement of conformance.',
           },
         },

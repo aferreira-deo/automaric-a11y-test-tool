@@ -25,3 +25,18 @@ export function fnv1a64(text: string): string {
 export function fingerprint(draft: Pick<FindingDraft, 'rule' | 'wcag' | 'frame' | 'selector'>): string {
   return fnv1a64([draft.rule, draft.wcag?.sc ?? '', draft.frame, draft.selector].join('\u0000'));
 }
+
+/** The key of an element in `Snapshot.signatures`: its frame and its selector. */
+export function signatureKey(frame: string, selector: string): string {
+  return `${frame}\u0000${selector}`;
+}
+
+/**
+ * The signature of an element: `tag|role|hash`, the hash over what tells it from another
+ * element of the same kind (see `Finding.signature`). What goes into the hash is never kept:
+ * a baseline file can then be committed without holding text of a page.
+ */
+export function elementSignature(tag: string, role: string, material: string): string {
+  // The separator is not part of a tag name; a role is reduced to what a role token can hold.
+  return `${tag.toLowerCase()}|${role.trim().toLowerCase().replace(/[^a-z0-9 -]/g, '')}|${fnv1a64(material)}`;
+}

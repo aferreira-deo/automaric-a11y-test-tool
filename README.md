@@ -67,7 +67,7 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
-| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `adjudication`). Options win over the environment, which wins over the file. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -1097,7 +1097,10 @@ are always printed.
 
 ### Several pages
 
-- `scan <url> <url> ...`: any number of addresses.
+- `scan <url> <url> ...`: any number of addresses. Only http(s) addresses are scanned. A `file:` address reads
+  a file of this machine and is taken only with `--allow-file-urls`; every other scheme (`data:`,
+  `javascript:`, `view-source:`, `chrome:`, `about:`, `ftp:` ...) is refused with exit code 2 before anything
+  is opened.
 - `--urls <file>`: one http(s) address per line. Blank lines and lines that start with `#` are skipped (a `#`
   further on is part of the address). A line that is not an address is an error that names the line: a list with
   a typo is not scanned in part.
@@ -1120,13 +1123,40 @@ Limits, all in the `run` section of the config file:
 | Setting | Default | |
 |---|---|---|
 | `maxUrls` (`--max-urls`) | 200 | Pages in one run. More addresses given by hand is an error. A sitemap with more is cut at the limit, in the order of the file, and the cut is said on stderr and counted in the report (`a11yVision.input.overLimit`). |
-| `sameOrigin` (`--any-origin` switches it off) | true | Sitemap entries on another origin than the sitemap are left out and counted (`a11yVision.input.otherOrigin`); the same goes for the sitemaps an index lists. The origin of a sitemap read from a file is that of its first entry. Addresses given by hand or in a list are not filtered. |
+| `sameOrigin` (`--any-origin` switches it off) | true | Sitemap entries on another origin than the sitemap are left out and counted (`a11yVision.input.otherOrigin`); the same goes for the sitemaps an index lists. The origin of a sitemap is that of the address it was served from: after a redirect that is not the address that was asked for, and one line on stderr says so. A sitemap of an index that is served from another origin is not read. The origin of a sitemap read from a file is that of its first entry. A page of a sitemap that sends the browser to another origin (a redirect, by the server or by script) is not scanned there: it is reported as not scanned, and the run exits 2. Addresses given by hand or in a list are not filtered, and may redirect anywhere. |
 | `maxInputBytes` | 52428800 | Largest sitemap or list, after decompression: the 50 MB of the sitemap protocol. |
 | `maxSitemaps` | 50 | Sitemaps read from one index. |
 | `sitemapTimeoutMs` | 30000 | For fetching one sitemap. |
 | `navigationTimeoutMs` | 30000 | For loading one page. |
 | `httpErrorIsFailure` (`--allow-http-errors` switches it off) | true | |
 | `sarifMaxResults` | 25000 | See SARIF below. Cannot be raised. |
+| `sitemapMaxDepth` | 16 | Elements nested deeper than this in a sitemap are refused. |
+| `minSecretChars` | 8 | See "Signed-in pages". |
+| `redactQueryParams` | `access_token`, `api_key`, `apikey`, `auth`, `code`, `id_token`, `key`, `password`, `refresh_token`, `secret`, `sig`, `signature`, `token` | See "Credentials and tokens in an address". |
+
+A sitemap that is cut at `maxUrls` does not change the exit code: the pages that were scanned were scanned. The
+cut is said on stderr, in the JSON report (`a11yVision.input.overLimit`), in a line in bold at the top of the
+HTML report, and in the SARIF file (`runs[0].properties.input` and a warning among the
+`toolExecutionNotifications`), so that no report of such a run reads as a report of the whole site.
+
+#### Credentials and tokens in an address
+
+An address may carry a user name and a password (`https://user:password@host/`), and values in its query that
+are secrets (`?token=...`). The browser needs them; nothing that is written does.
+
+- The user name and password are taken out of the address before anything else is done with it, and given to the
+  browser as HTTP credentials for that origin (Playwright `httpCredentials`). They are in no report, baseline,
+  SARIF file, message, or directory name.
+- The value of each query parameter named in `run.redactQueryParams` (compared without regard to case) is
+  written as `redacted` wherever an address is written: `requestedUrl` and `url` in the reports, the messages
+  on stderr (an error of the browser quotes the address), SARIF. The browser gets the address as it was given.
+- Such a parameter is not part of the key of a page in a baseline, nor of the identity of a SARIF result: the
+  same page with another token is the same page. A parameter in this list that selects a page (a `code` or a
+  `key` that is not a secret on your site) makes two pages one; take it out of the list in the config file.
+- The default list is short and holds names that say what they hold. A secret under another name (`sid`, `s`,
+  `jwt`) is written as it is: add the name. Addresses that the page itself contains (the `href` of a link in a
+  finding, say) are not searched for parameters beyond the texts the tool reads into a finding, where the same
+  replacement is applied.
 
 A sitemap is content of the site under test, so it is read as untrusted input, by a small strict tokenizer in
 `packages/cli/src/sitemap.ts` and not by an XML parser (no dependency was added). A document type declaration is
@@ -1155,7 +1185,7 @@ gives the report of a run:
   "a11yVision": {
     "summary": { "pages": 3, "errors": 0, "fail": 5, "likely": 4, "advisory": 2, "info": 30, "newFail": 2, "baselinedFail": 3 },
     "errors": [{ "url": "...", "message": "..." }],
-    "baseline": { "new": 2, "baselined": 3, "stale": 0, "notScanned": 0, "added": 0, "pruned": 0 },
+    "baseline": { "new": 2, "baselined": 3, "stale": 0, "notScanned": 0, "unverified": 0, "added": 0, "pruned": 0 },
     "input": { "otherOrigin": 0, "overLimit": 0, "duplicates": 0 }
   }
 }
@@ -1190,16 +1220,46 @@ scan --urls a11y/urls.txt --baseline a11y/baseline.json --prune-baseline    # al
   meets anything.
 - Only `fail` findings are recorded, since only they can break a build. A finding that was `likely` when the file
   was written and is `fail` now is new.
-- An entry is one finding on one page: the key of the page, and the finding id (the fingerprint of rule, success
-  criterion, frame and selector) with the rule, criterion, frame and selector themselves. A finding is covered
-  only when all five are equal, so a failure of another rule or criterion on the same element is new, and a hash
-  collision cannot cover anything. Measured values, the message and the status are not part of it: an indicator
-  that goes from 1.7:1 to 1.9:1 stays recorded. A selector that changes (an id renamed, an element moved where
-  the selector depends on position) gives a new finding and a stale entry: that is the price of an identity that
-  needs no source file. Seen on a real page: an element whose `id` is generated anew on every load
-  (`#react-aria…` with a number in it) gets another selector each time, so its failure is new on every run
-  and its entry stale on every run. The selectors come from the collector and are not changed by a baseline;
-  until they avoid generated ids, such a finding cannot be recorded.
+- An entry is one finding on one page: the key of the page, the finding id (the fingerprint of rule, success
+  criterion, frame and selector), the check, rule, criterion, frame and selector themselves, and the signature
+  of the element. A finding is covered only when all of them are equal, so a failure of another rule or
+  criterion on the same element is new, and a hash collision cannot cover anything. Measured values, the message
+  and the status are not part of it: an indicator that goes from 1.7:1 to 1.9:1 stays recorded.
+- **Where the element is, and what it is.** A selector says where an element is, and often only by position
+  (`main > ul > li:nth-of-type(2) > button`). When the control that failed is fixed and another one that fails
+  takes its place, the selector is the same. So every finding also carries a `signature`, `tag|role|hash`: the
+  tag name, the `role` attribute, and a hash of what tells this element from another of its kind: its own text
+  when that is at most `selector.signatureMaxTextChars` (200) characters, the text of its labels, and the
+  attributes in `selector.signatureAttributes` (`aria-label`, `title`, `alt`, `name`, `type`, `for`,
+  `placeholder`, and of `href`, `src` and `action` the path only). An entry covers a finding only when the
+  signature is the same; another element at the same selector is new, and the entry of the old one is stale.
+  The signature is a hash: no text of the page is in a baseline file. It is taken from the element when its
+  selector is first made, before a check does anything to it. Not in it, because a visit changes them: ids,
+  classes, state, the value typed into a field, the query of a link, and the text of an element longer than the
+  limit (a container is told from another by its tag, role and attributes alone). The findings that describe a
+  check as a whole (`*/survey`, `focus-indicator/walk`, on `html`) are about no element and have an empty
+  signature; they are never `fail`.
+- **Ids that are not the same on the next visit** are not used in a selector. An `id` that matches
+  `selector.unstableIdPattern` is skipped and the path goes on by position: ids that component libraries
+  generate (React `useId` `:r1:`, react-aria, MUI, Headless UI, Radix, Ember `ember123`), a UUID, and any id
+  with a run of three digits or more, which is how an id made from content looks (`#up_48123456`). Without
+  this, such an element has another selector on every run, so its failure is new every time and its entry stale
+  every time. After a usable id, the attributes in `selector.stableAttributes` are tried, in this order:
+  `data-testid`, `data-test`, `data-cy`, `name`, as `tag[attr="value"]`, when exactly one element of the
+  document (or shadow root) has that value and the value does not match the pattern either. Every selector is
+  checked against the page when it is made: it finds its element and no other, or the path of positions from the
+  root is used instead. The `" >>> "` between a shadow host and what is inside it, and the frame path, are as
+  before. The pattern is a setting: `"selector": { "unstableIdPattern": "" }` uses every unique id again, and an
+  id of yours that the default takes for generated (`#section-2024`) can be let through by a narrower pattern.
+- **What still churns.** A selector that changes gives a new finding and a stale entry: an id renamed, or an
+  element that moved where the selector depends on position. On a page whose content is reordered between
+  visits (a news front page, search results, a feed), every element that is told apart by its content and
+  reached by position churns: the third story is another story an hour later, with another text and another
+  link, so its signature differs and its failure is new, by design, because it is another element. What does
+  not churn there is what is the same in every row (a vote arrow, a "reply" link: same place, same signature)
+  and everything outside the list. See "A front page that reorders" below for a measured case. A baseline suits
+  pages whose structure is stable between visits; for a feed, baseline the template on a fixed fixture of it, or
+  accept that the build breaks when the content turns over.
 - The page is the address that was asked for, not the one it redirected to, turned into a key. By default only
   the fragment is dropped; scheme and host are lower case and a default port is left out, as `URL` writes them.
   The query is kept as it is and `/a` and `/a/` are two pages, because a server may answer them differently. The
@@ -1210,35 +1270,78 @@ scan --urls a11y/urls.txt --baseline a11y/baseline.json --prune-baseline    # al
 - Several pages: entries are kept per page, and a finding recorded for one page is new on another. Entries of
   pages that the run did not scan (not asked for, or not loaded) are never touched, never counted as stale and
   never pruned: a run over part of the site can update its part of the file.
-- Stale entries (recorded, on a page of this run, and no `fail` matches any more) are counted in the summary and
-  in the report (`baseline.stale`) and kept, so that a failure that comes and goes does not become new each time.
-  `--prune-baseline` removes them; it can be combined with `--update-baseline` or used alone, in which case new
-  failures still give exit code 1.
+- Stale entries (recorded, on a page of this run, looked for, and no `fail` matches any more) are counted in the
+  summary and in the report (`baseline.stale`) and kept, so that a failure that comes and goes does not become
+  new each time. `--prune-baseline` removes them; it can be combined with `--update-baseline` or used alone, in
+  which case new failures still give exit code 1.
+- **An entry is only taken for gone when it was looked for.** That needs three things: its page was scanned in
+  this run, its check ran (each entry records its check), and the page that was read is the page that was asked
+  for: same origin and same path as the address ended on, after the settings of the key. Otherwise nothing is
+  known about the entry. It is counted as `baseline.unverified`, said in the summary ("not looked for"), never
+  counted as stale, and never removed by `--prune-baseline` or `--update-baseline`. So
+  `--checks headings --prune-baseline` leaves the entries of the other checks alone, and a session that has
+  expired and sends the browser to a sign-in page does not empty the file: stderr names the page and where it
+  ended. What this cannot see: an application that answers the same address with a sign-in form and status 200.
+  That page is, as far as an address can tell, the page that was asked for, and its entries are stale. Prune
+  from a run you have looked at, not from a scheduled job.
 - `--update-baseline` adds the `fail` findings of the run to the file, creates it when it is missing, and exits 0
-  unless a page could not be scanned. Without it a missing file is an error: a typo in the path must not turn
-  into a run where everything is new, or one where the comparison is skipped.
+  unless a page could not be scanned. It takes nothing out, so a run of some pages or some checks updates its
+  part of the file. Without it a missing file is an error: a typo in the path must not turn into a run where
+  everything is new, or one where the comparison is skipped.
 - A file that is not valid JSON, has another `version`, or is not exactly what this version writes is an error
-  (exit 2) before anything is scanned, with or without `--update-baseline`, and the file is left as it is.
+  (exit 2) before anything is scanned, with or without `--update-baseline`, and the file is left as it is. A
+  file of version 1 is refused, not converted: it does not say which element an entry is about. Move it away and
+  write a new one with `--update-baseline`.
+- The file is written beside itself and moved into place, so a run that is stopped while it writes leaves the
+  file as it was.
 
-The format, version 1. Pages are sorted by key and entries by rule, frame and selector; there is no date and
-nothing else of the run in it, so the same findings always give the same bytes and a diff of the file in a review
-is a change of what is accepted:
+The format, version 2 (version 1 had no `check` and no `signature`). Pages are sorted by key and entries by
+rule, frame, selector and signature; there is no date and nothing else of the run in it, so the same findings
+always give the same bytes and a diff of the file in a review is a change of what is accepted:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "tool": "a11y-vision",
   "urlKey": { "stripFragment": true, "sortQuery": false, "stripTrailingSlash": false, "dropQueryParams": [] },
   "pages": [
     {
       "url": "https://example.com/contact",
       "findings": [
-        { "id": "9f3c1f0e5d2a7b41", "rule": "focus-indicator/no-visible-change", "sc": "2.4.7", "frame": "", "selector": "#send" }
+        { "id": "9f3c1f0e5d2a7b41", "check": "focus-indicator", "rule": "focus-indicator/no-visible-change", "sc": "2.4.7", "frame": "", "selector": "#send", "signature": "button||5b1c0e77a93d42f6" }
       ]
     }
   ]
 }
 ```
+
+#### A front page that reorders
+
+Measured on 23 November 2026 with `scan https://news.ycombinator.com https://example.com https://www.gov.uk`,
+written with `--update-baseline` and compared twice afterwards. The front page of Hacker News gives every row
+ids made from the number of its item (`#up_48123456`), and its order changes all the time.
+
+| | `fail` | new | in the baseline | stale | exit code |
+|---|---|---|---|---|---|
+| Written | 29 | 0 | 29 (added) | 0 | 0 |
+| Compared 90 seconds later | 29 | 0 | 29 | 0 | 0 |
+| Compared 8 minutes later | 29 | 1 | 28 | 1 | 1 |
+
+All 29 are on Hacker News (the vote arrows, `icon-contrast/icon-low-contrast`); the other two pages gave no
+`fail` and the same findings, ids and signatures in all three runs. No selector of the 376 findings holds an item
+number: the arrows are named by position
+(`#bigbox > td > table > tbody > tr:nth-of-type(4) > td:nth-of-type(2) > center > a`), and all have one
+signature, since each is the same link with the same title and the same path. So the stories changing places
+did not change them: with the ids in the selectors, every arrow would have been new and every entry stale as
+soon as one story moved.
+
+What did churn: one row of the page has no arrow (a job posting). Between the second and the third run it went
+from place 13 to place 14, so place 13 gained an arrow (new, exit code 1) and place 14 lost one (stale). That is
+the positional path at work, and it will happen on such a page a few times an hour. In the same eight minutes 55
+of the 263 findings of that page kept their selector and changed signature (the link at that place is another
+story); all of them are `info`, so nothing came of it, and had they been `fail` each would have been new, as it
+should be: it is another link. `e2e/ci-hardening.spec.ts` has the same case on a fixture whose order is changed
+on purpose.
 
 ### SARIF
 
@@ -1266,10 +1369,13 @@ It has not been uploaded to GitHub from here.
   Understanding documents are not written from memory.
 - Each result has its level, a message (finding, element, page), `partialFingerprints`, `baselineState` on a
   `fail` when a baseline was used, and `properties` (status, finding id, check, page, requested address,
-  selector, frame, criterion). The element is a `logicalLocation` of kind `element`.
+  selector, frame, signature, criterion). The element is a `logicalLocation` of kind `element`.
 - `partialFingerprints.primaryLocationLineHash` is the only fingerprint GitHub reads. The tool gives it itself
-  (a hash of the key of the page and the finding id), because it cannot be worked out from a line of a source
-  file; the upload action keeps a fingerprint that is already there. The same value is under `a11yVision/v1`.
+  (a hash of the key of the page, the finding id and the signature of the element), because it cannot be worked
+  out from a line of a source file; the upload action keeps a fingerprint that is already there. The same value
+  is under `a11yVision/v1`. As in a baseline: another element at the same selector is another alert, an id that
+  is generated on every load is not part of it, and neither are credentials or a secret query parameter of the
+  address.
 - Pages that could not be scanned are `toolExecutionNotifications` of the invocation, whose
   `executionSuccessful` is then false.
 - Limits of GitHub: a file with more than 25,000 results in a run is rejected, and 5,000 are shown. The tool
@@ -1300,13 +1406,28 @@ account made for testing.
 
 - The file is checked before a browser starts. A file that is not a storage state is an error that names the
   file and shows nothing of it.
-- Its contents are not written to any report, log or error message. As a last line of defence, every cookie value
-  and local storage value of at least 8 characters is looked for in the JSON, HTML and SARIF reports and in
-  what is printed, and replaced by `[redacted]`: a page that shows its own token in its text would otherwise put
-  it into the evidence of a finding. Shorter values are not searched for (they would match by chance), and the
-  captures are images: a page that displays a secret displays it in its capture too.
+- Its contents are not written to any report, log or error message. A page that shows its own token in its text,
+  or makes an id from it, would still put it into a finding. So the values of the file are looked for in every
+  text that was read from the page (the selector, frame and message of a finding, what was read into its
+  evidence, the words of a model, the addresses) and replaced by `[redacted]`, before a report, a SARIF file or
+  a baseline is made. The values are: every cookie value and local storage value; when such a value is JSON, the
+  string values inside it, at any depth, and inside those that are JSON again; and the URL-decoded and
+  URL-encoded form of each.
+- Only texts are searched, never a serialised report, and never the words of the tool itself (the id, check,
+  rule, status and criterion of a finding, its signature, the keys of a report). A cookie whose value happens to
+  be `findings` or `advisory` therefore changes neither the structure of a report nor the status of a finding;
+  it is replaced where a text of the page holds that word.
+- A selector with a value replaced (`#btn-[redacted]`) is no longer a selector that finds the element. It is the
+  same on the next run, so a baseline still matches.
+- Values shorter than `run.minSecretChars` (8) are not searched for: they would match by chance. A short secret
+  can therefore show in a report. Values the page derives from the session (a hash of the token, a part of it,
+  a name looked up with it) are not known to the tool and are not replaced.
+- **Captures are images of the page.** A page that displays a secret displays it in its captures, in the HTML
+  report (where they are embedded) and under `--crops`. Nothing replaces anything in an image. Do not publish
+  the captures of signed-in pages without looking at them.
 - A session that has expired usually redirects to a sign-in page or answers 401. The second is an error
-  (exit 2). The first is scanned as the page it is: `requestedUrl` and `url` then differ in the report.
+  (exit 2). The first is scanned as the page it is: `requestedUrl` and `url` then differ in the report, stderr
+  says where the page ended, and the entries a baseline holds for the page are kept (see "Baseline").
 - A sitemap is fetched without the session.
 
 ### GitHub Action
@@ -1343,7 +1464,10 @@ Inputs: `urls` (addresses separated by spaces or line breaks), `urls-file`, `sit
 `checks`, `config`, `storage-state`, `output-dir` (default `a11y-vision-report`: `report.json`, `report.html`,
 `report.sarif`, `crops/`), `sarif-anchor` (defaults to `urls-file`), `upload-sarif` (default `false`),
 `fail-on-findings` (default `true`; `false` lets exit code 1 through, never 2), `setup-node`, `node-version`,
-`install-browser-deps`. Outputs: `exit-code`, `json-file`, `html-file`, `sarif-file`, `crops-dir`. The summary of
+`install-browser-deps`. On a pull request from a fork the SARIF upload is skipped, with a notice: such a run has
+a read-only token and no `security-events` permission, and the upload would fail the job for a reason that is
+not a finding. The last step, which ends the job with the outcome of the scan, runs whatever happened before it
+(`if: always()`). Outputs: `exit-code`, `json-file`, `html-file`, `sarif-file`, `crops-dir`. The summary of
 the run is added to the job summary. The baseline is only compared: write it locally with `--update-baseline` and
 commit it, so that a change of what is accepted goes through a review.
 
@@ -1369,7 +1493,8 @@ How it is put together:
   only when `upload-sarif` is on. `.github/workflows/ci.yml` of this repository has `contents: read` only, does
   not keep the checkout credentials, uses no secret and cancels superseded runs.
 - The action has not run on GitHub: nothing was pushed. What was checked here: both YAML files parse; every
-  `uses` is pinned and no `run` holds an expression (`e2e/ci.spec.ts`); and the scan script runs with the same
+  `uses` is pinned and no `run` holds an expression, the upload is conditional on the pull request not coming
+  from a fork and the last step runs always (`e2e/ci.spec.ts`); and the scan script runs with the same
   environment variables the action gives it, against the fixture server, including inputs that try to be options
   or commands. Not checked: the install and build step on a runner, `setup-node`, the upload to code scanning and
   how alerts then look.
@@ -1411,4 +1536,4 @@ node e2e/support/dump.mjs focus-indicator/gradient
 | `action.yml`, `scripts/action-scan.mjs` | The GitHub Action (composite) and the script of its scan step. |
 | `packages/extension` | Placeholder until M8. |
 | `fixtures/` | Test pages with expected-findings manifests, see `fixtures/README.md`. |
-| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings, lists and grouping, the collector, the CLI, runs over several pages with baseline, SARIF, sitemaps and a stored session (`e2e/ci.spec.ts`, against routes of the fixture server under `/_ci/`), and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |
+| `e2e/` | Browser tests: every fixture against its manifest, the mutation tests of headings, lists and grouping, the collector, the CLI, runs over several pages with baseline, SARIF, sitemaps and a stored session (`e2e/ci.spec.ts`) and the cases a review of that found (`e2e/ci-hardening.spec.ts`: identity of a baseline entry, pruning, generated ids, redaction, credentials, schemes, origins), both against routes of the fixture server under `/_ci/`, and the adjudicator layer against a mocked endpoint (`e2e/support/mock-model.ts`). No test calls a real model. |

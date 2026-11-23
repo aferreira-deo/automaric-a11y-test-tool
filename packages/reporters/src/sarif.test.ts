@@ -33,6 +33,7 @@ function finding(id: string, overrides: Partial<Finding> = {}): Finding {
     wcag: { sc: '2.4.7', level: 'AA' },
     selector: `#${id}`,
     frame: '',
+    signature: '',
     box: null,
     evidence: { crops: [], colors: {}, ratios: {}, flags: [] },
     message: 'Nothing changes on focus.',
@@ -69,7 +70,7 @@ const run: Run = {
     { requestedUrl: 'https://example.test/two#top', result: page('https://example.test/two', [finding('a')]) },
   ],
   errors: [{ url: 'https://example.test/gone', message: 'The page answered with HTTP status 404.' }],
-  baseline: { new: 2, baselined: 1, stale: 0, notScanned: 0, added: 0, pruned: 0 },
+  baseline: { new: 2, baselined: 1, stale: 0, notScanned: 0, unverified: 0, added: 0, pruned: 0 },
 };
 
 describe('toSarifReport', () => {
@@ -156,6 +157,35 @@ describe('toSarifReport', () => {
     expect(toSarifReport(moved).sarif.runs[0].results[2]!.partialFingerprints).toEqual(only.results[2]!.partialFingerprints);
   });
 
+  it('gives another identity to another element at the same selector, and the same one whatever a secret parameter holds', () => {
+    const print = (changed: Run): string => toSarifReport(changed).sarif.runs[0].results[0]!.partialFingerprints['primaryLocationLineHash']!;
+    const other = structuredClone(run);
+    other.pages[0]!.result.findings[0]!.signature = 'button||00000000000000ff';
+    expect(print(other)).not.toBe(print(run));
+    expect(toSarifReport(other).sarif.runs[0].results[0]!.properties['signature']).toBe('button||00000000000000ff');
+    const withToken = (token: string): Run => {
+      const changed = structuredClone(run);
+      changed.pages[0]!.requestedUrl = `https://user:pw@example.test/one?id=1&token=${token}`;
+      return changed;
+    };
+    expect(print(withToken('abc'))).toBe(print(withToken('def')));
+    expect(toSarifReport(withToken('abc'), { redactQueryParams: [] }).sarif.runs[0].results[0]!.partialFingerprints).not.toEqual(
+      toSarifReport(withToken('def'), { redactQueryParams: [] }).sarif.runs[0].results[0]!.partialFingerprints,
+    );
+  });
+
+  it('says that a sitemap was cut at the limit of pages', () => {
+    const cut = structuredClone(run);
+    cut.input = { otherOrigin: 0, overLimit: 12, duplicates: 0 };
+    const [only_] = toSarifReport(cut).sarif.runs;
+    expect(validate(toSarifReport(cut).sarif)).toEqual([]);
+    expect(only_.properties['input']).toEqual(cut.input);
+    expect(only_.invocations[0].toolExecutionNotifications.map((note) => [note.level, note.message.text])).toContainEqual(['warning', expect.stringContaining('12 page(s) of the sitemap were NOT scanned')]);
+    // Nothing is said when nothing was cut.
+    cut.input.overLimit = 0;
+    expect(toSarifReport(cut).sarif.runs[0].invocations[0].toolExecutionNotifications).toHaveLength(1);
+  });
+
   it('carries the baseline state of a fail, and none where no baseline was used', () => {
     expect(only.results.map((result) => result.baselineState)).toEqual(['unchanged', 'new', undefined, undefined, undefined]);
   });
@@ -227,6 +257,14 @@ describe('reports of a run over several pages', () => {
     expect(html).toContain('they are still failures');
     expect(html).toContain('makes no statement of conformance');
     expect(html).not.toMatch(/\bpass(es|ed)?\b/i);
+    // A sitemap that was cut, and entries of the baseline that were not looked for, are said.
+    expect(html).not.toContain('NOT scanned: the sitemap');
+    const cut = structuredClone(run);
+    cut.input = { otherOrigin: 0, overLimit: 7, duplicates: 0 };
+    cut.baseline = { ...cut.baseline!, unverified: 3 };
+    const said = toHtmlRunReport(cut, [{}, {}]);
+    expect(said).toContain('<strong>7 page(s) of the sitemap were NOT scanned: the sitemap lists more pages than the limit for a run');
+    expect(said).toContain('3 entr(y/ies) were not looked for: their check did not run, or their page ended on another address');
     // Headings go down one level at a time: run, pages, page, status, finding.
     expect(html.match(/<h[1-6]/g)!.slice(0, 6)).toEqual(['<h1', '<h2', '<h2', '<h3', '<h4', '<h5']);
   });
