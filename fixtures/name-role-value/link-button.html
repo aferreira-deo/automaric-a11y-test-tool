@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Links and buttons by what they do</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  section { margin: 0 0 24px; }
+  a { color: #0645ad; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid #595959; background: #fff; color: #1a1a1a; }
+  .panel { border: 1px solid #595959; padding: 12px; margin-top: 8px; width: 360px; }
+  [hidden] { display: none !important; }
+  dialog { border: 2px solid #1a1a1a; padding: 16px; }
+  #top-target { height: 40px; }
+  .spacer { height: 900px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="top-target">Links and buttons</h1>
+
+  <!-- True positives: links that act as buttons. -->
+  <section>
+    <h2>A link that opens a dialog</h2>
+    <a href="#" id="link-modal">Sign in</a>
+    <dialog id="modal-1" aria-labelledby="modal-1-title"><h2 id="modal-1-title">Sign in</h2><button id="modal-1-close">Close</button></dialog>
+  </section>
+  <section>
+    <h2>A javascript: link that shows a panel</h2>
+    <a href="javascript:void(0)" id="link-toggle">More details</a>
+    <div class="panel" id="details-1" hidden>Delivery in three days. Returns within thirty days.</div>
+  </section>
+  <section>
+    <h2>A link with an address that opens a dialog instead</h2>
+    <a href="/name-role-value/terms.html" id="link-terms">Terms of sale</a>
+    <div role="dialog" aria-modal="true" aria-label="Terms" class="panel" id="terms-dialog" hidden>The terms of sale apply to every order.</div>
+  </section>
+
+  <!-- True positive: a button that acts as a link. -->
+  <section>
+    <h2>A button that goes to another page</h2>
+    <button type="button" id="button-nav">Our shops</button>
+  </section>
+
+  <!-- True negatives. -->
+  <section>
+    <h2>A link that changes the route with pushState</h2>
+    <a href="/name-role-value/products" id="link-push">Products</a>
+  </section>
+  <section>
+    <h2>A button that opens a dialog</h2>
+    <button type="button" id="button-dialog">Open the size guide</button>
+    <dialog id="modal-2" aria-label="Size guide"><p>Sizes run small.</p><button>Close</button></dialog>
+  </section>
+  <section>
+    <h2>A search form with a submit button</h2>
+    <form action="/name-role-value/search" method="get" role="search">
+      <label for="q">Search</label> <input id="q" name="q" type="search" value="shoes">
+      <button id="button-submit">Search</button>
+    </form>
+  </section>
+  <section>
+    <h2>A search button that navigates with the field value</h2>
+    <label for="q2">Find a shop</label> <input id="q2" type="text" value="Lyon">
+    <button type="button" id="button-search">Find</button>
+  </section>
+  <section>
+    <h2>Same-page and hash links</h2>
+    <a href="#bottom-target" id="link-anchor">Go to the end</a>
+    <a href="#/account" id="link-hash-route">Account</a>
+  </section>
+  <section>
+    <h2>A button that adds to the cart</h2>
+    <button type="button" id="button-cart">Add to cart</button>
+    <span id="cart-count">Cart: 0</span>
+    <div role="status" id="cart-status"></div>
+  </section>
+  <section>
+    <h2>A plain link</h2>
+    <a href="/name-role-value/about.html" id="link-plain">About us</a>
+  </section>
+  <div class="spacer"></div>
+  <p id="bottom-target" tabindex="-1">End of the page.</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('link-modal').addEventListener('click', (event) => { event.preventDefault(); $('modal-1').showModal(); });
+  $('modal-1-close').addEventListener('click', () => $('modal-1').close());
+  $('link-toggle').addEventListener('click', () => { $('details-1').hidden = !$('details-1').hidden; });
+  $('link-terms').addEventListener('click', (event) => { event.preventDefault(); $('terms-dialog').hidden = false; });
+  $('button-nav').addEventListener('click', () => { location.href = '/name-role-value/shops.html'; });
+  $('link-push').addEventListener('click', (event) => { event.preventDefault(); history.pushState({}, '', '/name-role-value/products'); document.title = 'Products'; });
+  $('button-dialog').addEventListener('click', () => $('modal-2').showModal());
+  $('button-search').addEventListener('click', () => { location.href = '/name-role-value/shops.html?city=' + encodeURIComponent($('q2').value); });
+  let count = 0;
+  $('button-cart').addEventListener('click', () => { count++; $('cart-count').textContent = 'Cart: ' + count; $('cart-status').textContent = 'Added to the cart.'; });
+  $('link-hash-route').addEventListener('click', () => {});
+  $('link-plain').addEventListener('click', () => {});
+</script>
+</body>
+</html>

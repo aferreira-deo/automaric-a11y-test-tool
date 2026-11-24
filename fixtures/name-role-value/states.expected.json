@@ -1,0 +1,94 @@
+{
+  "description": "States that change, measured by activating the control. Done right (the ARIA practices): accordion, toggle button, switch, checkbox, tabs, menu button, slider, dialog trigger, load more. Wrong: a disclosure without aria-expanded, one whose aria-expanded never changes, a toggle without aria-pressed that changes colour, a custom checkbox whose look changes and aria-checked does not, tabs without aria-selected (behaviour and markup), and, read from the markup, a custom checkbox without aria-checked and a slider without a value.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#disclosure-bad",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "disclosure"
+      ]
+    },
+    {
+      "selector": "#disclosure-stuck",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "expandedNotUpdated"
+      ]
+    },
+    {
+      "selector": "#toggle-bad",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "toggle"
+      ]
+    },
+    {
+      "selector": "#checkbox-bad",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "checkedNotUpdated"
+      ]
+    },
+    {
+      "selector": "#checkbox-bad",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-state",
+      "flags": [
+        "noAriaChecked",
+        "axeCovered"
+      ]
+    },
+    {
+      "selector": "#tab-bad-1",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-state",
+      "flags": [
+        "noSelectedTab"
+      ]
+    },
+    {
+      "selector": "#tab-bad-2",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "selectionNotExposed"
+      ]
+    },
+    {
+      "selector": "#slider-bad",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-state",
+      "flags": [
+        "noAriaValuenow"
+      ]
+    }
+  ]
+}

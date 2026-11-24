@@ -28,7 +28,7 @@ const local: ModelSettings = { enabled: true, baseUrl: 'http://127.0.0.1:11434/v
 describe('settings', () => {
   it('start with every check, no model, and remote endpoints refused', () => {
     const settings = defaultSettings(extensionConfig);
-    expect(settings.checks).toEqual(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping']);
+    expect(settings.checks).toEqual(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value']);
     expect(settings.model).toEqual({ enabled: false, baseUrl: '', model: '', allowRemote: false, sendImages: true });
     expect(adjudicationFor(settings.model, false).provider).toBe('none');
   });
@@ -41,7 +41,7 @@ describe('settings', () => {
     );
     expect(parsed).toEqual({ checks: ['headings', 'lists'], groupBy: 'check', model: { enabled: false, baseUrl: 'http://localhost:1/v1', model: '', allowRemote: false, sendImages: false } });
     // No usable check: all of them, rather than a scan of nothing.
-    expect(parseSettings({ checks: ['noop'] }, extensionConfig).checks).toHaveLength(5);
+    expect(parseSettings({ checks: ['noop'] }, extensionConfig).checks).toHaveLength(6);
   });
 });
 

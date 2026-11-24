@@ -496,6 +496,14 @@ export interface Agent {
   prepareGrouping(blocks: number[], controls: number[], target: number): Promise<AgentHeadingPrepared>;
   /** What every element a selector was made for is, as it was when its selector was first made. */
   signatures(): AgentSignature[];
+  /** The key of an element, registered so that cleanup() puts back the scroll positions of what holds it. */
+  keyFor(element: Element): number;
+  /** Selector and frame of an element, as findings name it (its signature is recorded). */
+  named(element: Element): { selector: string; frame: string };
+  /** The Tab walk of this collection reached the element. */
+  wasTabbed(element: Element): boolean;
+  /** The stabilising style sheet is adopted around the element (its document, its shadow roots, the frames it is in). */
+  stableAround(element: Element): void;
   cleanup(): void;
 }
 
@@ -3978,6 +3986,23 @@ export function agentFactory(options: AgentOptions): Agent {
 
     element(key) {
       return get(key);
+    },
+
+    keyFor(element) {
+      return keyOf(element);
+    },
+
+    named(element) {
+      return { selector: selectorOf(element), frame: frameOf(element) };
+    },
+
+    wasTabbed(element) {
+      const key = keys.get(element);
+      return key !== undefined && tabbed.has(key);
+    },
+
+    stableAround(element) {
+      ensureStableAround(element);
     },
 
     cleanup() {

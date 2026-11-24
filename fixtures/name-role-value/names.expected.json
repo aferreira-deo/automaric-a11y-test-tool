@@ -1,0 +1,147 @@
+{
+  "description": "Accessible names read from the accessibility tree. Done right: text, aria-label, visually hidden text, alt, a ligature of an icon font, labels, aria-labelledby, named tabs, switches, summaries and frames, a hidden button. Wrong: empty names on proven controls (fail), a disabled control without a name (likely), names that do not name (a role word, a picture file name, a class name, a glyph of a Private Use Area: likely; an underscored ligature, a symbol: advisory), a field named by its title or its placeholder alone (advisory), focusable content under aria-hidden (fail), a frame with controls and no title (fail). Static: nothing on the page listens, so nothing is activated.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#b-empty",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "axeCovered"
+      ]
+    },
+    {
+      "selector": "#a-empty",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#f-none",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#t-empty",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#sum-empty",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#frame-unnamed",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "frame"
+      ]
+    },
+    {
+      "selector": "#a-hidden-focus",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/focusable-hidden"
+    },
+    {
+      "selector": "#b-disabled",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "disabled"
+      ]
+    },
+    {
+      "selector": "#b-generic",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "generic"
+      ]
+    },
+    {
+      "selector": "#a-file",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "fileName"
+      ]
+    },
+    {
+      "selector": "#b-class",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "classLike"
+      ]
+    },
+    {
+      "selector": "#b-glyph",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "privateUse"
+      ]
+    },
+    {
+      "selector": "#b-ligature-underscore",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "ligature"
+      ]
+    },
+    {
+      "selector": "#b-symbol",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "symbols"
+      ]
+    },
+    {
+      "selector": "#f-title",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/title-only-name"
+    },
+    {
+      "selector": "#f-placeholder",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/placeholder-only-name"
+    }
+  ]
+}

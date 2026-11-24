@@ -3,7 +3,7 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M8. Five checks are implemented, and all run by default. A run can cover several pages, be compared with
+Status: M8. Six checks are implemented, and all run by default. A run can cover several pages, be compared with
 a baseline, and be written as SARIF (see [CI](#ci)); the same checks run from a Chrome extension on the tab in
 front of you (see [Chrome extension](#chrome-extension)). None of them needs a model. When a model is
 configured it judges the heading candidates, the series of lines with bullets or numbers and the sets of radios
@@ -19,9 +19,14 @@ or checkboxes under a visible text, and nothing else (see "Having a model judge 
 - `grouping`: 1.3.1 (related 3.3.2 and 4.1.2) for sets of radios or checkboxes under a visible question that
   nothing ties to them, for fields split in parts whose names do not say which part each is, and for sections of
   one form whose fields have the same names. It never reports a `fail`.
+- `name-role-value`: 4.1.2 for every interactive element: a name that is there and names, a role that matches
+  what the element does (a link that acts as a button, a button that acts as a link, an operated element with
+  no role), and states that are exposed and updated. It activates controls to measure behaviour, with every
+  write to the network stopped (`--no-probe` turns that off). See [What `name-role-value`
+  reports](#what-name-role-value-reports).
 
-`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings`, `--checks lists` or `--checks grouping`
-runs one of them.
+`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings`, `--checks lists`, `--checks grouping`
+or `--checks name-role-value` runs one of them.
 
 ## Use
 
@@ -69,7 +74,7 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
-| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `nameRoleValue`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -999,6 +1004,314 @@ read from the accessibility tree), nor the inventory.
 - The capture shows the text and the controls as far as the window does. Other covers than fixed or sticky
   content over its middle are not looked for.
 
+### What `name-role-value` reports
+
+Every interactive element against 4.1.2: its name, its role and its states, as Chrome exposes them in its
+accessibility tree (`Accessibility.getFullAXTree`; nothing is computed again from attributes). On by default,
+with probing: controls are activated, one by one, to see what they do, with the network held (see "The probing
+safety model"). `--no-probe` (`nameRoleValue.probe: "off"`) keeps only the rules that read the page as it is.
+The extension never probes (see "Decisions left to the owner").
+
+#### The inventory: what counts as interactive
+
+An element is in the inventory for one or more of these reasons, each measured on its own and recorded in the
+finding (`values.interactiveBy`):
+
+| Source | How it is read | What it proves |
+|---|---|---|
+| `native` | `a[href]`, `area[href]`, `button`, `input` but hidden, `select`, `textarea`, the first `summary` of a `details`, media with `controls` | A control by HTML. |
+| `role` | The tree exposes a control role (`button`, `link`, `checkbox`, `radio`, `switch`, `tab`, `menuitem*`, `option`, `treeitem`, `slider`, `spinbutton`, `combobox`, `textbox`, `searchbox`, `listbox`, `scrollbar`, and Chrome's `DisclosureTriangle` for `summary`) | That it claims to be a control. |
+| `tab` | The real Tab walk reached it: the one of `focus-indicator` when it runs in the same scan, otherwise a walk of this check (`tabWalk`, `maxTabStops`), never two | Keyboard focus in sequence. |
+| `tabindex` | `tabindex` of 0 or more | The same, from markup. |
+| `contenteditable` | The root of an editable region | Inventory only. |
+| `listener` | `DOMDebugger.getEventListeners` on the document, `depth: -1`, `pierce: true` (one call for the document, its shadow trees and its same-origin frames; `addEventListener` and inline handlers alike), and on each window: `click`, `mousedown`, `mouseup`, `pointerdown`, `pointerup`, `keydown`, `keyup`, `keypress`, `touchstart`, `touchend`, `auxclick`, `dblclick` on the element itself | Something runs when it is activated. |
+| `framework` | Read in the page's own world: React props (`__reactProps$…`, `__reactEventHandlers$…`) with `onClick`, `onMouseDown`, `onKeyDown`…; jQuery handlers delegated with a selector the element matches; `data-ember-action` | The same, where the framework delegates. |
+| `cursor` | `cursor: pointer` that the element sets itself (its parent does not have it) | Supporting evidence only. |
+| `frame` | `iframe`, `frame` | A frame, named when what it holds is interactive. |
+
+**Delegation.** React (17 and later on the root, 16 on the document), Vue's and jQuery's delegated handlers,
+analytics: a listener on an ancestor, the document or the window says nothing about any one element. It is
+recorded (`delegated`), is the reason an element may be activated, and is never evidence on its own. What
+replaces it is the framework's own record of which element has a handler (React props, jQuery's selectors),
+read from the main world, where a page could falsify it; that is why a framework handler is never enough for a
+`fail` without focus and an observed effect. `cursor: pointer` alone is not reported: on real pages it is set on
+cards, rows, labels and containers far more often than on controls.
+
+Left out: what is not rendered and not reached by Tab (`display: none`, `visibility: hidden`, `hidden`, closed
+`details`); what is `inert` or outside an open modal dialog (no node in the tree); what is under `aria-hidden`
+is kept when Tab reaches it (`focusable-hidden`). Open shadow trees and same-origin frames are read; frames of
+another origin are not looked into. At most `maxElements` (3000) elements and `maxListenerElements` (3000)
+elements with listeners are read; the survey says when there were more.
+
+#### Rules and statuses
+
+| Rule | What | Status | axe-core |
+|---|---|---|---|
+| `missing-name` | A control with an empty accessible name | `fail` on a proven control (below); `likely` when disabled, when nothing shows it is operable, or when it has no size and `tabindex="-1"` (a duplicate link the author hid from the keyboard and not from screen readers: 37 of them on one real shop page) | `button-name`, `link-name`, `input-button-name`, `label`, `select-name`, `aria-command-name`, `aria-toggle-field-name`, `aria-input-field-name`, `aria-treeitem-name`, `summary-name`, `area-alt`, `input-image-alt`, `frame-title` by element; not for tabs and other roles |
+| `missing-name` (flag `frame`) | A frame without a name that holds a focusable element (read for same-origin frames; for others, the Tab walk went into it) | `fail` | `frame-title` |
+| `name-not-descriptive` | A name made only of a role word or a word a template leaves (`genericNamePattern`, English and French), the file name of a picture, a class-like token, glyphs of a Private Use Area: `likely`. An underscored ligature of an icon font (`arrow_forward`), an address on a control that is not a link, symbols only (`×`, `›`): `advisory` | `likely`, `advisory` | no |
+| `title-only-name` | A field named by its `title` alone | `advisory` (`titleOnlyStatus`) | no (axe accepts it) |
+| `placeholder-only-name` | A field named by its placeholder alone | `advisory` (`placeholderOnlyStatus`) | no (axe accepts it) |
+| `no-role` | An operated element exposed with no control role | see the table below | no |
+| `focusable-hidden` | Reached by Tab and ignored by the tree for `aria-hidden` | `fail` | `aria-hidden-focus` |
+| `nested-interactive` | A focusable control inside a link, a button or a control whose children are presentational. A link in a `summary` is not reported: HTML allows it there, and Chrome exposes both | `likely` | `nested-interactive` (presentational parents only) |
+| `required-context` | A tab outside a tab list, a menu item outside a menu, a tree item outside a tree, an option outside a list box (Chrome drops that role: flag `roleDropped`): `likely`. A custom radio outside a radiogroup: `advisory` | `likely`, `advisory` | `aria-required-parent` (not the radio) |
+| `link-acts-as-button` | A link that, activated, changed the page in place or tried to send a write, with no navigation: `behaviourRoleStatus` (`likely`). A link that points nowhere (no `href`, `#`, `#!`, `javascript:`) and runs a script, not activated or with nothing to show: `advisory` | `likely`, `advisory` | no |
+| `button-acts-as-link` | A button that, activated, went to another page or place, with no write and no field value in the address: `behaviourRoleStatus`. One that opened a window and changed nothing: `advisory`. An `a href` to another address with `role="button"`, not activated: `advisory` | `likely`, `advisory` | no |
+| `missing-state` | Read from markup: a custom checkbox, radio, switch or menu item without `aria-checked`, a combobox without `aria-expanded`, a slider or scrollbar without `aria-valuenow` (`likely`); a tab list in which no tab is selected (`likely`, once, on its first tab); a spin button without a value, a button with `aria-haspopup` or with `aria-controls` on a hidden element and no `aria-expanded` (`advisory`) | `likely`, `advisory` | `aria-required-attr` for the required states; no for the others |
+| `state-not-exposed` | Measured: activated, the control changed something and none of its states (expanded, pressed, checked, selected, value, disabled, name) changed | see "Value and state" | no |
+| `survey` | Counts, how the inventory was read, what probing did (requests stopped, reloads, storage put back) | `info` | |
+
+Every rule that axe-core also reports carries the flag `axeCovered` and `values.axeRule`. With
+`includeAxeCovered: false` (`--no-axe-overlap`) they are left out and the survey counts them
+(`axeCoveredLeftOut`). The default is `true`: the owner asked for the whole criterion.
+
+**What a `fail` needs.** Only facts read from the tree, on an element whose interactivity was measured:
+
+- `missing-name`: the tree gives an empty name, and the element is a native control that is not disabled, or
+  has a control role and is focusable (Chrome's `focusable`), reached by Tab, or has an activation listener or a
+  framework handler of its own.
+- `no-role`: no control role in the tree, focusable in sequence (`tabindex` of 0 or more, or reached by Tab), and
+  either an activation listener by pointer of its own (`click`, `mousedown`, `pointerdown`…) or a probe that saw it
+  act (a navigation, a change in place, a write it tried to send). Not inside a control, holding no control, not a
+  label, not a container role (dialog, tab panel, region, document, application, composite widgets), not larger
+  than `maxControlAreaShare` (0.25) of the viewport.
+- `focusable-hidden`: reached by Tab, ignored by the tree with `ariaHiddenElement` or `ariaHiddenSubtree`.
+
+Anything inferred is `likely` or lower: the role a control should have, from what it did; whether a name names;
+what a state should be. When the tree could not be read in full, nothing is above `info` (`axIncomplete`).
+
+| `no-role` | When |
+|---|---|
+| `fail` | Focusable in sequence and a pointer listener of its own, or focusable and seen acting. |
+| `likely` | Focusable with only key listeners or a framework handler; a pointer listener or a framework handler and `cursor: pointer` of its own; or seen acting without focus. |
+| `advisory` | A pointer listener or a framework handler, no pointer, no focus: it may be a container that listens for something else. |
+| not reported | `cursor: pointer` alone; anything that holds a control (a card with a link, a delegation root) or is inside one; labels. |
+
+Keyboard access is 2.1.1: an element without focus is used as a member of the inventory, and "not focusable" is
+never reported here.
+
+#### Names
+
+The name is the one Chrome computed, white space collapsed, cut to `maxNameChars` (160). Where it comes from is
+read from the sources Chrome gives with it: the first one that is not superseded and has a value
+(`values.nameSource`: `contents:`, `attribute:aria-label`, `relatedElement:aria-labelledby`, `relatedElement:label`,
+`attribute:title`, `placeholder:placeholder`). Measured in Chromium 159: a field with only a `title` is named by it
+(`attribute:title`); a field with only a placeholder is named by it (`placeholder`), as the HTML accessibility
+mapping says as a last resort; an `input type="image"` without `alt` gets the name "Submit" from Chrome itself;
+characters of a Private Use Area are usually dropped from the name, so a button that shows only an icon-font
+glyph is most often an empty name (`fail`), and is `name-not-descriptive` only when Chrome keeps the glyph.
+A ligature of an icon font ("close", "menu", detected by `icon.iconFontFamilyPattern`) is a name; with underscores
+("arrow_forward") it is announced as written, which is advisory. The patterns are options and in English and
+French: `genericNamePattern`, `classLikeNamePattern`, `fileNamePattern`, `urlNamePattern`, `privateUsePattern`.
+"Click here" is not among the generic words: that is 2.4.4. Nor are role words that are also names of things
+("Option" as a filter of a shop, "Switch", "Radio", "Image", "Tab", "Toggle"): kept, they gave false positives on
+real pages. A link named by a generic word that is also in the
+path or the fragment of its address is named after what it points to ("button" to the page about the button
+role, "Toggle" to the section `#toggle-between-modals`: both seen in documentation sites) and is not reported.
+The options of a native `select` are not checked (the select is). An address as the name of a link is a name.
+
+#### Link or button
+
+What an element does is measured when it is activated (see "Activation"), and read as follows:
+
+| Seen | Reading |
+|---|---|
+| A request for another document in the top frame, GET (stopped) | Navigation. In a frame: recorded, not counted (on real pages it is a frame the page reloads itself, an embedded playground or an advert). |
+| `history.pushState` to another path | Navigation (a route of a single-page application). Same path, other query: not counted. `replaceState`: not counted. |
+| Only the fragment changed, to an element with that id or name, or a route of a hash router (`#/…`, `#!…`) | Navigation in the page. `#` alone: not counted. |
+| A window opened (`window.open`, a link with a target) | A new window: `advisory` on a button. |
+| A form submitted, a POST navigation, or any request of another method than GET or HEAD (all stopped) | An action. |
+| A dialog appeared; a region was shown or hidden; text changed elsewhere (a counter); its own look changed (pixels in its box); one of its states or its name changed | A change in place. |
+
+- A link with no navigation and a change in place or an action: `link-acts-as-button`.
+- A button with a navigation, no dialog, no action, and no value of a text field of the page in the address of
+  the navigation: `button-acts-as-link`. That is the owner's exception: a button that submits a form and then
+  navigates is a button (it is never activated: see below), and so is one that sends a write and then changes
+  the route, or one that sends a search by script (the value typed in the field is in the query).
+- A link whose router changes the address (`pushState`), also to open an overlay, navigates: not reported.
+- Text that changes on its own (a clock) is checked: the page is watched for `probeSettleMs` more without any
+  activation, and text changes that go on are not taken for an effect.
+- A link that points nowhere and is not activated, or activated with nothing measurable, is `advisory`
+  (`static`): its script can still navigate. An `a` without `href` that a script listens to is exposed by Chrome
+  as a link (measured), not focusable; without a listener it is generic.
+
+#### Value and state
+
+Native controls (`input`, `select`, `textarea`, `summary`, `details`) expose their state themselves and are only
+checked for their name. Every other control that is activated is compared before and after, through the tree
+(`Accessibility.getPartialAXTree`) and through what is visible:
+
+| Seen after activation, with no state of the control changed | Status, flag |
+|---|---|
+| A region shown or hidden, and the control has `aria-expanded` | `likely`, `expandedNotUpdated` |
+| A region shown or hidden, on a `tab` | `likely`, `selectionNotExposed` |
+| Something that was in the page appeared, nothing else was hidden, and a second activation hid it again | `likely`, `disclosure` (unless all of it is fixed in the window: `advisory`, `fixedRegion`) |
+| Its own look changed (`ownChangeMinAreaCssPx2`, 6 CSS px² of pixels in its box), nothing else, and a second activation brought the look back | `likely`, `toggle`, or `checkedNotUpdated` on a custom checkbox, radio or switch |
+| One region swapped for another, the control itself unchanged | not reported: the next slide, the next step |
+| Any other region shown or hidden, or its own look changed, without a second activation that confirms it | `advisory`, `regionChanged` or `lookChanged` |
+| A dialog appeared, a navigation, a write | not reported: no state is required on what opens a dialog |
+| The control hid itself (a "No" button of a feedback prompt replaced by the form it opens) | not reported: nobody can perceive a state on it |
+| New content added (load more), a live region, a status or a toast | not reported |
+
+A disclosure is told from a dialog by what appeared: role `dialog` or `alertdialog`, a `dialog` element or
+`aria-modal="true"`, on it, inside it or around it. A region counts only when it is near the control: the control
+names it in `aria-controls`, or the two share an ancestor at most `regionMaxAncestorLevels` (3) above the control.
+On real pages, what appears elsewhere during an activation is the page itself (a header that changes as the page
+scrolls, a "CodePen" button a documentation page adds after loading); a dialog counts wherever it is, since
+dialogs are often rendered at the end of the body. The element's own look is compared where the element is in
+each capture: when content added above moves it, the comparison follows it; when its size changes, nothing is
+concluded from its pixels. The second activation (`probeConfirmToggle`) is what
+separates a disclosure and a toggle from a control that only changes something once. Before the activation the
+element is focused, and both captures are taken focused, so that a focus style is not taken for a pressed look.
+Evidence: captures before, after and after the second activation, the tree's properties at each step
+(`axBefore`, `axAfter`, `axAfterSecondActivation`), what navigations were stopped, how many regions were shown and
+hidden, and the area that changed in the element.
+
+Static rules cannot know that a button is a disclosure before it is activated: `aria-controls` on a hidden
+element and `aria-haspopup` are used, as `advisory`; words of the name are not.
+
+#### Activation
+
+Activation is a sequence of synthetic events dispatched on the element from the isolated world: `pointerdown`,
+`mousedown`, `pointerup`, `mouseup`, `click`, at its centre, after it was scrolled into view and focused. A
+synthetic `click` runs the activation behaviour of the element (a link follows its `href`, a checkbox toggles)
+but carries no user activation: what browsers keep behind a gesture (popups, file pickers, fullscreen, payment,
+the clipboard) does not open. A page that checks `event.isTrusted` does not react; that costs findings, not
+safety. `probeSettleMs` (250 ms) is waited, then two frames, and the requests under way. While probing,
+transitions and animations last 1 ms instead of their own duration, not 0: a transition of no duration fires no
+`transitionend`, and a component that sets `aria-expanded` when its collapse transition ends would never set it,
+which would be reported as a state that is not updated.
+
+Which elements, in this order, up to `maxProbes` (30) and `probeBudgetMs` (60 s): links that point nowhere; buttons
+and other stateful roles; elements that may be controls without a role; links with an address and a handler of
+their own. Each only when something listens: a listener or a framework handler on it, or a listener on an
+ancestor, its document or its window (`delegated`). Never activated: submit buttons with a form, fields, file
+inputs, `select`, links to a new window or with `download`, disabled or hidden elements, frames, media, editable
+regions, what is inside a control, and what matches `probeExcludeSelector` (`[data-a11y-vision-no-probe]`, on the
+element or an ancestor).
+
+#### The probing safety model
+
+Activating controls on a real site can order, delete, log out, send a form or pay. Nothing here recognises a
+dangerous control by its words; the guarantees come from what the browser lets out:
+
+1. **The network.** While probing, the Fetch domain pauses every request of the page (its frames in this process,
+   its dedicated workers: verified). Only GET and HEAD of `probeAllowedResourceTypes` (style sheets, scripts,
+   images, fonts, media, text tracks, manifests) without a query string are let through (`probeAllowQueryStrings`:
+   false): reads that render the page. Stopped: every other method; every request of a script (`Fetch`, `XHR`),
+   whatever its method, so a GET to `/cart/add?id=1` too; beacons and `<a ping>` (`Ping`); `fetch` with
+   `keepalive`; `EventSource`; `Other`; JSONP (a script with `?callback=`) and tracking pixels (an image with a
+   query); and every navigation (`Document`, aborted, which leaves the page as it is: measured). A navigation that is
+   stopped is the evidence that an element navigates.
+2. **What this session cannot see.** Frames of another origin run in other processes, where requests are not
+   paused by this session: they are emptied (`about:blank`) while probing, so that a click cannot ask them to do
+   something (a payment frame that is sent a message), and filled again afterwards. The service worker is bypassed
+   (`Network.setBypassServiceWorker`), so the page's requests reach the Fetch domain directly; what the page could
+   send to it, or to a shared worker, is stopped in the page (below).
+3. **The guard in the page.** A script in the page's own world, in the top window and every same-origin window,
+   for the time of probing: `window.open`, links and forms with a target that opens a window, downloads, printing,
+   `window.close`, `alert`, `confirm` (answers false, so "Are you sure?" cancels), `prompt`; form submission (the
+   `submit` event is cancelled, `submit()` and `requestSubmit()` do nothing); sends over WebSocket, WebRTC data
+   channels, WebTransport, to a service worker, over a BroadcastChannel, new shared workers, background sync;
+   writes to IndexedDB and to the Cache API; geolocation, camera, microphone, screen capture, notifications,
+   credentials (passkeys), payment sheets, file and directory pickers, sharing, the clipboard, fullscreen. Each is
+   recorded (`guarded` in the survey). File choosers are also intercepted through the protocol, JavaScript
+   dialogs dismissed, downloads denied, and a window that opens all the same is closed and counted (`popups`).
+4. **Storage and the page.** Cookies (`Network.getCookies` for every frame's address), local storage and session
+   storage of every same-origin window are read before probing and written back after it, and before every
+   reload: a basket kept in local storage by a click is not sent by the page when it loads again. A probe that
+   changed the page (its elements and their attributes, text, field values and open dialogs, in its documents
+   and shadow trees, or its address; an empty `class` or `style` a script leaves behind and the order of classes
+   do not count) is followed by a reload, so that every probe starts from the page as it loads; at most
+   `maxProbeReloads` (30). Before the first probe and after each reload, the page is waited for until nothing
+   in it has changed for `quietMs` (300 ms), `quietMaxMs` (3 s) at most: what a page adds once it has loaded is
+   not taken for an effect of the next activation. During a reload GET and
+   HEAD pass and every other method is still stopped, so what the page that goes away sends as it unloads (a
+   beacon, a keepalive request) does not get out either. When an element was activated on the document the page
+   is on at the end, it is reloaded once more the same way, which also ends any timer a click left pending; then
+   the network is given back. A page that nothing was activated on since its last load gets its frames back and
+   its guard removed instead.
+
+What proves it: `fixtures/name-role-value/safety.html` holds 28 controls that each write to the fixture server
+when they are really clicked (fetch POST, XHR DELETE, a beacon, keepalive, a GET API, JSONP, a pixel,
+EventSource, a form sent by script, `requestSubmit`, `location.href`, `window.open`, a link opened in a new tab
+by script, a download by script, a `confirm` before a DELETE, a basket and a cookie that the page sends when it
+loads again, IndexedDB, a message to a payment frame of another origin, to the service worker directly and over
+a BroadcastChannel, to a worker, a WebSocket, a single-page checkout, a clickable `span`, a link that posts).
+`e2e/name-role-value.spec.ts` clicks them for real and sees the server record the writes, then scans the page
+through the Playwright API and through the CLI and sees none: no write, no navigation, no WebSocket handshake,
+with the page on its address, its storage as before and the frame of another origin back.
+
+**What it does not cover.** A shared worker or a service worker that sends something on its own, without a
+message from the page; requests of an `object` or `embed` of another origin; frames created by a script during
+probing (they are not guarded); a page that saves its guarded APIs before the guard is installed and calls them
+later; and writes that a GET does on a server that misuses GET for actions, when the request is one of the reads
+that are let through (a style sheet, a script, an image or a font without a query). Each reload is also one more
+page view in the site's own statistics, made with the network open for reads. Probing runs in the browser
+context it is given: in the CLI a fresh context per page, closed afterwards; through the Playwright API the
+context of the test, with its cookies.
+
+#### What a scan with probing does to the page
+
+Probing runs last, after every other check has read the page and after the signatures of the elements were
+taken, so nothing measures a page a probe changed. The page is then reloaded whenever an element was activated
+on it: through the Playwright API, a test that scans a page in the middle of a flow gets it back as it loads, not
+as it was (an open dialog, a form being filled). `probe: "off"` changes nothing on the page beyond what the
+other checks do. In a collection, a reload by probing is not taken for the page going to another document.
+
+#### Decisions left to the owner, and their defaults
+
+- **`behaviourRoleStatus`** (`likely`): the status of a link that acted as a button and a button that acted as a
+  link when activation measured it. `fail` makes those break a build; static evidence stays `advisory`.
+- **Probing in the extension** (`extensionConfig.openDecisions.probe`, `off`): the network block works over
+  `chrome.debugger`, but the extension scans the user's own browser and sessions, reloads would lose what the user
+  was doing, and storage that cannot be put back (IndexedDB, the Cache API, another tab of the same site) is the
+  user's. The extension runs the rules that read the page as it is.
+- **`includeAxeCovered`** (`true`): the whole criterion, with the overlap marked.
+- **`probeAllowQueryStrings`** (`false`): a style sheet or a script with a cache-busting query is stopped too; the
+  page may look or work less well while it is probed, which costs findings, never safety.
+
+#### Settings
+
+All under `nameRoleValue` in a config file, documented in `packages/core/src/types.ts`
+(`NameRoleValueConfig`): `probe`, `includeAxeCovered`, `behaviourRoleStatus`, the limits of the inventory
+(`maxElements`, `maxListenerElements`, `maxNameChars`, `maxCandidates`, `maxCaptures`), `maxControlAreaShare`, the
+name patterns, `titleOnlyStatus`, `placeholderOnlyStatus`, `tabWalk`, `maxTabStops`, and for probing `maxProbes`,
+`probeBudgetMs`, `probeSettleMs`, `probeExcludeSelector`, `probeAllowedResourceTypes`, `probeAllowQueryStrings`,
+`probeConfirmToggle`, `maxProbeReloads`, `reloadTimeoutMs`, `ownChangeMinAreaCssPx2`, `revealMinAreaCssPx2`,
+`regionMaxAncestorLevels`, `quietMs`, `quietMaxMs`, `maxVisibilityElements` and the margins of the captures.
+
+### Known limits of the name-role-value check
+
+- Chrome's tree is the reference. Other browsers expose some things differently (an `a` without `href` that a
+  script listens to is a link in Chrome, not focusable; a tab without `aria-selected` that has focus is
+  exposed as selected by Chrome).
+- Frames of another origin and closed shadow trees are not looked into; their controls are not in the
+  inventory. Elements a script creates after the scan started are seen only if they are there when the survey
+  runs.
+- A listener on an ancestor is not attributed to an element, except through React props, jQuery selectors and
+  Ember's attribute: with another framework that delegates (Ember Octane's `on` and Angular attach to the element
+  and are seen; others may not), a clickable `div` with no pointer and no focus is missed, and one with
+  `cursor: pointer` is in the inventory and activated, but reported only if the activation shows an effect.
+- Activation is synthetic and by pointer only. A control that reacts only to trusted events, only to keys, only
+  to hover, or after more than `probeSettleMs`, shows nothing and is not reported on behaviour. Effects that are
+  not visible (a value written somewhere, an announcement) are not seen; a write it tried to send is.
+- A region is "shown" when an element goes from not visible to visible (`checkVisibility`, a box); content that
+  is only scrolled, moved or clipped is not. At most `maxVisibilityElements` (30000) elements are compared. A
+  menu or a panel rendered far from its button (at the end of the body) without `aria-controls` is not near it,
+  and its button is not reported for a missing state.
+- What the network block lets through is decided by method, resource type and query string, not by content (see
+  "What it does not cover"). Pages that need their API reads (`Fetch`, `XHR`) to open a panel open it empty or
+  not at all while probing.
+- `probeBudgetMs`, `maxProbes` and `maxProbeReloads` cut probing on large pages; the survey says how many
+  elements qualified and how many were activated, in document order within each kind.
+- A page that changes on its own (a carousel that turns, a clock) makes every probe look like it changed the
+  page, and each is followed by a reload; text that changes is checked, regions that turn are left to the second
+  activation.
+- Two runs are identical on a page that behaves the same way twice. A page whose handlers depend on time or on
+  the network (which is held) can give other findings from one run to the next.
+
 ### What `icon-contrast` reports
 
 Everything is measured on a capture of the control at rest, at device scale factor 2. The scale of each capture is
@@ -1043,6 +1356,9 @@ The report shows, for every finding, the capture, the two colours and the ratio,
 from (`declaredColour` or `pixelColour`).
 
 ### What a scan does to the page
+
+The name-role-value check also activates controls and reloads the page (see "The probing safety model" and
+"What a scan with probing does to the page"); what follows is what every check does.
 
 While it runs, the scan changes the page: device scale factor 2 (set as an override even when the page already has
 that ratio, because captures do not honour a ratio emulated through another session), reduced motion, an adopted
@@ -1949,6 +2265,8 @@ framework can replace `render.ts` and `panel.ts` without touching the rest.
 - One page at a time, the one in the tab. No list of pages, no sitemap, no baseline, no exit code.
 - The debugger bar, and the page visibly changing during the scan.
 - The page can be disturbed (see above); the CLI's page cannot.
+- `name-role-value` activates nothing (`probe` is off whatever is configured): link and button behaviour and
+  state changes are not measured, only what the page says as it is. See "Decisions left to the owner" of that check.
 - No option for anything but the checks and the endpoint of the model: thresholds are the defaults of `core`. Of
   the model options of the CLI only `--ai-text-only` has a counterpart ("Send captures", switched off); votes,
   timeouts, the size of the cache and what a verdict that disagrees does (`--ai-lower-on-disagree`) are the defaults.

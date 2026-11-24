@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A shop built with care</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 0; color: #1a1a1a; background: #fff; }
+  header, main, footer { padding: 12px 24px; }
+  header { display: flex; gap: 16px; align-items: center; border-bottom: 1px solid #595959; }
+  nav ul { display: flex; gap: 12px; list-style: none; margin: 0; padding: 0; }
+  a { color: #0645ad; }
+  button, [role="tab"], [role="switch"], [role="option"], [role="treeitem"], [role="menuitem"] { font: inherit; padding: 4px 10px; border: 1px solid #595959; background: #fff; color: #1a1a1a; cursor: pointer; }
+  [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"] { background: #1a1a1a; color: #fff; }
+  .panel { border: 1px solid #595959; padding: 12px; margin: 8px 0; width: 480px; }
+  [hidden] { display: none !important; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 8px; top: 8px; background: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(3, 200px); gap: 12px; }
+  .card { border: 1px solid #595959; padding: 8px; cursor: pointer; }
+  [role="tablist"], [role="listbox"], [role="tree"], [role="menu"] { display: flex; gap: 4px; }
+  [role="listbox"], [role="tree"], [role="menu"] { flex-direction: column; width: 220px; }
+  .slides > div { height: 40px; }
+  [role="slider"] { display: inline-block; width: 200px; height: 12px; background: #ddd; }
+  section { margin: 0 0 20px; }
+</style>
+</head>
+<body>
+<div id="app">
+<a class="skip" href="#content">Skip to content</a>
+<header>
+  <a href="/name-role-value/well-built.html"><img src="../icon-contrast/assets/none.png" alt="Linen and Co, home" width="80" height="24"></a>
+  <button type="button" aria-expanded="false" aria-controls="main-nav" id="nav-toggle">Menu</button>
+  <nav aria-label="Main" id="main-nav" hidden><ul><li><a href="/name-role-value/women.html">Women</a></li><li><a href="/name-role-value/men.html">Men</a></li></ul></nav>
+  <form role="search" action="/name-role-value/search" method="get"><label for="search">Search the shop</label> <input id="search" name="q" type="search"> <button>Search</button></form>
+  <a href="/name-role-value/cart.html" aria-label="Cart, 0 items" id="cart-link"><svg width="20" height="20" aria-hidden="true"><rect width="20" height="20" fill="#1a1a1a"/></svg></a>
+</header>
+<main id="content" tabindex="-1">
+  <h1>Linen shirts</h1>
+  <section>
+    <h2>Questions</h2>
+    <h3><button type="button" aria-expanded="false" aria-controls="faq-1" id="faq-1-button">How do I wash linen?</button></h3>
+    <div class="panel" id="faq-1" role="region" aria-labelledby="faq-1-button" hidden>At forty degrees, inside out.</div>
+    <h3><button type="button" aria-expanded="false" aria-controls="faq-2" id="faq-2-button">Do you ship abroad?</button></h3>
+    <div class="panel" id="faq-2" role="region" aria-labelledby="faq-2-button" hidden>To every country of the European Union.</div>
+  </section>
+  <section>
+    <h2>Details</h2>
+    <div role="tablist" aria-label="Product information">
+      <button role="tab" aria-selected="true" aria-controls="p-1" id="t-1">Fabric</button>
+      <button role="tab" aria-selected="false" aria-controls="p-2" id="t-2" tabindex="-1">Fit</button>
+      <button role="tab" aria-selected="false" aria-controls="p-3" id="t-3" tabindex="-1">Care</button>
+    </div>
+    <div role="tabpanel" id="p-1" aria-labelledby="t-1" class="panel">Pure linen from Normandy.</div>
+    <div role="tabpanel" id="p-2" aria-labelledby="t-2" class="panel" hidden>Regular fit.</div>
+    <div role="tabpanel" id="p-3" aria-labelledby="t-3" class="panel" hidden>Iron while damp.</div>
+  </section>
+  <section>
+    <h2>Options</h2>
+    <span id="size-label">Size</span>
+    <div role="listbox" aria-labelledby="size-label" tabindex="0" id="sizes">
+      <div role="option" aria-selected="true" id="size-m">Medium</div>
+      <div role="option" aria-selected="false" id="size-l">Large</div>
+    </div>
+    <span role="switch" aria-checked="false" tabindex="0" id="gift">Gift wrap</span>
+    <button type="button" aria-pressed="false" id="favourite">Favourite</button>
+    <span id="qty-label">Quantity</span>
+    <div role="slider" aria-labelledby="qty-label" aria-valuemin="1" aria-valuemax="10" aria-valuenow="1" tabindex="0"></div>
+    <label for="colour">Colour</label>
+    <input id="colour" role="combobox" aria-expanded="false" aria-controls="colours" aria-autocomplete="list">
+    <ul role="listbox" id="colours" aria-label="Colours" hidden><li role="option" aria-selected="false">White</li></ul>
+    <label><input type="checkbox" id="newsletter"> Send me the newsletter</label>
+  </section>
+  <section>
+    <h2>Actions</h2>
+    <button type="button" aria-haspopup="dialog" id="size-guide">Size guide</button>
+    <div role="dialog" aria-modal="true" aria-labelledby="sg-title" class="panel" id="size-dialog" hidden><h3 id="sg-title">Size guide</h3><button type="button" id="sg-close">Close</button></div>
+    <button type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="share-menu" id="share">Share</button>
+    <div role="menu" id="share-menu" aria-label="Share" hidden><div role="menuitem" tabindex="-1">Email</div><div role="menuitem" tabindex="-1">Copy the link</div></div>
+    <button type="button" id="add">Add to cart</button>
+    <div role="status" id="added"></div>
+    <button type="button" id="back-to-top">Back to top</button>
+  </section>
+  <section>
+    <h2>Categories</h2>
+    <div role="tree" aria-label="Categories">
+      <div role="treeitem" aria-expanded="false" tabindex="0" id="tree-shirts">Shirts</div>
+      <div role="group" id="tree-group" hidden><div role="treeitem" tabindex="-1">Short sleeves</div></div>
+    </div>
+  </section>
+  <section>
+    <h2>You may also like</h2>
+    <div class="cards">
+      <div class="card"><h3>Trousers</h3><a href="/name-role-value/trousers.html">See the trousers</a></div>
+      <div class="card"><h3>Dresses</h3><a href="/name-role-value/dresses.html">See the dresses</a></div>
+    </div>
+    <div class="slides"><div id="slide-1">Spring collection</div><div id="slide-2" hidden>Summer collection</div></div>
+    <button type="button" aria-label="Next slide" id="next-slide">&#8250;</button>
+    <nav aria-label="Pages"><a href="/name-role-value/well-built.html?page=1" aria-current="page">1</a> <a href="/name-role-value/well-built.html?page=2">2</a></nav>
+  </section>
+</main>
+<footer><a href="/name-role-value/contact.html">Contact</a></footer>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const flip = (element, attribute) => element.setAttribute(attribute, element.getAttribute(attribute) === 'true' ? 'false' : 'true');
+  // As a React application: one listener on the root, handlers in the props.
+  const handlers = {
+    'nav-toggle': () => { flip($('nav-toggle'), 'aria-expanded'); $('main-nav').hidden = !$('main-nav').hidden; },
+    'faq-1-button': () => { flip($('faq-1-button'), 'aria-expanded'); $('faq-1').hidden = !$('faq-1').hidden; },
+    'faq-2-button': () => { flip($('faq-2-button'), 'aria-expanded'); $('faq-2').hidden = !$('faq-2').hidden; },
+    'gift': () => flip($('gift'), 'aria-checked'),
+    'favourite': () => flip($('favourite'), 'aria-pressed'),
+    'size-guide': () => { $('size-dialog').hidden = false; },
+    'sg-close': () => { $('size-dialog').hidden = true; },
+    'share': () => { flip($('share'), 'aria-expanded'); $('share-menu').hidden = !$('share-menu').hidden; },
+    'add': () => { $('added').textContent = 'Added to the cart.'; $('cart-link').setAttribute('aria-label', 'Cart, 1 item'); },
+    'back-to-top': () => window.scrollTo(0, 0),
+    'tree-shirts': () => { flip($('tree-shirts'), 'aria-expanded'); $('tree-group').hidden = !$('tree-group').hidden; },
+    'next-slide': () => { $('slide-1').hidden = !$('slide-1').hidden; $('slide-2').hidden = !$('slide-2').hidden; },
+    'size-m': () => { $('size-m').setAttribute('aria-selected', 'true'); $('size-l').setAttribute('aria-selected', 'false'); },
+    'size-l': () => { $('size-l').setAttribute('aria-selected', 'true'); $('size-m').setAttribute('aria-selected', 'false'); },
+  };
+  for (const index of [1, 2, 3]) {
+    handlers['t-' + index] = () => {
+      for (const other of [1, 2, 3]) {
+        $('t-' + other).setAttribute('aria-selected', String(other === index));
+        $('p-' + other).hidden = other !== index;
+      }
+    };
+  }
+  for (const [id, handler] of Object.entries(handlers)) $(id)['__reactProps$shop'] = { onClick: handler };
+  $('app').addEventListener('click', (event) => {
+    for (let node = event.target; node && node !== event.currentTarget; node = node.parentElement) {
+      const props = node['__reactProps$shop'];
+      if (props && props.onClick) { props.onClick(event); return; }
+    }
+  });
+</script>
+</body>
+</html>

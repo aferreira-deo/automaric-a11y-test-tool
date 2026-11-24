@@ -1,0 +1,7 @@
+{
+  "description": "A page built with care, as a React application renders it (one listener on the root): skip link, menu toggle, search form, cart link, accordion, tabs, listbox, switch, toggle, slider, combobox, native checkbox, dialog trigger, menu button, add to cart with a status message, back to top, tree, cards with a link, a carousel button, pagination. Everything that listens is activated as well: nothing is fail or likely.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": []
+}

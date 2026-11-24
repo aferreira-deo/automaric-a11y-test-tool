@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roles of operable elements</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  section { margin: 0 0 16px; }
+  .fake { display: inline-block; padding: 6px 12px; border: 1px solid #595959; }
+  .pointer { cursor: pointer; }
+  .card { border: 1px solid #595959; padding: 12px; width: 300px; cursor: pointer; }
+  .panel { border: 1px solid #595959; padding: 12px; margin-top: 8px; width: 360px; }
+  [hidden] { display: none !important; }
+  .grid { display: grid; grid-template-columns: repeat(2, 200px); gap: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Roles</h1>
+
+  <!-- True positives: operable, and no role of a control. -->
+  <section>
+    <div class="fake pointer" tabindex="0" id="div-focusable">Download the brochure</div>
+    <span class="fake pointer" id="span-pointer">Show the map</span>
+    <span class="fake" id="span-plain">Print</span>
+    <a class="fake" tabindex="0" id="a-nohref-focusable">Next photo</a>
+    <a class="fake" id="a-nohref">Previous photo</a>
+    <div class="panel" id="photo-panel" hidden>Photo two of five.</div>
+  </section>
+  <section id="react-root">
+    <!-- What React 17 and later render: one listener on the root, the handler in the props of the element. -->
+    <div class="fake pointer" id="react-div">Add to the wish list</div>
+    <div class="fake pointer" tabindex="0" id="react-focusable">Compare</div>
+    <div class="panel" id="compare-panel" hidden>Two products compared.</div>
+  </section>
+
+  <!-- Role conflicts. -->
+  <section>
+    <div role="tab" tabindex="0" id="tab-alone">Overview</div>
+    <div role="option" id="option-alone">Small</div>
+    <div role="menuitem" tabindex="0" id="menuitem-alone">Copy</div>
+    <div role="radio" aria-checked="false" tabindex="0" id="radio-alone">Express delivery</div>
+    <a href="/name-role-value/offer.html" id="link-with-button"><button type="button" id="button-in-link">See the offer</button></a>
+    <a href="/name-role-value/catalogue.html" role="button" id="a-role-button">Catalogue</a>
+  </section>
+
+  <!-- True negatives. -->
+  <section>
+    <div class="card" id="card-with-link"><h3>Linen shirt</h3><p>Light and cool.</p><a href="/name-role-value/linen.html">See the linen shirt</a></div>
+    <label class="pointer" id="label-click"><input type="checkbox"> I agree</label>
+    <div class="pointer" id="pointer-only">Decorative pointer</div>
+    <div id="container-listener" class="grid"><button type="button">One</button><button type="button">Two</button></div>
+    <div role="listbox" aria-label="Sizes" tabindex="0"><div role="option" aria-selected="true">Medium</div></div>
+    <div role="menu" aria-label="Edit"><div role="menuitem" tabindex="-1">Paste</div></div>
+    <div role="radiogroup" aria-label="Speed"><div role="radio" aria-checked="true" tabindex="0">Standard</div></div>
+    <div tabindex="0" role="region" aria-label="Terms" style="height: 60px; overflow: auto; border: 1px solid #595959;" id="scroll-region"><p>Long terms.</p><p>More terms.</p><p>Even more terms.</p></div>
+    <button type="button" id="real-button">A real button</button>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('div-focusable').addEventListener('click', () => { document.title = 'Downloaded'; });
+  $('span-pointer').addEventListener('click', () => { $('photo-panel').hidden = !$('photo-panel').hidden; });
+  $('span-plain').onclick = () => { document.title = 'Printed'; };
+  $('a-nohref-focusable').addEventListener('click', () => { $('photo-panel').hidden = false; });
+  $('a-nohref').addEventListener('click', () => { $('photo-panel').hidden = true; });
+  $('container-listener').addEventListener('click', () => {});
+  $('label-click').addEventListener('click', () => {});
+  $('real-button').addEventListener('click', () => {});
+  // React-style delegation: the listener is on the root, the handlers are props of the elements.
+  const handlers = {
+    'react-div': () => { $('react-div').textContent = 'Added to the wish list'; },
+    'react-focusable': () => { $('compare-panel').hidden = !$('compare-panel').hidden; },
+  };
+  for (const [id, handler] of Object.entries(handlers)) $(id)['__reactProps$fixture'] = { onClick: handler, children: [] };
+  $('react-root').addEventListener('click', (event) => {
+    for (let node = event.target; node && node !== event.currentTarget; node = node.parentElement) {
+      const props = node['__reactProps$fixture'];
+      if (props && props.onClick) { props.onClick(event); return; }
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Accessible names of controls</title>
+<style>
+  @font-face { font-family: "Fixture Icons"; src: url("../icon-contrast/assets/fixture-icons.ttf"); }
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  section { margin: 0 0 16px; }
+  button, [role="button"], [role="tab"], [role="switch"] { font: inherit; padding: 6px 12px; border: 1px solid #595959; background: #fff; color: #1a1a1a; display: inline-block; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .icon-font { font-family: "Fixture Icons", "Material Icons", sans-serif; }
+  [role="tablist"] { display: flex; gap: 4px; }
+  input, select, textarea { font: inherit; margin: 4px 0; }
+  .hidden { display: none; }
+  iframe { width: 300px; height: 60px; border: 1px solid #595959; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Names</h1>
+
+  <!-- Done right. -->
+  <section id="good">
+    <button type="button" id="b-text">Save the draft</button>
+    <button type="button" aria-label="Close the message" id="b-aria"><svg width="16" height="16" aria-hidden="true"><path d="M2 2l12 12M14 2L2 14" stroke="#1a1a1a" stroke-width="2"/></svg></button>
+    <button type="button" id="b-sr"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#1a1a1a"/></svg><span class="sr-only">Open the menu</span></button>
+    <button type="button" id="b-img"><img src="../icon-contrast/assets/none.png" alt="Print" width="16" height="16"></button>
+    <button type="button" class="icon-font" id="b-ligature">close</button>
+    <a href="/name-role-value/help.html" id="a-text">Help</a>
+    <a href="/name-role-value/cart.html" aria-label="Cart, two items" id="a-aria"><svg width="16" height="16" aria-hidden="true"><rect width="16" height="16" fill="#1a1a1a"/></svg></a>
+    <label for="f-label">Email</label> <input id="f-label" type="email">
+    <input id="f-aria" type="text" aria-label="Postcode">
+    <span id="town-label">Town</span> <input id="f-labelledby" type="text" aria-labelledby="town-label">
+    <label><input type="checkbox" id="f-wrapped"> Keep me signed in</label>
+    <label for="f-select">Country</label> <select id="f-select"><option value="">Choose</option><option>France</option></select>
+    <div role="tablist" aria-label="Sections"><span role="tab" aria-selected="true" tabindex="0" id="t-named">Overview</span><span role="tab" aria-selected="false" tabindex="-1">Specs</span></div>
+    <span role="switch" aria-checked="false" tabindex="0" aria-label="Dark mode" id="s-named"></span>
+    <details><summary id="sum-named">More</summary>Hidden text.</details>
+    <iframe title="Map of the shop" srcdoc="<button>Zoom in</button>" id="frame-named"></iframe>
+    <iframe srcdoc="<p>Plain text</p>" id="frame-plain"></iframe>
+    <button type="button" class="hidden" id="b-hidden"></button>
+  </section>
+
+  <!-- True positives. -->
+  <section id="bad">
+    <button type="button" id="b-empty"><svg width="16" height="16"><path d="M2 8h12" stroke="#1a1a1a" stroke-width="2"/></svg></button>
+    <a href="/name-role-value/profile.html" id="a-empty"><svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="#1a1a1a"/></svg></a>
+    <span role="button" tabindex="0" class="icon-font" id="b-glyph">&#xe5cd;</span>
+    <button type="button" id="b-generic">button</button>
+    <a href="/name-role-value/home.html" id="a-file"><img src="../icon-contrast/assets/none.png" alt="logo-header.png" width="16" height="16"></a>
+    <button type="button" id="b-class">btn_close</button>
+    <button type="button" class="icon-font" id="b-ligature-underscore">arrow_forward</button>
+    <button type="button" id="b-symbol">&times;</button>
+    <button type="button" disabled id="b-disabled"><svg width="16" height="16"><rect width="16" height="16" fill="#595959"/></svg></button>
+    <input id="f-title" type="text" title="Phone number">
+    <input id="f-placeholder" type="text" placeholder="Your name">
+    <input id="f-none" type="text">
+    <div role="tablist" aria-label="Empty"><span role="tab" aria-selected="true" tabindex="0" id="t-empty"></span><span role="tab" aria-selected="false" tabindex="-1">Second</span></div>
+    <details><summary id="sum-empty"></summary>Hidden text.</details>
+    <div aria-hidden="true"><a href="/name-role-value/hidden.html" id="a-hidden-focus">Hidden but focusable</a></div>
+    <iframe srcdoc="<button>Play</button>" id="frame-unnamed"></iframe>
+  </section>
+</main>
+</body>
+</html>

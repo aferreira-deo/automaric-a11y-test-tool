@@ -1,0 +1,38 @@
+{
+  "description": "Controls in an open shadow tree and in a same-origin frame. An icon button without a name in a shadow tree, and one in the frame, fail; a custom element that listens and takes focus without a role fails, one with its role given through ElementInternals does not; a focusable div that listens in the frame fails.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#toolbar >>> #italic",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#fancy",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/no-role"
+    },
+    {
+      "selector": "#remove",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "frame": "#frame"
+    },
+    {
+      "selector": "#checkout",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/no-role",
+      "frame": "#frame"
+    }
+  ]
+}

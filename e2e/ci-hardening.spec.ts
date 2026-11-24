@@ -277,7 +277,7 @@ test('--storage-state: values of the session are replaced in texts, never in the
   expect(report.a11yVision.findings.length).toBeGreaterThan(4);
   for (const finding of report.a11yVision.findings) {
     expect(['fail', 'likely', 'advisory', 'info']).toContain(finding.status);
-    expect(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping']).toContain(finding.check);
+    expect(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value']).toContain(finding.check);
     expect(finding.rule.startsWith(`${finding.check}/`)).toBe(true);
   }
   expect(report.violations.map((rule) => rule.id)).toEqual(['focus-indicator/no-visible-change']);

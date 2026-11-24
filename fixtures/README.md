@@ -77,3 +77,12 @@ controls.
 `icon-contrast/assets/fixture-icons.ttf` is the icon font of the icon-contrast
 fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,
 so it carries no third-party licence.
+
+The `name-role-value/*` fixtures are probed (their controls are activated) unless nothing on them listens.
+`names` is static and is also scanned from the extension, which never probes. `well-built` is a page made as a
+React application renders it, with the patterns of the ARIA practices done right, and must give no `fail` and
+no `likely` with probing on; `link-button`, `states` and `roles` hold true positives and true negatives side by
+side; `formulaire-fr` is in French. `safety` holds controls that each write to the fixture server when really
+clicked (`/_nrv/write/<session>/`, `/_nrv/nav/<session>/`, a WebSocket under `/_nrv/ws/<session>`, read back
+from `/_nrv/log/<session>`); `e2e/name-role-value.spec.ts` checks that a real click on them writes, and that a
+scan that probes them writes nothing.

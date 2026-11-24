@@ -1,0 +1,60 @@
+{
+  "description": "Every control writes to the fixture server when it is really clicked (e2e/name-role-value.spec.ts checks both). Probing must send none of those writes: fetch, XHR, beacons, keepalive, JSONP, a pixel, EventSource, forms sent by script, navigations, windows, downloads, a confirm, storage that a reload would send, a cross-origin frame, a service worker, a worker, a WebSocket. The findings are what the probe saw of the roles.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#location",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/button-acts-as-link",
+      "flags": [
+        "measured",
+        "navigates:document"
+      ]
+    },
+    {
+      "selector": "#link-post",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "sendsRequest"
+      ]
+    },
+    {
+      "selector": "#div-post",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/no-role",
+      "flags": [
+        "sendsRequest"
+      ]
+    },
+    {
+      "selector": "#popup",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/button-acts-as-link",
+      "flags": [
+        "newWindow"
+      ]
+    },
+    {
+      "selector": "#blank-anchor",
+      "check": "name-role-value",
+      "status": "advisory",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/button-acts-as-link",
+      "flags": [
+        "newWindow"
+      ]
+    }
+  ]
+}

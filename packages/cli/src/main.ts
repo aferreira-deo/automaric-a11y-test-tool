@@ -111,8 +111,17 @@ Checks
       --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
                         available: ${registeredChecks().join(', ')})
       --config <file>   JSON file with settings (checks, focus, icon, headings,
-                        lists, grouping, adjudication, baseline, run,
-                        selector); the options given here win over it
+                        lists, grouping, nameRoleValue, adjudication,
+                        baseline, run, selector); the options given here
+                        win over it
+      --no-probe        name-role-value: activate nothing. Without it, controls
+                        are activated to see whether they act as links or
+                        buttons and expose their state, with every write to
+                        the network stopped and the page reloaded afterwards
+      --no-axe-overlap  name-role-value: leave out what axe-core also reports
+                        (empty names of buttons, links and fields, required
+                        states and context, focusable content under
+                        aria-hidden, nested controls)
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -200,7 +209,7 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`The config file ${file} has to hold a JSON object.`);
   const input = value as Record<string, unknown>;
-  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'adjudication', 'baseline', 'run', 'selector']) {
+  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'nameRoleValue', 'adjudication', 'baseline', 'run', 'selector']) {
     const part = input[section];
     if (part !== undefined && (part === null || typeof part !== 'object' || Array.isArray(part))) {
       throw new Error(`"${section}" in the config file ${file} has to be an object.`);
@@ -369,6 +378,8 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         'ai-cache': { type: 'string' },
         'no-ai-cache': { type: 'boolean' },
         'no-ai': { type: 'boolean' },
+        'no-probe': { type: 'boolean' },
+        'no-axe-overlap': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -480,7 +491,11 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   if (values['any-origin']) run.sameOrigin = false;
   if (values['allow-http-errors']) run.httpErrorIsFailure = false;
 
-  const input: ConfigInput = { ...fromFile, adjudication, run, ...(checks ? { checks: checks as CheckId[] } : {}) };
+  const nameRoleValue = { ...fromFile.nameRoleValue };
+  if (values['no-probe']) nameRoleValue.probe = 'off';
+  if (values['no-axe-overlap']) nameRoleValue.includeAxeCovered = false;
+
+  const input: ConfigInput = { ...fromFile, adjudication, run, nameRoleValue, ...(checks ? { checks: checks as CheckId[] } : {}) };
   const config = resolveConfig(input);
   const settings = config.adjudication;
   const limits = config.run;

@@ -377,7 +377,8 @@ async function scanOnce(mine: RunningScan): Promise<void> {
   try {
     const built = buildAdjudicator(model, apiKey, (input, init) => fetch(input, init));
     adjudicator = built.adjudicator;
-    config = resolveConfig({ checks, adjudication: built.config });
+    // Nothing is activated from the extension: see `extensionConfig.openDecisions.probe`.
+    config = resolveConfig({ checks, adjudication: built.config, nameRoleValue: { probe: extensionConfig.openDecisions.probe } });
   } catch (error) {
     setText('error', format(strings.modelConfigError, { detail: safeMessage(error, apiKey) }));
     return;

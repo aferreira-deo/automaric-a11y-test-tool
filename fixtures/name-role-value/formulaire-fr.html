@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Boutique en français</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  section { margin: 0 0 20px; }
+  a { color: #0645ad; }
+  button, .faux { font: inherit; padding: 4px 10px; border: 1px solid #595959; background: #fff; color: #1a1a1a; }
+  .faux { display: inline-block; cursor: pointer; }
+  [aria-pressed="true"] { background: #1a1a1a; color: #fff; }
+  .panneau { border: 1px solid #595959; padding: 12px; margin: 8px 0; width: 420px; }
+  [hidden] { display: none !important; }
+  dialog { border: 2px solid #1a1a1a; }
+  .evitement { position: absolute; left: -9999px; }
+  .evitement:focus { left: 8px; }
+</style>
+</head>
+<body>
+<a class="evitement" href="#contenu">Aller au contenu</a>
+<main id="contenu" tabindex="-1">
+  <h1>Chemises en lin</h1>
+
+  <!-- Ce qui est correct. -->
+  <section>
+    <form role="search" action="/name-role-value/recherche" method="get">
+      <label for="recherche">Rechercher dans la boutique</label> <input id="recherche" name="q" type="search">
+      <button>Rechercher</button>
+    </form>
+    <label><input type="checkbox" id="lettre"> Recevoir la lettre d’information</label>
+    <button type="button" aria-pressed="false" id="favori">Ajouter aux favoris</button>
+    <button type="button" id="guide">Guide des tailles</button>
+    <dialog id="guide-dialogue" aria-label="Guide des tailles"><p>Les tailles sont petites.</p><button>Fermer</button></dialog>
+    <a href="/name-role-value/livraison.html" id="livraison">Conditions de livraison</a>
+  </section>
+
+  <!-- Ce qui ne l’est pas. -->
+  <section>
+    <button type="button" id="bouton-generique">bouton</button>
+    <a href="/name-role-value/compte.html" id="lien-vide"><svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="#1a1a1a"/></svg></a>
+    <div class="faux" tabindex="0" id="voir-detail">Voir le détail</div>
+    <div class="panneau" id="detail" hidden>Coupe droite, col italien.</div>
+    <a href="#" id="lien-connexion">Se connecter</a>
+    <dialog id="connexion" aria-label="Connexion"><p>Identifiant et mot de passe.</p></dialog>
+    <button type="button" id="nos-magasins">Nos magasins</button>
+    <button type="button" id="horaires">Horaires d’ouverture</button>
+    <div class="panneau" id="horaires-texte" hidden>Du lundi au samedi, de dix heures à dix-neuf heures.</div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('favori').addEventListener('click', () => $('favori').setAttribute('aria-pressed', $('favori').getAttribute('aria-pressed') === 'true' ? 'false' : 'true'));
+  $('guide').addEventListener('click', () => $('guide-dialogue').showModal());
+  $('voir-detail').addEventListener('click', () => { $('detail').hidden = !$('detail').hidden; });
+  $('lien-connexion').addEventListener('click', (event) => { event.preventDefault(); $('connexion').showModal(); });
+  $('nos-magasins').addEventListener('click', () => { location.href = '/name-role-value/magasins.html'; });
+  $('horaires').addEventListener('click', () => { $('horaires-texte').hidden = !$('horaires-texte').hidden; });
+</script>
+</body>
+</html>

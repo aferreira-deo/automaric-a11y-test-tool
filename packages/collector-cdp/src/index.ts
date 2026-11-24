@@ -7,6 +7,8 @@ import { collectGrouping } from './grouping.js';
 import { collectHeadings } from './headings.js';
 import { collectIcons } from './icons.js';
 import { collectLists } from './lists.js';
+import { collectNameRoleValue, nrvTabWalk } from './nrv.js';
+import { probeNameRoleValue } from './nrv-probe.js';
 import { markAccessibility } from './accessibility.js';
 import { withStablePage } from './page.js';
 import { gateSession, stopReason } from './session.js';
@@ -129,15 +131,24 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     }
     let snapshot: Snapshot | undefined;
     let error: unknown;
+    /** The document probing left the page on, when it reloaded it: that is not the page going elsewhere. */
+    let reloaded: string | undefined;
     try {
-      snapshot = await collectOnce(cdp, config, signal, options);
+      const once = await collectOnce(cdp, config, signal, options);
+      snapshot = once.snapshot;
+      reloaded = once.reloadedLoaderId;
     } catch (caught) {
       error = caught ?? new Error('Collection failed.');
     }
     // Stopped: not a page that went elsewhere, and nothing to read again.
     stopped();
     const now = await mainDocument(cdp).catch(() => null);
-    return { from, to: now && now.loaderId !== from.loaderId ? now : null, ...(snapshot ? { snapshot } : {}), ...(error !== undefined ? { error } : {}) };
+    return {
+      from,
+      to: now && now.loaderId !== from.loaderId && now.loaderId !== reloaded ? now : null,
+      ...(snapshot ? { snapshot } : {}),
+      ...(error !== undefined ? { error } : {}),
+    };
   };
 
   const first = await attempt();
@@ -161,7 +172,7 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
   return second.snapshot;
 }
 
-async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<Snapshot> {
+async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<{ snapshot: Snapshot; reloadedLoaderId?: string }> {
   // Everything below goes through the gate, the restoring of the page included: it is opened for that.
   const gate = gateSession(raw, signal);
   const cdp = gate.session;
@@ -178,11 +189,16 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
   const headings = config.checks.includes('headings');
   const lists = config.checks.includes('lists');
   const grouping = config.checks.includes('grouping');
-  if (focus || icons || headings || lists || grouping) {
+  const nrv = config.checks.includes('name-role-value');
+  let reloadedLoaderId: string | undefined;
+  if (focus || icons || headings || lists || grouping || nrv) {
     const original = { ...environment, reducedMotion, mediaType };
     await withStablePage(cdp, world, original, config, snapshot.screenshots.clips, async (page) => {
       // The focus walk goes first: it needs focus where the page left it, and ends with nothing focused.
       if (focus) snapshot.focus = await collectFocus(page, config.focus);
+      // The name-role-value check reuses that walk; without it, it walks the page itself, also first.
+      const walk = focus ? 'focus' : nrv && config.nameRoleValue.tabWalk ? 'own' : 'none';
+      if (nrv && walk === 'own') await nrvTabWalk(page, config);
       if (icons) snapshot.icons = await collectIcons(page, config.icon);
       // Last: they read the page as the other collectors left it and only scroll. What the
       // accessibility tree exposes as headings, lists, form controls and groups is read once for all, with everything
@@ -198,10 +214,17 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
         if (lists) snapshot.lists = await collectLists(page, config, exposed.headings && exposed.lists);
         if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
+      if (nrv) snapshot.nameRoleValue = await collectNameRoleValue(page, config, walk);
       // What each element that was named is, hashed here: the text it is made from stays in this function.
       const signatures: Record<string, string> = {};
       for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
       snapshot.signatures = signatures;
+      // Last of all: activating controls changes the page, and may reload it. Nothing reads it after this.
+      if (nrv && snapshot.nameRoleValue && config.nameRoleValue.probe === 'safe') {
+        const probed = await probeNameRoleValue(page, config, snapshot.nameRoleValue);
+        snapshot.nameRoleValue.probe = probed.log;
+        reloadedLoaderId = probed.loaderId;
+      }
     }, {
       before: () => gate.release(options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS),
       stepTimeoutMs: () => (signal?.aborted ? (options.restoreStepTimeoutMs ?? RESTORE_STEP_TIMEOUT_MS) : null),
@@ -210,5 +233,5 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
   }
-  return snapshot;
+  return { snapshot, ...(reloadedLoaderId ? { reloadedLoaderId } : {}) };
 }

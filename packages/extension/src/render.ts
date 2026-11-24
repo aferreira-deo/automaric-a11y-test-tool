@@ -42,6 +42,7 @@ const CHECK_TITLE: Record<string, StringKey> = {
   headings: 'checkHeadings',
   lists: 'checkLists',
   grouping: 'checkGrouping',
+  'name-role-value': 'checkNameRoleValue',
 };
 const DECISION_TEXT: Record<Decision, StringKey> = { confirmed: 'decisionConfirmed', dismissed: 'decisionDismissed' };
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -71,7 +72,10 @@ function cropLabel(id: string, strings: Strings): string {
   if (id.endsWith('-focused.png')) return strings.cropFocused;
   if (id.endsWith('-unfocused.png')) return strings.cropUnfocused;
   if (id.startsWith('icon-contrast/')) return strings.cropAtRest;
-  if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/')) return strings.cropInContext;
+  if (id.startsWith('name-role-value/') && id.endsWith('-before.png')) return strings.cropBeforeActivation;
+  if (id.startsWith('name-role-value/') && id.endsWith('-after.png')) return strings.cropAfterActivation;
+  if (id.startsWith('name-role-value/') && id.endsWith('-again.png')) return strings.cropAfterSecondActivation;
+  if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/') || id.startsWith('name-role-value/')) return strings.cropInContext;
   return strings.cropCapture;
 }
 

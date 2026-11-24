@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>States that change</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  section { margin: 0 0 20px; }
+  button, [role="button"], [role="switch"], [role="checkbox"], [role="tab"] { font: inherit; padding: 6px 12px; border: 1px solid #595959; background: #fff; color: #1a1a1a; cursor: pointer; display: inline-block; }
+  .pressed, [aria-pressed="true"], [aria-checked="true"], .on { background: #1a1a1a; color: #fff; }
+  .panel { border: 1px solid #595959; padding: 12px; margin-top: 8px; width: 420px; }
+  [hidden] { display: none !important; }
+  [role="tablist"] { display: flex; gap: 4px; }
+  [role="tab"][aria-selected="true"], .tab-active { border-bottom: 4px solid #1a1a1a; }
+  [role="menu"] { list-style: none; margin: 4px 0; padding: 4px; border: 1px solid #595959; width: 200px; }
+  [role="slider"] { display: inline-block; width: 200px; height: 12px; background: #ddd; position: relative; }
+  .box { display: inline-block; width: 16px; height: 16px; border: 2px solid #1a1a1a; vertical-align: middle; margin-right: 6px; }
+  .checked .box { background: #1a1a1a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>States</h1>
+
+  <!-- Done right: the ARIA practices patterns. -->
+  <section>
+    <h2>Accordion</h2>
+    <h3><button type="button" aria-expanded="false" aria-controls="acc-1" id="acc-good">Shipping</button></h3>
+    <div class="panel" id="acc-1" hidden>We ship in three days.</div>
+  </section>
+  <section>
+    <h2>Toggle button</h2>
+    <button type="button" aria-pressed="false" id="toggle-good">Mute</button>
+  </section>
+  <section>
+    <h2>Switch</h2>
+    <span role="switch" aria-checked="false" tabindex="0" id="switch-good">Notifications</span>
+  </section>
+  <section>
+    <h2>Checkbox</h2>
+    <span role="checkbox" aria-checked="false" tabindex="0" id="checkbox-good">Accept the newsletter</span>
+  </section>
+  <section>
+    <h2>Tabs</h2>
+    <div role="tablist" aria-label="Product">
+      <button role="tab" aria-selected="true" aria-controls="tp-1" id="tab-good-1">Details</button>
+      <button role="tab" aria-selected="false" aria-controls="tp-2" id="tab-good-2" tabindex="-1">Reviews</button>
+    </div>
+    <div role="tabpanel" id="tp-1" aria-labelledby="tab-good-1" class="panel">Cotton, made in Portugal.</div>
+    <div role="tabpanel" id="tp-2" aria-labelledby="tab-good-2" class="panel" hidden>Four stars.</div>
+  </section>
+  <section>
+    <h2>Menu button</h2>
+    <button type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-1" id="menu-good">Actions</button>
+    <ul role="menu" id="menu-1" hidden><li role="menuitem" tabindex="-1">Copy</li><li role="menuitem" tabindex="-1">Move</li></ul>
+  </section>
+  <section>
+    <h2>Slider</h2>
+    <span id="volume-label">Volume</span>
+    <div role="slider" aria-labelledby="volume-label" aria-valuemin="0" aria-valuemax="10" aria-valuenow="5" tabindex="0" id="slider-good"></div>
+  </section>
+  <section>
+    <h2>Dialog trigger</h2>
+    <button type="button" id="dialog-trigger">Change the address</button>
+    <div role="dialog" aria-modal="true" aria-label="Address" class="panel" id="dialog-1" hidden>Street and town.</div>
+  </section>
+  <section>
+    <h2>Load more</h2>
+    <ul id="results"><li>Result one</li></ul>
+    <button type="button" id="load-more">Load more results</button>
+  </section>
+
+  <!-- True positives. -->
+  <section>
+    <h2>Disclosure without aria-expanded</h2>
+    <button type="button" id="disclosure-bad">Opening hours</button>
+    <div class="panel" id="hours" hidden>Monday to Friday, nine to six, and Saturday mornings.</div>
+  </section>
+  <section>
+    <h2>Disclosure whose aria-expanded never changes</h2>
+    <button type="button" aria-expanded="false" id="disclosure-stuck">Returns</button>
+    <div class="panel" id="returns" hidden>Returns are free within thirty days of delivery.</div>
+  </section>
+  <section>
+    <h2>Toggle without aria-pressed that changes colour</h2>
+    <button type="button" id="toggle-bad">Favourite</button>
+  </section>
+  <section>
+    <h2>Custom checkbox without aria-checked</h2>
+    <div role="checkbox" tabindex="0" id="checkbox-bad"><span class="box"></span>Gift wrap</div>
+  </section>
+  <section>
+    <h2>Tabs without aria-selected</h2>
+    <div role="tablist" aria-label="Help">
+      <div role="tab" tabindex="0" id="tab-bad-1" class="tab-active">Delivery</div>
+      <div role="tab" tabindex="0" id="tab-bad-2">Payment</div>
+    </div>
+    <div class="panel" id="help-1">Delivery takes three days.</div>
+    <div class="panel" id="help-2" hidden>We take cards and transfers.</div>
+  </section>
+  <section>
+    <h2>Slider without a value</h2>
+    <span id="speed-label">Speed</span>
+    <div role="slider" aria-labelledby="speed-label" tabindex="0" id="slider-bad"></div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const flip = (button, attribute) => button.setAttribute(attribute, button.getAttribute(attribute) === 'true' ? 'false' : 'true');
+  $('acc-good').addEventListener('click', () => { flip($('acc-good'), 'aria-expanded'); $('acc-1').hidden = !$('acc-1').hidden; });
+  $('toggle-good').addEventListener('click', () => flip($('toggle-good'), 'aria-pressed'));
+  $('switch-good').addEventListener('click', () => flip($('switch-good'), 'aria-checked'));
+  $('checkbox-good').addEventListener('click', () => flip($('checkbox-good'), 'aria-checked'));
+  for (const [tab, other, panel, otherPanel] of [['tab-good-1', 'tab-good-2', 'tp-1', 'tp-2'], ['tab-good-2', 'tab-good-1', 'tp-2', 'tp-1']]) {
+    $(tab).addEventListener('click', () => {
+      $(tab).setAttribute('aria-selected', 'true'); $(other).setAttribute('aria-selected', 'false');
+      $(panel).hidden = false; $(otherPanel).hidden = true;
+    });
+  }
+  $('menu-good').addEventListener('click', () => { flip($('menu-good'), 'aria-expanded'); $('menu-1').hidden = !$('menu-1').hidden; });
+  $('slider-good').addEventListener('keydown', () => {});
+  $('dialog-trigger').addEventListener('click', () => { $('dialog-1').hidden = false; });
+  let page = 1;
+  $('load-more').addEventListener('click', () => { page++; const item = document.createElement('li'); item.textContent = 'Result ' + page; item.style.height = '24px'; $('results').append(item); });
+  $('disclosure-bad').addEventListener('click', () => { $('hours').hidden = !$('hours').hidden; });
+  $('disclosure-stuck').addEventListener('click', () => { $('returns').hidden = !$('returns').hidden; });
+  $('toggle-bad').addEventListener('click', () => $('toggle-bad').classList.toggle('pressed'));
+  $('checkbox-bad').addEventListener('click', () => $('checkbox-bad').classList.toggle('checked'));
+  for (const [tab, other, panel, otherPanel] of [['tab-bad-1', 'tab-bad-2', 'help-1', 'help-2'], ['tab-bad-2', 'tab-bad-1', 'help-2', 'help-1']]) {
+    $(tab).addEventListener('click', () => {
+      $(tab).classList.add('tab-active'); $(other).classList.remove('tab-active');
+      $(panel).hidden = false; $(otherPanel).hidden = true;
+    });
+  }
+  $('slider-bad').addEventListener('keydown', () => {});
+</script>
+</body>
+</html>

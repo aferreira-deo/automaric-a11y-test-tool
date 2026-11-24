@@ -17,7 +17,8 @@ export type CheckId =
   | 'icon-contrast'
   | 'headings'
   | 'lists'
-  | 'grouping';
+  | 'grouping'
+  | 'name-role-value';
 
 /** CSS pixels, relative to the top-left of the document of the frame the node lives in. */
 export interface Box {
@@ -752,8 +753,283 @@ export interface GroupingSurvey {
   captures: Record<string, GroupingCapture>;
 }
 
+/**
+ * Why an element is in the inventory of the name-role-value check. Each is a separate
+ * measurement, recorded as evidence:
+ * - `native`: an element HTML makes interactive (`a[href]`, `area[href]`, `button`, `input`
+ *   but hidden, `select`, `textarea`, the first `summary` of a `details`).
+ * - `role`: the accessibility tree exposes it with a widget role (button, link, checkbox, tab...).
+ * - `tab`: the real Tab walk of this scan reached it.
+ * - `tabindex`: it has a `tabindex` of 0 or more.
+ * - `contenteditable`: it is the root of an editable region.
+ * - `listener`: an activation listener is attached to the element itself (click, mousedown,
+ *   mouseup, pointerdown, pointerup, keydown, keyup, keypress, touchstart, touchend), read with
+ *   `DOMDebugger.getEventListeners`: `addEventListener` and inline handlers alike.
+ * - `framework`: a framework holds a handler for the element itself although the listener the
+ *   browser sees is on an ancestor: React props (`onClick`...), a jQuery handler delegated with a
+ *   selector the element matches, `data-ember-action`.
+ * - `cursor`: it sets `cursor: pointer` itself (its parent does not have it).
+ * - `frame`: an `iframe` or `frame`.
+ */
+export type NrvSource = 'native' | 'role' | 'tab' | 'tabindex' | 'contenteditable' | 'listener' | 'framework' | 'cursor' | 'frame';
+
+/** What the accessibility tree says about an element, as Chrome computed it (`Accessibility.getFullAXTree`). */
+export interface NrvAx {
+  /** Role as Chrome names it (`button`, `link`, `generic`, `DisclosureTriangle`, `Iframe`...). */
+  role: string;
+  /** Accessible name, white space collapsed, cut to `maxNameChars`. Empty when there is none. */
+  name: string;
+  /**
+   * Where the name comes from: the first source of the name that is not superseded and has a
+   * value, as `type:attribute` (`contents:`, `attribute:aria-label`, `attribute:title`,
+   * `relatedElement:aria-labelledby`, `relatedElement:label`, `placeholder:placeholder`). Empty
+   * when the name is empty.
+   */
+  nameSource: string;
+  /** The property `focusable`. */
+  focusable: boolean;
+  /** The property `disabled`. */
+  disabled: boolean;
+  /** Present when the node is ignored: the reasons Chrome gives (`ariaHiddenElement`, `ariaHiddenSubtree`, `inertElement`...). */
+  ignored?: string[];
+  /** States and values as text: `expanded`, `pressed`, `checked`, `selected`, `valuenow`, `valuetext`, `valuemin`, `valuemax`, `hasPopup`, `editable`. Only those Chrome gives. */
+  states: Record<string, string>;
+  /** Roles of the nearest ancestors in the tree, nearest first, generic and ignored nodes left out (at most 4). */
+  context: string[];
+}
+
+/** How an `a` or `area` element points somewhere, from its `href` attribute. */
+export type NrvHrefKind =
+  /** No `href`. */
+  | 'none'
+  /** `href=""`: the page itself. */
+  | 'empty'
+  /** `#`: the top of the page. */
+  | 'hash'
+  /** `#!` alone. */
+  | 'hashbang'
+  | 'javascript'
+  /** `#name` (a place in the page, or a route of a hash router). */
+  | 'fragment'
+  /** Another document, or this one with another query. */
+  | 'url';
+
+/** One element of the inventory. Boxes are CSS pixels in page coordinates. */
+export interface NrvElement {
+  /** Position in the inventory, in document order, frames and shadow trees in place. */
+  ord: number;
+  /** Filled for the elements that are reported or probed; empty for the others. */
+  selector: string;
+  frame: string;
+  /** Border box, or null when it has none. */
+  box: Box | null;
+  /** Rendered: it has a box and `checkVisibility()` holds. */
+  visible: boolean;
+  tag: string;
+  /** `type` of an `input` or a `button`, lower case; empty otherwise. */
+  type: string;
+  /** The `role` attribute, trimmed and lower case. */
+  roleAttr: string;
+  /** Null when the accessibility tree has no node for the element (not rendered, or the tree could not be read). */
+  ax: NrvAx | null;
+  sources: NrvSource[];
+  /** Activation listeners on the element itself, by type, sorted. */
+  listeners: string[];
+  /** Handlers a framework holds for the element (`react:onClick`, `jquery:click`, `ember:action`), sorted. */
+  framework: string[];
+  /** An ancestor, its document or its window has an activation listener: a framework may delegate. Not evidence on its own. */
+  delegated: boolean;
+  /** `tabindex` attribute as a number, null when absent or not a number. */
+  tabindex: number | null;
+  /** `disabled`, inside a disabled `fieldset`, or `aria-disabled="true"` on it or an ancestor. */
+  disabled: boolean;
+  /** For `a` and `area`. */
+  /** For `a` and `area`. `words`: the path and fragment of the address, lower case, cut to 200 characters: what the link points to. */
+  href?: { kind: NrvHrefKind; target: string; download: boolean; sameDocument: boolean; words?: string };
+  /** A submit button (`button` of type submit, `input` submit or image) with a form owner. */
+  submits: boolean;
+  /** Inside a `form` or with a form owner. */
+  inForm: boolean;
+  /** A `label` element, or an element with `for`. */
+  isLabel: boolean;
+  /** Inside a link, a button or another control (composed tree): the control is the ancestor. */
+  insideControl: string;
+  /** Interactive elements inside it (composed tree), counted up to 9. */
+  interactiveDescendants: number;
+  /** Visible text, white space collapsed, cut to `itemTextMaxChars`. */
+  text: string;
+  textChars: number;
+  /** Share of the viewport its box covers. */
+  areaShare: number;
+  /** Its text, or that of a descendant, is set in a font that `icon.iconFontFamilyPattern` matches (a ligature font). */
+  iconFont: boolean;
+  /** Attributes of state read from the markup, when present: `aria-expanded`, `aria-pressed`, `aria-checked`, `aria-selected`, `aria-valuenow`, `aria-valuetext`, `aria-controls`, `aria-haspopup`. */
+  attrs: Record<string, string>;
+  /** `aria-controls` names an element that exists and is not rendered. */
+  controlsHidden: boolean;
+  /** Matches `nameRoleValue.probeExcludeSelector`. */
+  excluded: boolean;
+  /** The nearest ancestor with the role `tablist`, `radiogroup`, `listbox`, `menu`, `menubar`, `tree`, `grid` or `toolbar`, as a number that only tells such containers apart; -1 for none. */
+  container: number;
+  /** For a frame: whether its document can be read, and how many focusable elements it holds. */
+  frameContent?: { readable: boolean; focusables: number };
+}
+
+/** The accessibility states compared before and after an activation. */
+export interface NrvAxState {
+  role: string;
+  name: string;
+  /** `expanded`, `pressed`, `checked`, `selected`, `valuenow`, `valuetext`, `disabled`: only those Chrome gives. */
+  states: Record<string, string>;
+}
+
+/** Something an activation tried to do that is not a change in place, recorded while it was stopped. */
+export interface NrvNavigation {
+  /**
+   * - `document`: a request for a new document in the top frame (stopped).
+   * - `frame`: the same in a frame.
+   * - `history`: `history.pushState` (the address changed, no request).
+   * - `replace`: `history.replaceState`.
+   * - `fragment`: only the fragment of the address changed.
+   * - `window`: `window.open`, or a link to a new window (stopped).
+   * - `download`: a link with `download` (stopped).
+   * - `submit`: a form was submitted (stopped).
+   */
+  kind: 'document' | 'frame' | 'history' | 'replace' | 'fragment' | 'window' | 'download' | 'submit';
+  /** Origin and path; no query, no fragment (it can carry what a page holds). For `fragment` the fragment alone. */
+  url: string;
+  /** HTTP method, for `document` and `frame`. */
+  method?: string;
+  /** The path of the address differs from the one the page had. */
+  otherPath?: boolean;
+  /** The query of the address holds the value of a text field of the page: a search or a form sent by script. */
+  carriesFieldValue?: boolean;
+  /** For `fragment`: an element of the page has that id or name. */
+  targetFound?: boolean;
+}
+
+/** An element that appeared or disappeared after an activation, outside the activated element. Only the outermost of each set. */
+export interface NrvRegion {
+  box: Box;
+  /** `dialog` (role dialog or alertdialog, `dialog` element, `aria-modal`), `live` (a live region, an alert, a status, a tooltip), `popup` (menu, listbox, tree, grid), or empty. */
+  kind: '' | 'dialog' | 'live' | 'popup';
+  /** Fixed in the viewport (`position: fixed` on it or an ancestor): a toast, a drawer, an overlay. */
+  fixed: boolean;
+  /** The activated element names it, or an element inside it, with `aria-controls`. */
+  controlled: boolean;
+  /**
+   * Close to the activated element in the document: it controls it, or they share an ancestor no
+   * more than `regionMaxAncestorLevels` above the activated element. What appears elsewhere (a
+   * notice of the page, a widget that finished loading) is not taken for an effect of the activation.
+   */
+  near: boolean;
+  /** The element was in the document before: it was shown or hidden, not added or removed. */
+  existed: boolean;
+}
+
+/** What one activation changed. */
+export interface NrvStep {
+  ax: NrvAxState | null;
+  /** The activated element is no longer in the document. */
+  removed: boolean;
+  /** The activated element is still in the document and no longer visible: it hid itself (a button that opens a form in its place). */
+  selfHidden?: boolean;
+  navigations: NrvNavigation[];
+  /** Elements that became visible. */
+  revealed: NrvRegion[];
+  /** Elements that stopped being visible. */
+  hidden: NrvRegion[];
+  /** Text outside the activated element changed in a visible element (a counter, a message). */
+  textChanged: number;
+  /** Pixels changed inside the box of the activated element, in CSS px²; null when the two captures cannot be compared (the page scrolled). */
+  ownChange: number | null;
+  /** The page scrolled. */
+  scrolled: boolean;
+  /** Focus moved into something that appeared, or to the target of a fragment. */
+  focusMoved: boolean;
+  /** JavaScript dialogs (alert, confirm, prompt, print) that were dismissed. */
+  dialogs: number;
+  /** Requests of another method than GET or HEAD it tried to send (all stopped): it performs an action. */
+  writes: number;
+}
+
+/** One activation probe of an element of the inventory. */
+export interface NrvProbe {
+  /** `ord` of the element in the inventory. */
+  ord: number;
+  selector: string;
+  frame: string;
+  /** Why it was chosen: see `nameRoleValueProbeTargets`. */
+  reason: 'no-href' | 'stateful' | 'no-role' | 'link-handler';
+  /**
+   * `done`; `not-found` (not in the page any more, or another element is in its place after a
+   * reload); `not-visible`; `error` (the page did not answer); `budget` (`maxProbes`,
+   * `probeBudgetMs` or `maxProbeReloads` ran out before it).
+   */
+  outcome: 'done' | 'not-found' | 'not-visible' | 'error' | 'budget';
+  before?: NrvAxState | null;
+  /** After the activation. */
+  after?: NrvStep;
+  /** After a second activation, when the first showed something or changed the element itself: a toggle comes back. */
+  again?: NrvStep & {
+    /** What appeared after the first activation is hidden again. */
+    revealReverted: boolean;
+    /** The element looks as it did before the first activation. */
+    ownReverted: boolean;
+  };
+  /** Capture ids: before, after, and after the second activation. */
+  crops?: { before: string; after: string; again?: string };
+}
+
+export interface NrvProbeLog {
+  mode: 'safe' | 'off';
+  /** Probing ran (`mode` is `safe`, and there was something to probe). */
+  ran: boolean;
+  probes: NrvProbe[];
+  /** Elements that qualified for a probe, including those beyond the limits. */
+  planned: number;
+  /** Requests that were stopped, as `METHOD type origin+path`, sorted, without repeats. */
+  blocked: string[];
+  /** Requests that were let through (GET or HEAD of `probeAllowedResourceTypes`), counted. */
+  allowed: number;
+  /** Writes that reached the network: requests that were neither stopped nor of an allowed kind. Always 0 unless something is wrong; a test checks it. */
+  unsafe: number;
+  /** Windows the page opened that had to be closed (none, unless the page got past the guard). */
+  popups: number;
+  /** Calls the guard in the page stopped: `window.open`, a send over a WebSocket, a beacon, a write to IndexedDB... by name, counted. */
+  guarded: Record<string, number>;
+  /** Reloads of the page between probes, and at the end. */
+  reloads: number;
+  /** Frames the agent cannot look into, emptied while probing and put back afterwards. */
+  framesEmptied: number;
+  /** Cookies, local storage and session storage were put back as they were before probing. */
+  storageRestored: { cookies: number; localStorage: number; sessionStorage: number };
+  /** Why probing stopped early, when it did. */
+  stopped?: 'maxProbes' | 'budget' | 'reloads' | 'error';
+}
+
+export interface NameRoleValueSurvey {
+  /** In document order. */
+  elements: NrvElement[];
+  /** Elements that qualified, including those beyond `maxElements`. */
+  total: number;
+  /** The accessibility tree of every document that was looked into could be read. */
+  axComplete: boolean;
+  /** `focus`: the walk of the focus-indicator check; `own`: a walk of this check; `none`: no walk. */
+  walk: 'focus' | 'own' | 'none';
+  /** Activation listeners read from the page could be read in full. */
+  listenersRead: boolean;
+  /** Elements with activation listeners that were left out of the inventory (beyond `maxListenerElements`). */
+  listenersBeyond: number;
+  /** Captures of elements in context, by `ord`. */
+  captures: Record<string, { crop: string | null; covered?: boolean }>;
+  probe: NrvProbeLog;
+}
+
 export interface Snapshot {
   environment: Environment;
+  /** Present when the name-role-value check was collected. */
+  nameRoleValue?: NameRoleValueSurvey;
   /** Present when the grouping check was collected. */
   grouping?: GroupingSurvey;
   /** Present when the lists check was collected. */
@@ -1876,9 +2152,121 @@ export interface GroupingConfig {
   contextMaxItems: number;
 }
 
+/** Settings of the name-role-value check (4.1.2). */
+export interface NameRoleValueConfig {
+  /**
+   * `safe`: controls are activated to see what they do (link or button behaviour, state that
+   * changes), with every write to the network stopped and the page put back (see the README,
+   * "The probing safety model"). `off`: the rules that read the page as it is, and nothing else.
+   * The extension uses `off` whatever this says.
+   */
+  probe: 'safe' | 'off';
+  /**
+   * Report also what axe-core reports (empty names of buttons, links and fields, required states,
+   * required context, focusable content under `aria-hidden`, nested controls). True by default:
+   * the owner asked for the whole criterion. Each such finding carries the flag `axeCovered` and
+   * the name of the axe rule in `values.axeRule`.
+   */
+  includeAxeCovered: boolean;
+  /**
+   * OPEN DECISION of the owner. Status of a link that behaves as a button, or a button that behaves
+   * as a link, when an activation measured it. `likely` by default: the role a control should have
+   * is inferred from what it does. `fail` makes those measured cases break a build; static evidence
+   * alone stays `advisory` whatever this says.
+   */
+  behaviourRoleStatus: 'likely' | 'fail';
+  /** At most this many elements are read into the inventory, in document order. */
+  maxElements: number;
+  /** At most this many elements with activation listeners are looked at (Vue and Svelte attach one to each element). */
+  maxListenerElements: number;
+  /** Accessible names are cut to this many characters. */
+  maxNameChars: number;
+  /** Text of an element kept for messages, at most. */
+  itemTextMaxChars: number;
+  /** At most this many findings are reported (`fail` first). */
+  maxCandidates: number;
+  /** At most this many captures of elements in context are taken. */
+  maxCaptures: number;
+  /** Margin around an element in a capture, CSS px. */
+  clipMarginCssPx: number;
+  /**
+   * An element whose box covers more than this share of the viewport is a container (a card grid
+   * with a listener for delegation, a backdrop that closes a dialog), not a control: it is not
+   * reported as a control without a role.
+   */
+  maxControlAreaShare: number;
+  /**
+   * A name made only of one of these words is no name: the role said again, or what a template
+   * leaves behind (`null`, `undefined`). English and French, as the owner asked; case and the
+   * space around it are ignored. "Click here" is not among them: that is 2.4.4. Words that are also
+   * names of things are left out ("Option" is a filter of a shop, "Switch" a console, "Radio" a
+   * station, "Image", "Tab", "Toggle"), as seen on real pages.
+   */
+  genericNamePattern: string;
+  /** A name that looks like a CSS class or an identifier: words joined by `_`, or a prefix of an icon set or a component library. */
+  classLikeNamePattern: string;
+  /** A name that ends as the file name of a picture. */
+  fileNamePattern: string;
+  /** A name that is an address. Reported on controls that are not links: a link named by its address says where it goes. */
+  urlNamePattern: string;
+  /** Characters of the Private Use Areas, where icon fonts put their glyphs. */
+  privateUsePattern: string;
+  /** Status of a field named only by its `title` (`advisory`), and of one named only by its placeholder (`advisory`). Neither can be raised above `advisory`. */
+  titleOnlyStatus: 'advisory' | 'info';
+  placeholderOnlyStatus: 'advisory' | 'info';
+  /** Walk the page with Tab when the focus-indicator check does not run in the same scan. */
+  tabWalk: boolean;
+  /** The walk of this check stops after this many stops. */
+  maxTabStops: number;
+  /** At most this many elements are activated. */
+  maxProbes: number;
+  /** Probing stops when it has taken this long, in milliseconds; what is left is recorded as not probed. */
+  probeBudgetMs: number;
+  /** After an activation, this long is waited for the page to react, in milliseconds, before the frames settle. */
+  probeSettleMs: number;
+  /** A CSS selector; elements that match it, or are inside an element that does, are never activated. */
+  probeExcludeSelector: string;
+  /**
+   * The only requests let through while probing: GET or HEAD of these resource types (as CDP
+   * names them). Everything else is stopped: every other method, every request of a script
+   * (`Fetch`, `XHR`), beacons (`Ping`), `EventSource`, `Other`, and every navigation (`Document`).
+   */
+  probeAllowedResourceTypes: string[];
+  /**
+   * Let those reads through also when their address has a query string. False by default: a read
+   * with a query is what a tracking pixel, a JSONP call (`?callback=`) and an old add-to-cart link
+   * look like, and a static resource rarely needs one. A style sheet or a script with a cache-busting
+   * query (`app.css?v=3`) is then stopped too, and the page may look or work less well while it is
+   * probed; that costs findings, never safety.
+   */
+  probeAllowQueryStrings: boolean;
+  /** Activate a second time what showed something or changed its own look, to see whether it comes back (a toggle, a disclosure). */
+  probeConfirmToggle: boolean;
+  /** Reloads between probes, at most; probing stops when they run out. */
+  maxProbeReloads: number;
+  /** How long a reload may take, in milliseconds. */
+  reloadTimeoutMs: number;
+  /** Pixels that changed inside the activated element, in CSS px², from which its own look changed. */
+  ownChangeMinAreaCssPx2: number;
+  /** An element that appears or disappears is counted when its box is at least this large, CSS px². */
+  revealMinAreaCssPx2: number;
+  /** At most this many elements of the page are compared for visibility before and after an activation. */
+  maxVisibilityElements: number;
+  /** A region shown or hidden counts for the state of a control when it shares an ancestor with it at most this many levels above the control, or the control names it in `aria-controls`. */
+  regionMaxAncestorLevels: number;
+  /** Before the first probe and after each reload, the page is waited for until nothing in it has changed for `quietMs`, `quietMaxMs` at most. */
+  quietMs: number;
+  quietMaxMs: number;
+  /** Margins of the captures of an activation around the element, CSS px: on each side, above, below. */
+  probeClipSideCssPx: number;
+  probeClipAboveCssPx: number;
+  probeClipBelowCssPx: number;
+}
+
 export interface Config {
   /** Checks to run, in any order. */
   checks: CheckId[];
+  nameRoleValue: NameRoleValueConfig;
   /**
    * Focus-indicator settings. Its capture settings (`deviceScaleFactor`, `settleFrames`,
    * `settleTimeoutMs`, `fontsTimeoutMs`) apply to every check that takes captures.

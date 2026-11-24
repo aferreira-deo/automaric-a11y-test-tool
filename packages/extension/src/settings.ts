@@ -6,7 +6,7 @@ import type { PermissionsApi, StorageArea } from './chrome-api.js';
 import type { ExtensionConfig } from './config.js';
 
 /** The checks the panel offers, in the order it lists them. */
-export const CHECKS: readonly CheckId[] = ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping'];
+export const CHECKS: readonly CheckId[] = ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value'];
 
 /** The model endpoint, as the user configured it. The key is not part of it: see `SettingsStore`. */
 export interface ModelSettings {

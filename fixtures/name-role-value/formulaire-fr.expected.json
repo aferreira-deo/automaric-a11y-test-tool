@@ -1,0 +1,64 @@
+{
+  "description": "The same rules on a page in French: what is correct (a skip link, a search form, a checkbox, a toggle, a dialog trigger, a link) and what is not (a name that says bouton, an empty link, a focusable div that listens, a link that opens a dialog, a button that goes to another page, a disclosure without aria-expanded).",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#bouton-generique",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/name-not-descriptive",
+      "flags": [
+        "generic"
+      ]
+    },
+    {
+      "selector": "#lien-vide",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name"
+    },
+    {
+      "selector": "#voir-detail",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/no-role"
+    },
+    {
+      "selector": "#lien-connexion",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "opensDialog"
+      ]
+    },
+    {
+      "selector": "#nos-magasins",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/button-acts-as-link",
+      "flags": [
+        "measured"
+      ]
+    },
+    {
+      "selector": "#horaires",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "disclosure"
+      ]
+    }
+  ]
+}

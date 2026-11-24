@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dangerous controls</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  button, .fake { font: inherit; padding: 4px 10px; margin: 4px; border: 1px solid #595959; background: #fff; color: #1a1a1a; }
+  .fake { display: inline-block; cursor: pointer; }
+  iframe { width: 240px; height: 50px; border: 1px solid #595959; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Every control here writes somewhere when it is really clicked</h1>
+  <p>A scan that probes this page must leave no request under /_nrv/write/ or /_nrv/nav/ on the server.</p>
+  <div id="controls">
+    <button type="button" id="fetch-post">Place the order</button>
+    <button type="button" id="xhr-delete">Delete the account</button>
+    <button type="button" id="beacon">Send a beacon</button>
+    <button type="button" id="keepalive">Fetch with keepalive</button>
+    <button type="button" id="get-api">Add to cart (GET API)</button>
+    <button type="button" id="jsonp">Add to cart (JSONP)</button>
+    <button type="button" id="pixel">Track (pixel)</button>
+    <button type="button" id="event-source">Subscribe (EventSource)</button>
+    <button type="button" id="form-submit">Send the form by script</button>
+    <button type="button" id="location">Log out</button>
+    <button type="button" id="popup">Open a window</button>
+    <button type="button" id="blank-anchor">Open in a new tab by script</button>
+    <button type="button" id="download">Download by script</button>
+    <button type="button" id="confirm">Empty the basket</button>
+    <button type="button" id="local-cart">Add to the local basket</button>
+    <button type="button" id="cookie">Remember me</button>
+    <button type="button" id="idb">Save offline</button>
+    <button type="button" id="frame-message">Pay in the frame</button>
+    <button type="button" id="sw-message">Sync with the service worker</button>
+    <button type="button" id="sw-broadcast">Broadcast to the service worker</button>
+    <button type="button" id="worker">Ask the worker</button>
+    <button type="button" id="websocket">Chat</button>
+    <button type="button" id="push-and-post">Checkout (single-page)</button>
+    <span class="fake" id="div-post">Buy now</span>
+    <a href="#" id="link-post">Unsubscribe</a>
+    <a id="ping-link">Read the article</a>
+    <form method="post" id="post-form"><input type="hidden" name="x" value="1"><button type="button" id="request-submit">Send with requestSubmit</button></form>
+    <form method="post" id="submit-form"><label for="amount">Amount</label> <input id="amount" name="amount" value="10"> <button id="real-submit">Transfer</button></form>
+    <iframe id="pay-frame" title="Payment"></iframe>
+  </div>
+</main>
+<script>
+  const session = new URLSearchParams(location.search).get('s') || 'manual';
+  const base = '/_nrv/write/' + session + '/';
+  const nav = '/_nrv/nav/' + session + '/';
+  const $ = (id) => document.getElementById(id);
+  const on = (id, handler) => $(id).addEventListener('click', handler);
+  $('post-form').action = base + 'request-submit';
+  $('submit-form').action = base + 'real-submit';
+  $('ping-link').href = nav + 'ping-link';
+  $('ping-link').setAttribute('ping', base + 'ping');
+  $('pay-frame').src = location.href.includes('127.0.0.1') ? location.origin.replace('127.0.0.1', 'localhost') + '/_nrv/frame/' + session : 'about:blank';
+
+  on('fetch-post', () => fetch(base + 'fetch-post', { method: 'POST', body: 'order' }));
+  on('xhr-delete', () => { const xhr = new XMLHttpRequest(); xhr.open('DELETE', base + 'xhr-delete'); xhr.send(); });
+  on('beacon', () => navigator.sendBeacon(base + 'beacon', 'x'));
+  on('keepalive', () => fetch(base + 'keepalive', { method: 'POST', keepalive: true, body: 'x' }));
+  on('get-api', () => fetch(base + 'get-api?item=42'));
+  on('jsonp', () => { const script = document.createElement('script'); script.src = base + 'jsonp?item=42&callback=cb'; document.head.append(script); });
+  on('pixel', () => { new Image().src = base + 'pixel?event=click'; });
+  on('event-source', () => { try { new EventSource(base + 'event-source'); } catch {} });
+  on('form-submit', () => $('post-form').submit());
+  on('location', () => { location.href = nav + 'logout'; });
+  on('popup', () => window.open(nav + 'popup'));
+  on('blank-anchor', () => { const a = document.createElement('a'); a.href = nav + 'blank-anchor'; a.target = '_blank'; document.body.append(a); a.click(); a.remove(); });
+  on('download', () => { const a = document.createElement('a'); a.href = base + 'download'; a.download = 'file.txt'; document.body.append(a); a.click(); a.remove(); });
+  on('confirm', () => { if (confirm('Empty the basket?')) fetch(base + 'confirm', { method: 'DELETE' }); });
+  on('local-cart', () => localStorage.setItem('nrv-cart', '1'));
+  on('cookie', () => { document.cookie = 'nrv-remember=1; path=/'; });
+  on('idb', () => {
+    const open = indexedDB.open('nrv-safety', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('queue');
+    open.onsuccess = () => { try { open.result.transaction('queue', 'readwrite').objectStore('queue').put('order', 'pending'); } catch {} };
+  });
+  on('frame-message', () => $('pay-frame').contentWindow.postMessage('pay', '*'));
+  on('sw-message', () => navigator.serviceWorker.ready.then((registration) => registration.active.postMessage({ session })));
+  on('sw-broadcast', () => new BroadcastChannel('nrv-safety').postMessage({ session }));
+  const worker = new Worker(URL.createObjectURL(new Blob(['onmessage = (event) => fetch(event.data, { method: "POST", body: "x" });'], { type: 'text/javascript' })));
+  on('worker', () => worker.postMessage(location.origin + base + 'worker'));
+  on('websocket', () => { const ws = new WebSocket(location.origin.replace('http', 'ws') + '/_nrv/ws/' + session); ws.onopen = () => ws.send('hello'); });
+  on('push-and-post', () => { history.pushState({}, '', '/name-role-value/checkout'); fetch(base + 'checkout', { method: 'POST', body: 'x' }); });
+  on('div-post', () => fetch(base + 'div-post', { method: 'PUT', body: 'x' }));
+  on('link-post', (event) => { event.preventDefault(); fetch(base + 'unsubscribe', { method: 'POST', body: 'x' }); });
+  on('request-submit', () => $('post-form').requestSubmit());
+
+  // What a page does when it loads again after a click wrote to storage: it sends what was kept.
+  if (localStorage.getItem('nrv-cart')) fetch(base + 'local-cart-sync', { method: 'POST', body: 'x' });
+  if (document.cookie.includes('nrv-remember=1')) fetch(base + 'cookie-sync', { method: 'POST', body: 'x' });
+  try {
+    const open = indexedDB.open('nrv-safety', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('queue');
+    open.onsuccess = () => {
+      try {
+        const request = open.result.transaction('queue', 'readonly').objectStore('queue').get('pending');
+        request.onsuccess = () => { if (request.result) fetch(base + 'idb-sync', { method: 'POST', body: 'x' }); };
+      } catch {}
+    };
+  } catch {}
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('safety-sw.js', { scope: './' }).catch(() => {});
+</script>
+</body>
+</html>

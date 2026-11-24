@@ -4,6 +4,8 @@ import { compareToManifest, loadFixtures } from './support/manifest.js';
 
 for (const fixture of loadFixtures()) {
   test(`fixture ${fixture.name}`, async ({ page }) => {
+    // Probing activates controls one by one and reloads the page between them, twice here.
+    if (fixture.manifest.checks.includes('name-role-value')) test.slow();
     await page.goto(fixture.path);
     const analyze = () => new A11yVision({ page }).withChecks(fixture.manifest.checks).analyze();
 

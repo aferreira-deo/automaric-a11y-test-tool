@@ -1,4 +1,4 @@
-import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, RunConfig, SelectorConfig } from './types.js';
+import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, NameRoleValueConfig, RunConfig, SelectorConfig } from './types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +6,48 @@ import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, 
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value'],
+  nameRoleValue: {
+    probe: 'safe',
+    includeAxeCovered: true,
+    behaviourRoleStatus: 'likely',
+    maxElements: 3000,
+    maxListenerElements: 3000,
+    maxNameChars: 160,
+    itemTextMaxChars: 80,
+    maxCandidates: 300,
+    maxCaptures: 120,
+    clipMarginCssPx: 16,
+    maxControlAreaShare: 0.25,
+    genericNamePattern:
+      '^(?:button|btn|bouton|link|lien|checkbox|check box|case \\u00e0 cocher|radio button|bouton radio|menu item|img|icon|ic\\u00f4ne|picto|pictogramme|graphic|svg|null|undefined|nan|\\[object object\\]|true|false)$',
+    classLikeNamePattern: '^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$|^(?:fa|fas|far|fab|fal|bi|mdi|icon|icons|ico|icn|btn|glyphicon|material-icons|ti|la|las|lar|js)-[a-z0-9-]+$',
+    fileNamePattern: '\\.(?:png|jpe?g|gif|svg|webp|avif|bmp|ico|tiff?)$',
+    urlNamePattern: '^(?:https?:)?//|^www\\.',
+    privateUsePattern: '[\\ue000-\\uf8ff\\u{f0000}-\\u{ffffd}\\u{100000}-\\u{10fffd}]',
+    titleOnlyStatus: 'advisory',
+    placeholderOnlyStatus: 'advisory',
+    tabWalk: true,
+    maxTabStops: 300,
+    maxProbes: 30,
+    probeBudgetMs: 60000,
+    probeSettleMs: 250,
+    probeExcludeSelector: '[data-a11y-vision-no-probe]',
+    probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],
+    probeAllowQueryStrings: false,
+    probeConfirmToggle: true,
+    maxProbeReloads: 30,
+    reloadTimeoutMs: 15000,
+    ownChangeMinAreaCssPx2: 6,
+    revealMinAreaCssPx2: 200,
+    maxVisibilityElements: 30000,
+    regionMaxAncestorLevels: 3,
+    quietMs: 300,
+    quietMaxMs: 3000,
+    probeClipSideCssPx: 120,
+    probeClipAboveCssPx: 48,
+    probeClipBelowCssPx: 240,
+  },
   focus: {
     deviceScaleFactor: 2,
     captureSizeTolerancePx: 1,
@@ -351,6 +392,7 @@ export type AdjudicationInput = Partial<AdjudicationConfig> & DeprecatedAdjudica
 
 export type ConfigInput = {
   checks?: CheckId[];
+  nameRoleValue?: Partial<NameRoleValueConfig>;
   focus?: Partial<FocusConfig>;
   icon?: Partial<IconConfig>;
   headings?: Partial<HeadingsConfig>;
@@ -477,6 +519,7 @@ export function resolveConfig(input: ConfigInput = {}): Config {
   grouping.duplicateUnderHeadingsStatus = clampDuplicateUnderHeadingsStatus(grouping.duplicateUnderHeadingsStatus);
   return {
     checks: input.checks ? [...new Set(input.checks)] : [...defaultConfig.checks],
+    nameRoleValue: resolveNameRoleValue(input.nameRoleValue),
     focus: { ...defaultConfig.focus, ...input.focus },
     icon: { ...defaultConfig.icon, ...input.icon },
     headings,
@@ -486,6 +529,71 @@ export function resolveConfig(input: ConfigInput = {}): Config {
     baseline: resolveBaselineConfig(input.baseline),
     run: resolveRun(input.run),
     selector: resolveSelector(input.selector),
+  };
+}
+
+/** A regular expression with the `iu` flags, or the default when the value is not one. */
+function pattern(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  try {
+    new RegExp(value, 'iu');
+    return value;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Settings of the name-role-value check, whatever was given: a configuration can come from a JSON
+ * file. Statuses take only the values their option allows (`behaviourRoleStatus`: `likely` or
+ * `fail`; the status of a name from a title or a placeholder: `advisory` or `info`), numbers are
+ * numbers within their range, patterns are regular expressions.
+ */
+export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): NameRoleValueConfig {
+  const base = defaultConfig.nameRoleValue;
+  const merged = { ...base, ...input };
+  const flag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
+  const share = (value: unknown, fallback: number): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback);
+  return {
+    probe: oneOf(merged.probe, ['safe', 'off'], base.probe),
+    includeAxeCovered: flag(merged.includeAxeCovered, base.includeAxeCovered),
+    behaviourRoleStatus: oneOf(merged.behaviourRoleStatus, ['likely', 'fail'], base.behaviourRoleStatus),
+    maxElements: atLeast(merged.maxElements, 1, base.maxElements),
+    maxListenerElements: atLeast(merged.maxListenerElements, 0, base.maxListenerElements),
+    maxNameChars: atLeast(merged.maxNameChars, 8, base.maxNameChars),
+    itemTextMaxChars: atLeast(merged.itemTextMaxChars, 8, base.itemTextMaxChars),
+    maxCandidates: atLeast(merged.maxCandidates, 1, base.maxCandidates),
+    maxCaptures: atLeast(merged.maxCaptures, 0, base.maxCaptures),
+    clipMarginCssPx: atLeast(merged.clipMarginCssPx, 0, base.clipMarginCssPx, false),
+    maxControlAreaShare: share(merged.maxControlAreaShare, base.maxControlAreaShare),
+    genericNamePattern: pattern(merged.genericNamePattern, base.genericNamePattern),
+    classLikeNamePattern: pattern(merged.classLikeNamePattern, base.classLikeNamePattern),
+    fileNamePattern: pattern(merged.fileNamePattern, base.fileNamePattern),
+    urlNamePattern: pattern(merged.urlNamePattern, base.urlNamePattern),
+    privateUsePattern: pattern(merged.privateUsePattern, base.privateUsePattern),
+    titleOnlyStatus: oneOf(merged.titleOnlyStatus, ['advisory', 'info'], base.titleOnlyStatus),
+    placeholderOnlyStatus: oneOf(merged.placeholderOnlyStatus, ['advisory', 'info'], base.placeholderOnlyStatus),
+    tabWalk: flag(merged.tabWalk, base.tabWalk),
+    maxTabStops: atLeast(merged.maxTabStops, 1, base.maxTabStops),
+    maxProbes: atLeast(merged.maxProbes, 0, base.maxProbes),
+    probeBudgetMs: duration(merged.probeBudgetMs, 0, base.probeBudgetMs),
+    probeSettleMs: duration(merged.probeSettleMs, 0, base.probeSettleMs),
+    probeExcludeSelector: typeof merged.probeExcludeSelector === 'string' ? merged.probeExcludeSelector.trim() : base.probeExcludeSelector,
+    // A navigation is never let through, whatever the list says.
+    probeAllowedResourceTypes: names(merged.probeAllowedResourceTypes, base.probeAllowedResourceTypes).filter((type) => type !== 'Document' && /^[A-Za-z]+$/.test(type)),
+    probeAllowQueryStrings: flag(merged.probeAllowQueryStrings, base.probeAllowQueryStrings),
+    probeConfirmToggle: flag(merged.probeConfirmToggle, base.probeConfirmToggle),
+    maxProbeReloads: atLeast(merged.maxProbeReloads, 0, base.maxProbeReloads),
+    reloadTimeoutMs: duration(merged.reloadTimeoutMs, 1, base.reloadTimeoutMs),
+    ownChangeMinAreaCssPx2: atLeast(merged.ownChangeMinAreaCssPx2, 0, base.ownChangeMinAreaCssPx2, false),
+    revealMinAreaCssPx2: atLeast(merged.revealMinAreaCssPx2, 0, base.revealMinAreaCssPx2, false),
+    maxVisibilityElements: atLeast(merged.maxVisibilityElements, 0, base.maxVisibilityElements),
+    regionMaxAncestorLevels: atLeast(merged.regionMaxAncestorLevels, 1, base.regionMaxAncestorLevels),
+    quietMs: duration(merged.quietMs, 0, base.quietMs),
+    quietMaxMs: duration(merged.quietMaxMs, 0, base.quietMaxMs),
+    probeClipSideCssPx: atLeast(merged.probeClipSideCssPx, 0, base.probeClipSideCssPx, false),
+    probeClipAboveCssPx: atLeast(merged.probeClipAboveCssPx, 0, base.probeClipAboveCssPx, false),
+    probeClipBelowCssPx: atLeast(merged.probeClipBelowCssPx, 0, base.probeClipBelowCssPx, false),
   };
 }
 

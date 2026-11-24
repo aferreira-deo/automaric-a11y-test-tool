@@ -18,6 +18,7 @@ export const en = {
   checkHeadings: 'Headings (1.3.1)',
   checkLists: 'Lists (1.3.1)',
   checkGrouping: 'Grouping of form controls (1.3.1)',
+  checkNameRoleValue: 'Name, role, value (4.1.2)',
   scanButton: 'Scan this page',
   stopButton: 'Stop the scan',
   scanNote:
@@ -112,6 +113,9 @@ export const en = {
   cropUnfocused: 'Not focused',
   cropAtRest: 'At rest',
   cropInContext: 'In context',
+  cropBeforeActivation: 'Before activation',
+  cropAfterActivation: 'After activation',
+  cropAfterSecondActivation: 'After a second activation',
   cropCapture: 'Capture',
   cropAlt: '{label} capture of {selector}',
 

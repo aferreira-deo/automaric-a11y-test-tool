@@ -32,6 +32,8 @@ const chosen = [
   'headings/not-a-heading-negatives',
   'lists/glyph-lists',
   'grouping/choice-sets',
+  // Static: nothing on it listens, so probing would activate nothing there either.
+  'name-role-value/names',
 ];
 // With A11Y_VISION_EXTENSION_ALL_FIXTURES set: every fixture but the one of the check the panel does not offer.
 const fixtures = process.env['A11Y_VISION_EXTENSION_ALL_FIXTURES'] ? all.filter((fixture) => !fixture.manifest.checks.includes('noop')) : all.filter((fixture) => chosen.includes(fixture.name));
@@ -63,7 +65,8 @@ test.describe('a scan from the panel', () => {
       // The same page through the Playwright target, in the same browser and, Chrome's bar still
       // showing, the same viewport: the two targets share one core and one collector, and have
       // to say the same thing.
-      const viaPlaywright = await new A11yVision({ page }).withChecks(fixture.manifest.checks).analyze();
+      // The extension activates nothing (extensionConfig.openDecisions.probe): compared with a scan that does not either.
+      const viaPlaywright = await new A11yVision({ page }).withChecks(fixture.manifest.checks).options({ nameRoleValue: { probe: 'off' } }).analyze();
       expect(comparable(findings)).toEqual(comparable(viaPlaywright.findings));
       expect(compareToManifest(findings, fixture.manifest), fixture.manifest.description).toEqual({ missing: [], unexpected: [] });
       // What the panel shows is what was found: one card per finding.
@@ -95,7 +98,7 @@ test('the page is put back after a scan and the debugger is detached', async ({ 
   });
   const before = await pageState(page);
   expect(before.windowScroll[1]).toBe(120);
-  await scan(panel, ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping']);
+  await scan(panel, ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value']);
   // At once, everything but the height of the viewport: Chrome's bar ("... is debugging this
   // browser") is still there for some time after the debugger is detached, unless it already
   // showed before the scan (see `settled` below).
@@ -105,6 +108,20 @@ test('the page is put back after a scan and the debugger is detached', async ({ 
   // after the debugger is detached: the viewport is then the one the page had before the scan,
   // to the pixel. An emulated size that the scan left behind would never come back to it.
   await expect.poll(() => pageState(page), { timeout: 20_000, intervals: [250] }).toEqual(before);
+});
+
+test('the name-role-value check activates nothing from the extension', async ({ panelFor }) => {
+  const { page, panel } = await panelFor('/name-role-value/link-button.html');
+  await page.evaluate(() => document.body.setAttribute('data-before-scan', 'yes'));
+  await scan(panel, ['name-role-value']);
+  const findings = (await exportedJson(panel)).a11yVision.findings;
+  const survey = findings.find((finding) => finding.rule === 'name-role-value/survey')!;
+  expect(survey.evidence.values).toMatchObject({ probe: 'off', probesDone: 0, reloads: 0 });
+  expect(findings.filter((finding) => finding.evidence.flags.includes('measured'))).toEqual([]);
+  // What the markup says is reported all the same.
+  expect(findings.some((finding) => finding.selector === '#link-toggle' && finding.status === 'advisory')).toBe(true);
+  // Not reloaded, not changed.
+  expect(await page.evaluate(() => document.body.getAttribute('data-before-scan'))).toBe('yes');
 });
 
 test('the exports are the reports of the CLI, with the decisions in the JSON', async ({ panelFor }) => {
@@ -726,7 +743,7 @@ test.describe('the panel itself', () => {
     expect(unnamed).toBe(0);
     // Start a scan from the keyboard; the result is announced, and focus goes to the findings.
     await panel.locator('#check-focus-indicator').focus();
-    for (const id of ['check-icon-contrast', 'check-headings', 'check-lists', 'check-grouping']) {
+    for (const id of ['check-icon-contrast', 'check-headings', 'check-lists', 'check-grouping', 'check-name-role-value']) {
       await panel.keyboard.press('Tab');
       await expect(panel.locator(`#${id}`)).toBeFocused();
       await panel.keyboard.press('Space');

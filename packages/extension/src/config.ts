@@ -18,6 +18,15 @@ export interface ExtensionConfig {
     uiFramework: 'none';
     /** 10.6: an endpoint that is not on this machine is refused unless the user allows it, as in the CLI. */
     allowRemoteByDefault: false;
+    /**
+     * The name-role-value check activates nothing from the extension (`probe: 'off'`), whatever its
+     * configuration says: only the rules that read the page as it is run. The network block itself
+     * works over chrome.debugger, but the extension scans the user's own browser, with the user's
+     * sessions: a reload between probes loses what the user was doing on the page, and storage
+     * that cannot be put back (IndexedDB, the Cache API, what another tab does meanwhile) belongs
+     * to the user. Deciding to switch it on is the owner's.
+     */
+    probe: 'off';
   };
   debugger: {
     /** Version of the DevTools protocol asked for when attaching. */
@@ -119,6 +128,7 @@ export const extensionConfig: ExtensionConfig = {
     debuggerMode: 'required',
     uiFramework: 'none',
     allowRemoteByDefault: false,
+    probe: 'off',
   },
   debugger: { protocolVersion: '1.3', viewportSettleMs: 400, viewportPollMs: 50, viewportSettleTimeoutMs: 3000 },
   interference: {

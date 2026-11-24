@@ -214,8 +214,51 @@ function review(pathname, request, origin, searchParams) {
 }
 
 
-createServer(async (request, response) => {
+/**
+ * Routes for the probing safety tests of the name-role-value check (e2e/name-role-value.spec.ts).
+ * Every request under `/_nrv/write/<session>/` and `/_nrv/nav/<session>/`, whatever its method,
+ * and every WebSocket handshake under `/_nrv/ws/<session>`, is recorded for that session; a scan
+ * that probes a page must leave none. `/_nrv/log/<session>` gives what was recorded,
+ * `/_nrv/frame/<session>` is a page meant to be loaded from another origin, which sends a write
+ * when it receives a message.
+ */
+const nrvHits = new Map();
+function nrvRecord(session, entry) {
+  const list = nrvHits.get(session) ?? [];
+  list.push(entry);
+  nrvHits.set(session, list);
+}
+function nrv(pathname, request) {
+  const match = /^\/_nrv\/(write|nav|log|frame)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
+  if (!match) return null;
+  const [, kind, session, name = ''] = match;
+  if (kind === 'log') return { status: 200, type: types['.json'], body: JSON.stringify(nrvHits.get(session) ?? []) };
+  if (kind === 'frame') {
+    return {
+      status: 200,
+      type: types['.html'],
+      body: `<!doctype html><html lang="en"><title>Frame</title><button>Pay now</button><script>addEventListener('message', () => fetch('/_nrv/write/${session}/frame-post', { method: 'POST', body: 'x' }));</script></html>`,
+    };
+  }
+  nrvRecord(session, `${request.method} ${kind}/${name}`);
+  if (kind === 'nav') return { status: 200, type: types['.html'], body: '<!doctype html><html lang="en"><title>Landed</title><h1>You left the page</h1></html>' };
+  return { status: 200, type: 'text/plain', body: 'cb && cb()' };
+}
+
+const server = createServer(async (request, response) => {
   const { pathname, searchParams } = new URL(request.url ?? '/', 'http://localhost');
+  if (pathname.startsWith('/_nrv/')) {
+    // Drained, so that a request with a body is answered.
+    request.resume();
+    const reply = nrv(pathname, request);
+    if (!reply) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(reply.status, { 'content-type': reply.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+    response.end(reply.body);
+    return;
+  }
   if (pathname.startsWith('/_ci/')) {
     const reply = await dynamic(pathname, request, searchParams).catch(() => null);
     if (!reply) {
@@ -241,6 +284,13 @@ createServer(async (request, response) => {
     },
     () => response.writeHead(404).end(),
   );
-}).listen(port, '127.0.0.1', () => {
+});
+// A WebSocket handshake is recorded as a write and refused: nothing here speaks WebSocket.
+server.on('upgrade', (request, socket) => {
+  const match = /^\/_nrv\/ws\/([\w-]+)/.exec(new URL(request.url ?? '/', 'http://localhost').pathname);
+  if (match) nrvRecord(match[1], 'GET ws');
+  socket.destroy();
+});
+server.listen(port, '127.0.0.1', () => {
   console.log(`fixtures on http://127.0.0.1:${port}`);
 });

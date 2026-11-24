@@ -1,0 +1,52 @@
+{
+  "description": "Links and buttons by what they do when activated, with the network held. Links that open a dialog or show a panel without navigating act as buttons; a button that goes to another page acts as a link (likely). Not reported: a link whose router changes the address (pushState), a button that opens a dialog, a submit button of a search form (never activated), a button that navigates with the value of a field (a search sent by script), a same-page link, a hash route, a button that adds to the cart, a plain link.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#link-modal",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "opensDialog"
+      ]
+    },
+    {
+      "selector": "#link-toggle",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    },
+    {
+      "selector": "#link-terms",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "opensDialog"
+      ]
+    },
+    {
+      "selector": "#button-nav",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/button-acts-as-link",
+      "flags": [
+        "measured",
+        "navigates:document"
+      ]
+    }
+  ]
+}

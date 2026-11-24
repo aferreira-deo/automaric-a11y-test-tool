@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Basket</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 12px; color: #1a1a1a; background: #fff; }
+  button, .fake { font: inherit; padding: 6px 12px; border: 1px solid #595959; background: #fff; margin: 4px; display: inline-block; }
+  .fake { cursor: pointer; }
+</style>
+</head>
+<body>
+  <button type="button" id="remove"><svg width="16" height="16"><path d="M3 3l10 10M13 3L3 13" stroke="#1a1a1a" stroke-width="2"/></svg></button>
+  <button type="button" id="keep">Keep for later</button>
+  <div class="fake" tabindex="0" id="checkout">Checkout</div>
+  <script>
+    document.getElementById('checkout').addEventListener('click', () => { document.title = 'Checkout'; });
+  </script>
+</body>
+</html>

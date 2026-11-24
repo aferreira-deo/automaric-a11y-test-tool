@@ -60,7 +60,10 @@ function cropLabel(id: string): string {
   if (id.endsWith('-focused.png')) return 'Focused';
   if (id.endsWith('-unfocused.png')) return 'Not focused';
   if (id.startsWith('icon-contrast/')) return 'At rest';
-  if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/')) return 'In context';
+  if (id.startsWith('name-role-value/') && id.endsWith('-before.png')) return 'Before activation';
+  if (id.startsWith('name-role-value/') && id.endsWith('-after.png')) return 'After activation';
+  if (id.startsWith('name-role-value/') && id.endsWith('-again.png')) return 'After a second activation';
+  if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/') || id.startsWith('name-role-value/')) return 'In context';
   return 'Capture';
 }
 
