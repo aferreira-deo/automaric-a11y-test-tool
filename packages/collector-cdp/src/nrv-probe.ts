@@ -67,6 +67,11 @@ class ProbeTimeout extends Error {
 
 class CopyFailed extends Error {}
 
+/** Text with the user information of addresses removed (`http://user:pass@host`, `user:pass@host`). */
+export function withoutUserInfo(text: string): string {
+  return text.replace(/((?:[a-z][a-z0-9+.-]*:\/\/)?)[^\s@/;,=()"'[\]]+@/gi, '$1');
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
@@ -232,7 +237,8 @@ export async function probeNameRoleValue(
   const notStarted = (stopped: NonNullable<NrvProbeLog['stopped']>, detail: string): ProbeResult => {
     for (const entry of log.probes) entry.outcome = 'not-started';
     log.stopped = stopped;
-    log.stoppedDetail = detail;
+    // A host's message may quote a proxy or an address: never with its credentials.
+    log.stoppedDetail = withoutUserInfo(detail);
     return { log };
   };
   // An offline page's own requests go nowhere: neither do the copies'.
@@ -344,7 +350,9 @@ export async function probeNameRoleValue(
     }
     const target = blankCopy(page);
     try {
-      return await loadCopy(target);
+      const loaded = await loadCopy(target);
+      await baseline(loaded);
+      return loaded;
     } catch (error) {
       await closeCopy(target, true).catch(() => undefined);
       throw error;
@@ -385,12 +393,24 @@ export async function probeNameRoleValue(
       mainFrameId: page.targetId,
       frames: target.frames,
       url: source.settings.url,
-      cookies: (url) => raw.send('Network.getCookies', { urls: [url] }).then((result) => (result as { cookies: [] }).cookies),
     });
     const cdp = target.cdp;
     await cdp.send('Page.enable');
     await cdp.send('Inspector.enable').catch(() => undefined);
     await cdp.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
+    // Once per probing browser, before the page's cookies are in the context: does Chromium give the Cookie header it would send?
+    await network.checkCookies(
+      async (url, name, value) => {
+        await cdp.send('Network.setCookies', { cookies: [{ name, value, url }] });
+        // Stopped as it pauses (an error page is not committed for an aborted navigation): the copy stays blank.
+        await cdp.send('Page.navigate', { url }).catch((error: unknown) => {
+          if (error instanceof ProbeTimeout) throw error;
+        });
+      },
+      async (url, name) => {
+        await cdp.send('Network.deleteCookies', { name, url });
+      },
+    );
     if (source.cookies.length > 0) await cdp.send('Network.setCookies', { cookies: source.cookies.map(cookieParam) }).catch(() => undefined);
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: storageSeedScript(source.storage) });
     await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT });
@@ -434,27 +454,55 @@ export async function probeNameRoleValue(
     return target;
   };
 
-  const waitQuiet = async (target: Copy): Promise<void> => {
+  /** Waits for the copy to settle after an activation; returns whether it went quiet (nothing structural changed for `activationQuietMs`). */
+  const waitQuiet = async (target: Copy): Promise<boolean> => {
     await pause(settings.probeSettleMs);
-    await within(agent(target, `quiet(${settings.activationQuietMs}, ${settings.activationQuietMaxMs})`), settings.activationQuietMaxMs + settings.probeStepTimeoutMs);
+    const quiet = await within(agent<boolean>(target, `quiet(${settings.activationQuietMs}, ${settings.activationQuietMaxMs})`), settings.activationQuietMaxMs + settings.probeStepTimeoutMs);
     await agent(target, 'settle()');
     for (let tries = 0; network.busy() > 0 && tries < 40; tries++) await pause(25);
+    return quiet !== false;
+  };
+
+  /**
+   * Before the first probe of a copy, the same activation on a neutral spot (a throwaway element at
+   * the end of the body): the timers it sets are set by what listens to every click (analytics, a
+   * delegated poll), and those set by the same call later are the page's, not a control's.
+   */
+  const baseline = async (target: Copy): Promise<void> => {
+    await guard(target, 'baselineBegin()');
+    try {
+      await agent(target, 'activateNeutral()');
+    } finally {
+      await guard(target, 'baselineEnd()');
+    }
   };
 
   /**
    * Then the timers the activation set are waited for, as long as one is due within
    * `activationTimerMaxMs` of the activation (a link that shows a spinner and navigates 450 ms
    * later), and what each did is waited for as above. Nothing is waited for when the activation set
-   * none. Returns whether one is still pending (due later, or an interval): something still to happen.
+   * none. Returns whether one of its own is still pending (due later, or an interval): something
+   * still to happen. Not counted as pending: the page's timers (set by what listens to every click,
+   * see `baseline`), which are waited for only when due within the bound; and a poll, a timer that
+   * set itself again more than `activationTimerChainMax` times while the copy stayed quiet, which is
+   * no longer waited for. A poll whose runs change the copy is waited for like any other.
    */
-  const waitTimers = async (target: Copy, activatedAt: number): Promise<boolean> => {
+  const waitTimers = async (target: Copy, activatedAt: number, quietAfter: boolean): Promise<boolean> => {
     const bound = activatedAt + settings.activationTimerMaxMs;
+    let quiet = quietAfter;
     for (;;) {
-      const pending = await guard<{ count: number; next: number }>(target, 'pending()');
-      if (!pending || pending.count === 0) return false;
-      if (pending.next < 0 || Date.now() + pending.next > bound) return true;
-      await pause(pending.next + 25);
-      await waitQuiet(target);
+      const pending = await guard<{ count: number; next: number; polls?: number; pollNext?: number; pageNext?: number }>(target, `pending(${settings.activationTimerChainMax})`);
+      if (!pending) return false;
+      const polls = pending.polls ?? 0;
+      const within = (left: number | undefined): boolean => left !== undefined && left >= 0 && Date.now() + left <= bound;
+      if (pending.count > 0 && (pending.next < 0 || !within(pending.next))) return true;
+      // A poll (the control's or the page's) that changes nothing is a loop, not something still to happen.
+      const pollNext = pending.pollNext ?? -1;
+      const waitPoll = pollNext >= 0 && !quiet;
+      const due = [pending.count > 0 ? pending.next : -1, waitPoll ? pollNext : -1, pending.pageNext ?? -1].filter((left) => within(left));
+      if (due.length === 0) return pending.count > 0 || (polls > 0 && !quiet);
+      await pause(Math.min(...due) + 25);
+      quiet = await waitQuiet(target);
     }
   };
 
@@ -579,8 +627,8 @@ export async function probeNameRoleValue(
     await guard(target, 'begin()');
     const activatedAt = Date.now();
     await agent(target, `activate(${key})`);
-    await waitQuiet(target);
-    const timerPending = await waitTimers(target, activatedAt);
+    const quietAfter = await waitQuiet(target);
+    const timerPending = await waitTimers(target, activatedAt, quietAfter);
     let observed = await agent<ProbeObserved>(target, `observe(${key})`);
     const after = await capture(target, ids.after, prepared.clip);
     const interval = Date.now() - activatedAt;
@@ -621,8 +669,8 @@ export async function probeNameRoleValue(
       await guard(target, 'begin()');
       const againAt = Date.now();
       await agent(target, `activate(${key})`);
-      await waitQuiet(target);
-      const againPending = await waitTimers(target, againAt);
+      const quietAgain = await waitQuiet(target);
+      const againPending = await waitTimers(target, againAt, quietAgain);
       observed = await agent<ProbeObserved>(target, `observe(${key})`);
       const reverted = await agent<boolean>(target, 'revealReverted()');
       const third = await capture(target, ids.again, prepared.clip);

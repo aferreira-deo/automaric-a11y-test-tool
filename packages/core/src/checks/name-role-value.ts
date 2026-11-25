@@ -310,6 +310,8 @@ export const nameRoleValueCheck: Check = {
             ? { copyComparedWithPage: `interactive elements ${probe.clone.cloneInteractive} in the copy, ${probe.clone.pageInteractive} in the page; ${probe.clone.matched} of ${probe.clone.checked} elements to probe found alike, ${probe.clone.missing} not found` }
             : {}),
           ...(probe.route ? { copyReadsRoute: probe.route } : {}),
+          ...(probe.cookies ? { copyCookies: probe.cookiesDetail ? `${probe.cookies} (${probe.cookiesDetail})` : probe.cookies } : {}),
+          ...(probe.tooLarge ? { readsTooLarge: probe.tooLarge } : {}),
           requestsBlocked: probe.blocked.length,
           ...(probe.blocked.length > 0 ? { blockedRequests: probe.blocked.join(' | ') } : {}),
           requestsAllowed: probe.allowed,

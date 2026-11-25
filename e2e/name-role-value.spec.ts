@@ -432,14 +432,10 @@ test.describe('the reads of the copies go where the page under test reads, or no
     expect(String(values['probeStoppedDetail'])).toMatch(new RegExp(`the read of ${baseURL!.replace(/[.]/g, '\\.')}/_nrv/once/${session}/page\\.html failed: (socket hang up|read ECONNRESET)`));
   });
 
-  test('a page on HTTPS with a certificate its context accepts (ignoreHTTPSErrors): its copies accept it too', async ({ browser }, testInfo) => {
-    const key = testInfo.outputPath('key.pem');
-    const cert = testInfo.outputPath('cert.pem');
-    const made = await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1']).then(
-      () => true,
-      () => false,
-    );
-    test.skip(!made, 'openssl is needed to make a self-signed certificate');
+  test('a page on HTTPS with a certificate its context accepts (ignoreHTTPSErrors): its copies accept it too', async ({ browser }) => {
+    // A key and a self-signed certificate made for the tests only (e2e/support/tls).
+    const key = fileURLToPath(new URL('./support/tls/test-only-key.pem', import.meta.url));
+    const cert = fileURLToPath(new URL('./support/tls/test-only-cert.pem', import.meta.url));
     const html = await readFile(fileURLToPath(new URL('../fixtures/name-role-value/link-button.html', import.meta.url)), 'utf8');
     const server = createHttpsServer({ key: await readFile(key), cert: await readFile(cert) }, (_request, response) => response.writeHead(200, { 'content-type': 'text/html' }).end(html));
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

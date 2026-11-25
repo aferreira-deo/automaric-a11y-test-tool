@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { RoutingRefusal, addressClass, commandLineArgs, mapHost, parseHostRules, proxyFor, resolveRouting, switchesOf, systemProxy } from './probe-routing.js';
-import type { ReadRouting } from './probe-routing.js';
+import { RoutingRefusal, addressClass, commandLineArgs, linuxDesktop, mapHost, parseHostRules, parseProxyServer, proxyFor, redactCredentials, resolveRouting, switchesOf, systemProxy } from './probe-routing.js';
+import type { ReadRouting, SystemReaders } from './probe-routing.js';
 
-const local: ReadRouting = { commandLine: '"C:\\chrome\\chrome.exe" --headless --no-sandbox', contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null };
+const local: ReadRouting = { commandLine: '"C:\\chrome\\chrome.exe" --headless --no-sandbox', contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null, launchedHere: true };
 const refusal = (fn: () => unknown): string => {
   try {
     fn();
@@ -119,5 +119,69 @@ describe('the proxy of the system', () => {
   it('is read from the environment where Chromium reads it there', async () => {
     expect(await systemProxy('linux', { HTTPS_PROXY: 'http://user:secret@proxy.corp:8080' })).toBe('https_proxy=http://proxy.corp:8080');
     expect(await systemProxy('linux', {})).toBeNull();
+  });
+});
+
+describe('a browser this process did not launch', () => {
+  it('is not followed unless the caller says where its requests go: its proxy and its host rules, both', () => {
+    const elsewhere = { ...local, launchedHere: false };
+    expect(refusal(() => resolveRouting({}, elsewhere))).toContain('not launched by this process');
+    expect(refusal(() => resolveRouting({ proxy: null }, elsewhere))).toContain('probeContext.hostResolverRules');
+    expect(refusal(() => resolveRouting({ hostResolverRules: '' }, elsewhere))).toContain('probeContext.proxy');
+    expect(resolveRouting({ proxy: null, hostResolverRules: '' }, { ...elsewhere, commandLine: '/c --host-resolver-rules=MAP * 10.0.0.1' })).toMatchObject({ proxy: null, hostRules: [], description: 'direct' });
+  });
+});
+
+describe('--host-rules', () => {
+  it('is a layer of its own, before --host-resolver-rules, as in Chromium', () => {
+    const routing = resolveRouting({}, { ...local, commandLine: '/c --host-rules=MAP a.test b.test --host-resolver-rules=MAP b.test 127.0.0.1' });
+    expect(routing.connectionRules?.map((rule) => rule.host)).toEqual(['b.test']);
+    expect(routing.hostRules.map((rule) => rule.host)).toEqual(['127.0.0.1']);
+    expect(routing.description).toBe('direct; host rules: --host-rules=MAP a.test b.test, then MAP b.test 127.0.0.1');
+  });
+});
+
+describe('credentials', () => {
+  it('are never in what is said of a proxy: with a scheme or without, in the environment, the command line or a context', async () => {
+    expect(redactCredentials('http_proxy=user:pass@proxy.corp:3128')).toBe('http_proxy=proxy.corp:3128');
+    expect(redactCredentials('http=u:p@a.test:1;https=http://v:q@b.test:2')).toBe('http=a.test:1;https=http://b.test:2');
+    expect(redactCredentials('socks5://u:p@ss@s.test:1080')).toBe('socks5://s.test:1080');
+    // http_proxy without "//": the credentials are not left in the reason probing did not start.
+    const system = await systemProxy('linux', { http_proxy: 'user:hunter2@proxy.corp:3128' });
+    expect(system).toBe('http_proxy=proxy.corp:3128');
+    const messages = [
+      refusal(() => resolveRouting({}, { ...local, systemProxy: 'user:hunter2@proxy.corp:3128' })),
+      refusal(() => resolveRouting({}, { ...local, commandLine: '/c --proxy-server=socks5://user:hunter2@s.test:1080' })),
+      refusal(() => resolveRouting({}, { ...local, commandLine: '/c --proxy-server=http=user:hunter2@a.test:99999' })),
+      refusal(() => parseProxyServer('http=user:hunter2@a.test:1;ftp', '')),
+      refusal(() => resolveRouting({}, { ...local, contextProxy: { server: 'https://user:hunter2@secure.test:443' } })),
+    ];
+    for (const message of messages) {
+      expect(message).not.toBe('');
+      expect(message).not.toContain('hunter2');
+      expect(message).not.toContain('user:');
+    }
+    expect(resolveRouting({ proxy: { server: 'http://user:hunter2@p.test:1' } }, local).description).not.toContain('hunter2');
+  });
+});
+
+describe('the proxy of the desktop, on Linux', () => {
+  const readers = (gsettings: string | null, kioslaverc: string | null = null): SystemReaders => ({
+    run: (file) => Promise.resolve(file === 'gsettings' ? gsettings : null),
+    readFile: () => Promise.resolve(kioslaverc),
+    home: '/home/u',
+  });
+  it('is read as Chromium reads it there: GNOME, KDE, another desktop, or none', async () => {
+    expect(linuxDesktop({ XDG_CURRENT_DESKTOP: 'ubuntu:GNOME' })).toBe('gnome');
+    expect(linuxDesktop({ XDG_CURRENT_DESKTOP: 'KDE' })).toBe('kde');
+    expect(linuxDesktop({})).toBeNull();
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'GNOME' }, readers("'none'\n"))).toBeNull();
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'GNOME' }, readers("'manual'\n"))).toContain('GNOME, mode manual');
+    // What cannot be read cannot be ruled out.
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'GNOME' }, readers(null))).toContain('could not be read');
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'KDE' }, readers(null, '[Proxy Settings]\nProxyType=1\n'))).toContain('KDE, ProxyType 1');
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'KDE' }, readers(null, '[Proxy Settings]\nProxyType=0\n'))).toBeNull();
+    expect(await systemProxy('linux', { XDG_CURRENT_DESKTOP: 'XFCE' }, readers(null))).toContain('XFCE');
+    expect(await systemProxy('linux', {}, readers(null))).toBeNull();
   });
 });

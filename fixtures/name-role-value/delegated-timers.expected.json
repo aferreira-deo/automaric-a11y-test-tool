@@ -1,0 +1,53 @@
+{
+  "description": "What listens to every click sets timers of its own: an analytics flush 3 s later and a poll every 100 ms that changes nothing. An activation of a neutral spot of each copy shows them for the page's, so they are neither waited for to the end nor taken for something still to happen: the two links that only show a panel act as buttons and the button that shows and hides a part of the page without aria-expanded is a disclosure, all three likely as on a page without those listeners. The link whose own timer is due after 6 s is still info, timerPending.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#opens",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    },
+    {
+      "selector": "#details-link",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    },
+    {
+      "selector": "#disclosure",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "disclosure"
+      ]
+    },
+    {
+      "selector": "#wait-long",
+      "check": "name-role-value",
+      "status": "info",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides",
+        "timerPending"
+      ]
+    }
+  ]
+}

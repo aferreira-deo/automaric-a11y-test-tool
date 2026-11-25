@@ -35,6 +35,7 @@ export const defaultConfig: Config = {
     activationQuietMs: 150,
     activationQuietMaxMs: 2000,
     activationTimerMaxMs: 2000,
+    activationTimerChainMax: 5,
     probeExcludeSelector: '[data-a11y-vision-no-probe]',
     probeReads: 'cache',
     probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],
@@ -48,6 +49,9 @@ export const defaultConfig: Config = {
     probeCloneMaxMissingShare: 0.2,
     probeCloneMaxCountDelta: 0.15,
     probeCacheMaxBytes: 268435456,
+    probeReadMaxBytes: 16777216,
+    probeReadMaxEncodedBytes: 16777216,
+    probeReadConcurrency: 6,
     probeLoadDeny: [],
     generatedTextNameStatus: 'likely',
     ownChangeMinAreaCssPx2: 6,
@@ -597,6 +601,7 @@ export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): 
     activationQuietMs: duration(merged.activationQuietMs, 0, base.activationQuietMs),
     activationQuietMaxMs: duration(merged.activationQuietMaxMs, 0, base.activationQuietMaxMs),
     activationTimerMaxMs: duration(merged.activationTimerMaxMs, 0, base.activationTimerMaxMs),
+    activationTimerChainMax: atLeast(merged.activationTimerChainMax, 1, base.activationTimerChainMax),
     probeExcludeSelector: typeof merged.probeExcludeSelector === 'string' ? merged.probeExcludeSelector.trim() : base.probeExcludeSelector,
     probeReads: oneOf(merged.probeReads, ['cache', 'network'], base.probeReads),
     // A navigation, a script's own request, a beacon, a stream or a socket is never fetched, whatever the list says.
@@ -613,6 +618,9 @@ export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): 
     probeCloneMaxMissingShare: share(merged.probeCloneMaxMissingShare, base.probeCloneMaxMissingShare),
     probeCloneMaxCountDelta: share(merged.probeCloneMaxCountDelta, base.probeCloneMaxCountDelta),
     probeCacheMaxBytes: atLeast(merged.probeCacheMaxBytes, 0, base.probeCacheMaxBytes),
+    probeReadMaxBytes: atLeast(merged.probeReadMaxBytes, 1, base.probeReadMaxBytes),
+    probeReadMaxEncodedBytes: atLeast(merged.probeReadMaxEncodedBytes, 1, base.probeReadMaxEncodedBytes),
+    probeReadConcurrency: atLeast(merged.probeReadConcurrency, 1, base.probeReadConcurrency),
     // A pattern that is not a regular expression denies every read but the document: what was meant to stay unsent must not be sent because of a typo.
     probeLoadDeny: names(merged.probeLoadDeny, base.probeLoadDeny).map((source) => {
       try {

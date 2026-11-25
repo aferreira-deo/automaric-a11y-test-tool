@@ -48,6 +48,28 @@ export function isProbeReadRefused(error: unknown): boolean {
   return error instanceof Error && error.name === 'ProbeReadRefused';
 }
 
+/**
+ * A read whose response was larger than allowed, as sent (`maxEncodedBytes`) or decoded
+ * (`maxBytes`): stopped as soon as it went over, the copy gets an error, and it is counted.
+ * Told apart by its name.
+ */
+export class ProbeReadTooLarge extends Error {
+  override readonly name = 'ProbeReadTooLarge';
+}
+
+export function isProbeReadTooLarge(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ProbeReadTooLarge';
+}
+
+/** The bounds of one read: one deadline for all of it (name, connection, proxy, TLS, headers, body), and its size. */
+export interface ProbeReadLimits {
+  timeoutMs: number;
+  /** The body, decoded, at most. */
+  maxBytes: number;
+  /** The body as the server sent it (compressed), at most. */
+  maxEncodedBytes: number;
+}
+
 /** What a copy is set up with, read from the page under test. */
 export interface CloneSettings {
   url: string;
@@ -64,7 +86,10 @@ export interface CloneSettings {
 export interface ProbeFetchRequest {
   url: string;
   method: 'GET' | 'HEAD';
-  /** As Chrome would send them, with the cookies of the copy for that address. */
+  /**
+   * As the probing Chromium would send them, its `Cookie` header included: the cookies are those
+   * Chrome itself chose for this request of the copy (`Fetch.requestPaused`), never chosen here.
+   */
   headers: Record<string, string>;
 }
 
@@ -85,17 +110,25 @@ export interface ProbeBrowser {
   /** How the reads are sent, in a few words (`direct`, `proxy http://…`, host rules): for the survey. */
   route: string;
   /**
+   * Set when the browser of the page may choose cookies otherwise than the probing one (a profile
+   * of its own, with its settings: third-party cookies blocked, exceptions by site; switches that
+   * change cookies), with the reason: the cookies Chromium attaches are then sent only with reads of
+   * the main frame of a copy to the host of the page itself, where no such setting withholds them.
+   */
+  firstPartyCookiesOnly?: string;
+  /**
    * Sends a read to a server on behalf of a copy, and returns the response, the body as base64.
    * GET and HEAD only: anything else is refused here as well as by the collector. Redirects are
    * returned, not followed. The read goes where the page under test's own request would go (its
    * proxy, its host rules), or nowhere: a read the page routes itself, or one to a private address
    * when the page is public, is refused (`ProbeReadRefused`). Rejects when the server cannot be
-   * reached, when the body is larger than `maxBytes`, or after `timeoutMs`, with what went wrong.
+   * reached, when the body is larger than allowed (`ProbeReadTooLarge`), or after `timeoutMs`, with
+   * what went wrong; every connection of a read is closed when it ends, whichever way.
    */
-  fetch(request: ProbeFetchRequest, limits: { timeoutMs: number; maxBytes: number }): Promise<ProbeFetchResponse>;
+  fetch(request: ProbeFetchRequest, limits: ProbeReadLimits): Promise<ProbeFetchResponse>;
   /** Connections the probing browser opened by itself, all refused: what the interception did not see. */
   refusedConnections(): number;
-  /** Closes the browser: every copy, and every request still held, goes with it. */
+  /** Closes the browser: every copy, and every request still held, goes with it; every read still under way is stopped and its connections closed. */
   close(): Promise<void>;
 }
 

@@ -1062,7 +1062,7 @@ elements with listeners are read; the survey says when there were more.
 | `button-acts-as-link` | A button that, activated, went to another page or place and did nothing else: no write, no state of its own changed, nothing shown or hidden, not in a form, no field read: `behaviourRoleStatus` (`info`, `timerPending`, when a timer it set had not run yet). One that opened a window and changed nothing: `advisory`. An `a href` to another address with `role="button"`, not activated: `advisory` | `likely`, `advisory` | no |
 | `missing-state` | Read from markup: a custom checkbox, radio, switch or menu item without `aria-checked`, a combobox without `aria-expanded`, a slider or scrollbar without `aria-valuenow` (`likely`); a tab list in which no tab is selected (`likely`, once, on its first tab); a spin button without a value, a button with `aria-haspopup` or with `aria-controls` on a hidden element and no `aria-expanded` (`advisory`) | `likely`, `advisory` | `aria-required-attr` for the required states; no for the others |
 | `state-not-exposed` | Measured: activated, the control changed something and none of its states (expanded, pressed, checked, selected, value, disabled, name) changed; `info` (`requestBlocked`) when it made a request that the probe stopped, `info` (`timerPending`) when a timer it set had not run yet | see "Value and state" | no |
-| `survey` | Counts, how the inventory was read and why the Tab walk ended (`walkStoppedBy`), what probing did (copies loaded and reused, how the first copy compared with the page, where the reads of the copies were sent (`copyReadsRoute`), reads fetched, requests stopped or not sent and why, connections refused, why probing stopped or did not start, probes not done and why) | `info` | |
+| `survey` | Counts, how the inventory was read and why the Tab walk ended (`walkStoppedBy`), what probing did (copies loaded and reused, how the first copy compared with the page, where the reads of the copies were sent (`copyReadsRoute`) and how their cookies were chosen (`copyCookies`), reads fetched, reads stopped as too large (`readsTooLarge`), requests stopped or not sent and why, connections refused, why probing stopped or did not start, probes not done and why) | `info` | |
 
 Every rule that axe-core also reports carries the flag `axeCovered` and `values.axeRule`. With
 `includeAxeCovered: false` (`--no-axe-overlap`) they are left out and the survey counts them
@@ -1202,7 +1202,18 @@ task of its events, and in what those timers run; not the page's other timers, s
 within `activationTimerMaxMs` (2 s) of the activation is waited for, and the copy again until it is quiet: a link
 that shows a spinner and goes to its address 450 ms or 1.2 s later navigates, and is a link. A timer due later, or
 an interval the activation started, is something still to happen: what the element did is then not concluded on
-(`timerPending`, `info`), and nothing more is waited for. A control that sets no timer is not slowed down. A component that animates a panel by script for 400 ms and sets `aria-expanded` when
+(`timerPending`, `info`), and nothing more is waited for. A control that sets no timer is not slowed down.
+Two kinds of timers are not the control's. What listens to every click (an analytics library that sends its queue
+3 s later, a poll a delegated listener starts) sets them whatever is clicked: before the first probe of each copy,
+the same activation is dispatched on a neutral spot (a throwaway element at the end of the body, removed at
+once), and a timer set later by the same call in the same script, with the same delay (or by such a timer), is the
+page's: it is waited for when it is due within `activationTimerMaxMs` (a delegated router may navigate when it
+runs), never counted as `timerPending`, and it does not keep the copy from serving the next probe. A timer that sets
+itself again from its own callback more than `activationTimerChainMax` (5) times is a poll: once a wait has seen
+the copy quiet, it is no longer waited for, and a poll of the control's own that changes nothing is not
+`timerPending` either; one whose runs change the copy (an animation by script) is waited for like any other. Tested
+by `fixtures/name-role-value/delegated-timers.html`, whose three `likely` findings stay `likely` with both listeners,
+and by `delayed-navigation.html`, unchanged. A component that animates a panel by script for 400 ms and sets `aria-expanded` when
 the animation ends is read after it ends. While probing, transitions and animations last 1 ms instead of their
 own duration, not 0: a transition of no duration fires no `transitionend`, and a component that sets
 `aria-expanded` when its collapse transition ends would never set it.
@@ -1244,7 +1255,9 @@ it happens in can reach. **The page under test is never activated, reloaded or c
    from `Network.getAllCookies` on the session of the page, which reads the page's own context; a test with
    `e2e/name-role-value.spec.ts` checks that a page behind an HttpOnly session cookie is loaded signed in), the local and session storage of its documents (written into the copy before its
    scripts run), its viewport, language, time zone, user agent and colour scheme, plus HTTP credentials and headers
-   the host passes on (`probeContext`; the CLI passes the credentials of the address). It is loaded at the address
+   the host passes on (`probeContext`; the CLI passes the credentials of the address). Which of those cookies go with
+   a read is never decided by the collector: Chromium attaches to each request of a copy the `Cookie` header it would
+   send, and that header is what is sent (see "Where the reads of the copies go"). It is loaded at the address
    of the page. While it loads, and only then, its GET and HEAD requests are fetched from the server, or given what
    an earlier copy already fetched: **that load is a page view on the site.** Once it has loaded and settled
    (`quietMs`, `quietMaxMs`), nothing reaches a server any more: a request is given what was fetched while a copy
@@ -1306,7 +1319,15 @@ name resolves to, gets nothing; a read the page mocks with `page.route` reaches 
 page that is offline, at a `file:` address or whose own address is routed is not probed; `probeLoadDeny` keeps
 what it lists from the server; and with `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` set, nothing of the
 attack pages reaches this machine (`packages/playwright/src/probe-fetch.test.ts` covers private addresses, the
-proxy and certificates).
+proxy, a real tunnel to a TLS server with a listener on port 80 that must get nothing, a proxy that goes silent,
+compression bombs and certificates, with a key and certificate made for the tests only in `e2e/support/tls`).
+`e2e/name-role-value-routing.spec.ts` scans through a proxy of its own given to `launch` and to `newContext`, an
+HTTP page and an HTTPS read through the tunnel, and checks that the copy's requests are the page's, cookies
+included; compares, resource by resource, the `Cookie` header the page under test sent with the one its copy sent
+(host-only and `Domain`, `Path`, `Secure`, `__Host-`, a site of its own and another, a frame of another site that
+holds a frame of the top site, two sites under one public suffix, partitioned cookies, a redirect); and checks a
+browser reached with `connectOverCDP`, a route that is a function, and a compression bomb served by the fixture
+server.
 
 #### Where the reads of the copies go
 
@@ -1322,13 +1343,59 @@ and sends the read itself, in Node:
   browser does).
 - **Its host rules**: `--host-resolver-rules` and `--host-rules` (`MAP pattern host[:port]`, `EXCLUDE pattern`,
   `~NOTFOUND`): a name the browser of the page sends to a staging server is read from that server, with the name
-  in `Host`, and the server the name really resolves to gets nothing (a test checks it with two servers).
+  in `Host`, and the server the name really resolves to gets nothing (a test checks it with two servers). As in
+  Chromium, `--host-rules` (where a connection goes) applies first, then `--host-resolver-rules` (how that name
+  resolves). An HTTPS read that `--host-rules` sends to another host or port is not sent: Chromium then checks the
+  certificate against a name that is not followed here. `--host-rules` together with a proxy stops probing.
 - **Its certificates**: errors are ignored when the page's context (`ignoreHTTPSErrors`) or browser
   (`--ignore-certificate-errors`) ignores them, and only then.
 - **Its routes**: a read whose address matches a route of the page or of its context (`page.route`,
   `context.route`, `routeFromHAR`) never left the browser of the page, so it is not sent for a copy: the copy gets
-  an error, the survey lists it as not sent, and the route's handler is not called. A page whose own address is
+  an error, the survey lists it as not sent, and the route's handler is not called. The routes are read again at
+  every read, so one added during the scan counts. A glob is matched by Playwright's own code, a regular
+  expression or a `URLPattern` by the language's; a route whose address is a function (`page.route(url => …)`), or
+  anything else only the test's code can answer, is never called: probing does not start (`probeStopped:routing`,
+  the detail says which kind), and a read made after such a route appeared is not sent. A page whose own address is
   routed is not probed at all (`probeStopped:routing`).
+- **Its cookies, as Chromium chooses them**: the copy's context holds the page's cookies, and Chromium attaches to
+  each request of the copy, as it pauses, the `Cookie` header it would send: `SameSite` with every frame above the
+  request (a frame of the top site inside a frame of another site gets no `Lax` or `Strict` cookie), the public
+  suffix list (`x.github.io` and `y.github.io` are two sites), `Secure`, `__Host-` and `__Secure-`, the
+  credentials mode of the request, and each hop of a redirect on its own. That header is sent as it is, and nothing
+  else is added. Whether this Chromium attaches it is checked once per scan (a cookie set for a name that does not
+  exist, and a navigation there that is stopped as it pauses); when it does not, no read carries a cookie
+  (`copyCookies: withheld`). Partitioned cookies (`Partitioned`, CHIPS) are not sent: Chromium adds them after the
+  point where the request is held, so the copy sends fewer cookies than the page there, never more. When the browser
+  of the page may choose cookies otherwise than the probing one (a profile of its own, `launchPersistentContext`,
+  whose settings such as blocked third-party cookies are not read; a browser this process did not launch; switches
+  or features about cookies, partitions or third parties that differ between the two command lines), the cookies
+  go only with reads of the main frame of the copy to the host of the page itself (`copyCookies: firstParty`, with
+  the reason). The probing browser keeps the `--disable-features` and `--enable-features` of the page's browser
+  (Playwright's own lists, which change how cookies are partitioned, included) and adds its own to them.
+- **Its credentials**: the HTTP credentials the caller passes (`probeContext.httpCredentials`, the CLI's for the
+  address) go to their origin only, and only after that origin answered 401 with a `Basic` challenge, as
+  Playwright's `httpCredentials` are sent by default; `send: "always"` sends them with every read to that origin.
+  The credentials of a proxy go to that proxy only. `extraHTTPHeaders` go with every read, as Playwright's do.
+- **Plain HTTP only where it cannot have been upgraded**: the browser of the page upgrades plain HTTP to HTTPS for
+  the hosts its profile holds as HSTS, and blocks or upgrades plain HTTP in an HTTPS page; neither can be read from
+  here, and a read sent in clear where the page's would have gone over TLS would put its address and cookies on the
+  network. So when the page under test is on HTTPS, no plain-HTTP read is sent; when it is on plain HTTP, a
+  plain-HTTP read goes only to the host of the page itself (it was just loaded that way), to an address written as
+  such (HSTS is never kept for an address), or to a name of this machine reached without a proxy. Chromium never
+  sends a `Secure` cookie over plain HTTP, and neither does the copy.
+- **Where the bytes go is checked**: every connection is opened by the host itself to the address that was
+  checked, its peer is verified once connected, and a request is written only on a connection recorded for that
+  read and that peer: the TCP connection to the address, TLS over it, the proxy, or TLS through the tunnel the proxy
+  opened for that authority (the answer to `CONNECT` must be 200 and nothing after it). Anything else fails the read
+  before a byte is written.
+- **Bounded**: one deadline (`probeLoadTimeoutMs`) holds each read, the name, the connection, `CONNECT`, TLS, the
+  headers and the body together; a proxy or a server that goes silent fails the read in time, and every connection
+  of a read is closed when it ends, whichever way, and when the probing browser closes (the end of the scan or its
+  abort). At most `probeReadConcurrency` (6) reads are under way at once. A body is decoded as it arrives and the read
+  is stopped as soon as it goes over `probeReadMaxEncodedBytes` as sent or `probeReadMaxBytes` decoded (16 MiB each):
+  a compression bomb costs the limit, not what it decodes to; the copy gets an error and the survey counts it
+  (`readsTooLarge`, and `(too large)` in `blockedRequests`). What was fetched is kept for later copies up to
+  `probeCacheMaxBytes`.
 - **Not the network of this machine for a public page**: a read of an address of this machine, of a private
   network or of a link (`127.0.0.0/8`, `::1`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`,
   `fe80::/10`, `fc00::/7`, written as IPv6 too) is refused when the page under test is not itself on such an
@@ -1338,14 +1405,21 @@ and sends the read itself, in Node:
   checked there.
 
 When that cannot be read or followed, no copy is loaded and the survey says why (`probeStopped:routing`, with the
-reason in `probeStoppedDetail`, every element to probe `not-started`): a proxy script (`--proxy-pac-url`,
-`--proxy-auto-detect`), a SOCKS or HTTPS proxy, a proxy of the system (Windows' settings of the user, macOS's
-`scutil --proxy`, the `http_proxy` family of variables elsewhere), a browser driven from another process
-(`connect`, `connectOverCDP`: the proxy of its context cannot be read), a command line that cannot be read, a page
-that is offline (`navigator.onLine` false, Playwright's `setOffline`), a page that is not on http or https (a
-`file:` page). The host can be told what it cannot read: `new A11yVision({ page, probeContext: { proxy, hostResolverRules, ignoreHTTPSErrors } })`
-(`proxy: null` for none), and then it follows that. The survey says how the reads went (`copyReadsRoute`:
-`direct`, the proxy, the host rules, certificate errors ignored).
+reason in `probeStoppedDetail`, every element to probe `not-started`, never with the credentials of a proxy): a
+proxy script (`--proxy-pac-url`, `--proxy-auto-detect`), a SOCKS or HTTPS proxy, a proxy of the system (Windows'
+settings of the user, macOS's `scutil --proxy`; on Linux, as Chromium reads it there: the `org.gnome.system.proxy`
+mode on a GNOME-like desktop, read with `gsettings get`, run without a shell; `ProxyType` in `~/.config/kioslaverc`
+on KDE; on another desktop it cannot be ruled out, and is taken as a proxy; without a desktop, the `http_proxy`
+family of variables, as on the other systems), a browser this process did not launch (`connectOverCDP`, `connect`,
+a `launchServer`: it may be on another machine, behind another network, so neither its command line nor its
+context says where its requests go from there; Playwright's objects in this process show whether it launched the
+browser, and when they cannot be read it counts as not launched), a command line that cannot be read, a route only
+the test's code can answer, a page that is offline (`navigator.onLine` false, Playwright's `setOffline`), a page
+that is not on http or https (a `file:` page). The host can be told what it cannot read:
+`new A11yVision({ page, probeContext: { proxy, hostResolverRules, ignoreHTTPSErrors } })` (`proxy: null` for none,
+`hostResolverRules: ""` for none), and then it follows that and nothing it read; a browser this process did not
+launch needs both `proxy` and `hostResolverRules`. The survey says how the reads went (`copyReadsRoute`: `direct`, the
+proxy, the host rules, certificate errors ignored) and how their cookies were chosen (`copyCookies`).
 
 **What it does not cover, stated plainly.**
 
@@ -1372,18 +1446,17 @@ that is offline (`navigator.onLine` false, Playwright's `setOffline`), a page th
   activation asks for (a picture, a style sheet, a script without a query) are fetched from the server after the
   activation: a picture a click inserts at `/items/5/delete` is requested. It is off by default and exists only
   for sites the owner knows treat such reads as reads.
-- The cookies sent with those reads are those of the copy, filtered by Chrome's rules for an address (domain,
-  path, secure) and by this rule for `SameSite`: a cookie goes to another site only when it says `SameSite=None`.
-  The credentials mode of a request (`credentials: "omit"`, `crossorigin="anonymous"`) and third-party cookie
-  blocking are not applied: such a read gets the cookies too.
-  Which hosts are one site is approximated without the public suffix list (the last two labels of a host, three
-  under short country labels such as `co.uk`, `gouv.fr`).
+- The cookies of those reads are those the probing Chromium attaches, from the cookies the page under test has
+  (see above): it is the same Chromium, with the same feature switches, so it chooses as the page's browser does
+  unless that browser's profile says otherwise (blocked third-party cookies, an exception for a site), which is not
+  read; for a profile, only the main frame's reads to the page's own host carry cookies. Cookies a server sets while a
+  copy loads stay in that copy's context only.
 - What the page under test has that cannot be read is not in the copy: storage of frames of another origin,
   IndexedDB, the Cache API, service workers (they are not registered in copies), and extra headers or credentials
   of the context that the caller does not pass in `probeContext`. A copy that renders differently because of that
   is caught by the comparison above, or its elements are not found alike.
 - Probing needs a host that can start a browser: the Playwright API and the CLI. The probing browser is the
-  executable of the page's browser when it is on this machine (a machine that runs it runs it again; the newest
+  executable of the page's browser when this process launched it (a machine that runs it runs it again; the newest
   Chromium of Playwright can be blocked where the page's is not, by Windows Smart App Control for one), else
   Playwright's own Chromium, or what `probeContext.executablePath` or `channel` says; launched headless, with its
   own proxy that refuses everything, whatever `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` says (with it,
@@ -1435,13 +1508,13 @@ All under `nameRoleValue` in a config file, documented in `packages/core/src/typ
 (`maxElements`, `maxListenerElements`, `maxNameChars`, `maxCandidates`, `maxCaptures`), `maxControlAreaShare`, the
 name patterns, `titleOnlyStatus`, `placeholderOnlyStatus`, `generatedTextNameStatus`, `tabWalk`, `maxTabStops`, and
 for probing `maxProbes`, `probeBudgetMs`, `probeSettleMs`, `activationQuietMs`, `activationQuietMaxMs`,
-`activationTimerMaxMs`, `probeExcludeSelector`, `probeReads`, `probeAllowedResourceTypes`, `probeAllowQueryStrings`, `probeLoadDeny`, `probeConfirmToggle`,
+`activationTimerMaxMs`, `activationTimerChainMax`, `probeExcludeSelector`, `probeReads`, `probeAllowedResourceTypes`, `probeAllowQueryStrings`, `probeLoadDeny`, `probeConfirmToggle`,
 `maxProbeLoads` (30 copies at most), `probeLoadTimeoutMs`, `probeStepTimeoutMs`, `probeUnloadGraceMs`,
-`probeCloneMinMatchShare`, `probeCloneMaxMissingShare`, `probeCloneMaxCountDelta`, `probeCacheMaxBytes`, `ownChangeMinAreaCssPx2`,
+`probeCloneMinMatchShare`, `probeCloneMaxMissingShare`, `probeCloneMaxCountDelta`, `probeCacheMaxBytes`, `probeReadMaxBytes`, `probeReadMaxEncodedBytes`, `probeReadConcurrency`, `ownChangeMinAreaCssPx2`,
 `revealMinAreaCssPx2`, `regionMaxAncestorLevels`, `quietMs`, `quietMaxMs`, `maxVisibilityElements` and the margins
 of the captures. `focus.maxTabsInElement` (10) is shared with the walk of the focus check. Renamed in this
 version: `maxProbeReloads` is `maxProbeLoads`, `reloadTimeoutMs` is `probeLoadTimeoutMs`; the old names are ignored.
-The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials, extraHTTPHeaders, proxy, hostResolverRules, ignoreHTTPSErrors, executablePath, channel } })`.
+The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials, extraHTTPHeaders, proxy, hostResolverRules, ignoreHTTPSErrors, executablePath, channel } })`; `httpCredentials` takes `send: "always"` as Playwright's does.
 
 ### Known limits of the name-role-value check
 
@@ -1477,6 +1550,18 @@ The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials
   activation.
 - Two runs are identical on a page that behaves the same way twice. A page whose handlers depend on time, or on
   what its server answers from one load to the next, can give other findings from one run to the next.
+- A timer set by what listens to every click is told apart by where it was set and its delay, and is the page's: a
+  delegated handler that sets the same timer for every click but navigates only for some targets, more than
+  `activationTimerMaxMs` later, is not waited for, and the link is concluded on without that navigation. One due
+  within that time is waited for. A page that hides where its timers are set (`Error.stackTraceLimit = 0`) is told
+  apart by delay and callback source only.
+- Decisions taken where parity with the page's browser cannot be read, each under-sending, never over-sending:
+  partitioned cookies are not sent; for a profile (`launchPersistentContext`), a browser this process did not
+  launch, or cookie switches that differ, cookies go only with the main frame's reads to the page's own host; no
+  plain-HTTP read from an HTTPS page, nor to another host than the page's from a plain-HTTP page (HSTS); no HTTPS
+  read that `--host-rules` moves; credentials only after a 401 challenge of their origin; on Linux, a desktop
+  whose proxy settings cannot be read counts as a proxy. Each can cost reads, so a copy that renders differently, and
+  then probes or findings; none sends what the page's own request would not.
 
 ### What `icon-contrast` reports
 

@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * Where the requests of the page under test go, read from its browser, so that the reads the
@@ -41,13 +44,29 @@ export interface HostRule {
 
 export interface ProbeRouting {
   proxy: ProxyRules | null;
+  /** `--host-resolver-rules`: how a name resolves. */
   hostRules: HostRule[];
+  /** `--host-rules`: where a connection to a host goes, applied before `hostRules`. */
+  connectionRules?: HostRule[];
   ignoreHTTPSErrors: boolean;
   /** How the reads are sent, in a few words, for the survey. */
   description: string;
 }
 
-export class RoutingRefusal extends Error {}
+/** Why the routing of the page cannot be followed; its message never holds credentials (`redactCredentials`). */
+export class RoutingRefusal extends Error {
+  constructor(message: string) {
+    super(redactCredentials(message));
+  }
+}
+
+/**
+ * Text with the user information of every address in it removed: `http://user:pass@host` and
+ * `user:pass@host` (an `http_proxy` written without a scheme) become `http://host` and `host`.
+ */
+export function redactCredentials(text: string): string {
+  return text.replace(/((?:[a-z][a-z0-9+.-]*:\/\/)?)[^\s@/;,=()"'[\]]+@/gi, '$1');
+}
 
 /** Splits a command line as Chromium writes it (`SystemInfo.getInfo`): quoted on Windows, joined with spaces elsewhere. */
 export function commandLineArgs(line: string): string[] {
@@ -387,6 +406,12 @@ export interface ReadRouting {
   contextIgnoresHTTPSErrors: boolean;
   /** The proxy of the system, when the browser runs on this machine and uses it; null: none. Undefined: not read (the browser is elsewhere). */
   systemProxy: string | null | undefined;
+  /**
+   * The browser of the page was launched by this process (`launch`, `launchPersistentContext`), as
+   * Playwright's objects in this process show. False for a browser it connected to
+   * (`connectOverCDP`, `connect`, a `launchServer`), and when that cannot be read.
+   */
+  launchedHere: boolean;
 }
 
 /** Playwright adds `<-loopback>` to a proxy's bypass list, unless the list names loopback (or an environment variable says not to). */
@@ -404,6 +429,13 @@ function playwrightBypass(bypass: string | undefined): string {
  * cannot be read or followed.
  */
 export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeRouting {
+  // A browser this process did not launch may be on another machine, behind another network: its command line
+  // and its context say how it is set up, not where its requests go from there. Only what the caller says is followed.
+  if (!read.launchedHere && (stated.proxy === undefined || stated.hostResolverRules === undefined)) {
+    throw new RoutingRefusal(
+      'the browser of the page was not launched by this process (connectOverCDP, connect, launchServer): where its requests go (its proxy, its host rules, its network) cannot be read from here; say it with probeContext.proxy (null for none) and probeContext.hostResolverRules ("" for none)',
+    );
+  }
   const switches = read.commandLine !== null ? switchesOf(commandLineArgs(read.commandLine)).switches : null;
   let proxy: ProxyRules | null;
   if (stated.proxy !== undefined) {
@@ -429,55 +461,109 @@ export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeR
     proxy = null;
   }
   let hostRules: HostRule[];
+  let connectionRules: HostRule[] = [];
   let rulesText: string;
   if (stated.hostResolverRules !== undefined) {
+    // What the caller says is all there is: the command line is not read for rules.
     rulesText = stated.hostResolverRules;
     hostRules = parseHostRules(rulesText);
   } else if (switches !== null) {
     const resolver = switches.get('host-resolver-rules') ?? '';
     const connection = switches.get('host-rules') ?? '';
     if (connection !== '' && proxy) throw new RoutingRefusal('the browser of the page has host rules (--host-rules) and a proxy, which the reads of the copies cannot follow together');
-    rulesText = [resolver, connection].filter(Boolean).join(', ');
-    hostRules = parseHostRules(rulesText);
+    // Two layers, as in Chromium: `--host-rules` says where a connection goes, then `--host-resolver-rules` how that name resolves.
+    hostRules = parseHostRules(resolver);
+    connectionRules = parseHostRules(connection);
+    rulesText = [...(connection ? [`--host-rules=${connection}`] : []), ...(resolver ? [resolver] : [])].join(', then ');
   } else {
     throw new RoutingRefusal('the command line of the browser of the page could not be read, so neither can its host rules; say them with probeContext.hostResolverRules ("" for none)');
   }
   const ignoreHTTPSErrors = stated.ignoreHTTPSErrors ?? (read.contextIgnoresHTTPSErrors || (switches?.has('ignore-certificate-errors') ?? false));
   const description = [proxy ? describeProxy(proxy) : 'direct', ...(rulesText ? [`host rules: ${rulesText}`] : []), ...(ignoreHTTPSErrors ? ['certificate errors ignored'] : [])].join('; ');
-  return { proxy, hostRules, ignoreHTTPSErrors, description };
+  return { proxy, hostRules, ...(connectionRules.length > 0 ? { connectionRules } : {}), ignoreHTTPSErrors, description: redactCredentials(description) };
 }
 
-function run(file: string, args: string[]): Promise<string> {
+function run(file: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile(file, args, { timeout: 5000, windowsHide: true }, (error, stdout) => resolve(error ? '' : String(stdout)));
+    execFile(file, args, { timeout: 5000, windowsHide: true, shell: false }, (error, stdout) => resolve(error ? null : String(stdout)));
   });
 }
 
+/** What `systemProxy` reads the system with: replaced in tests. */
+export interface SystemReaders {
+  /** Runs a program with arguments (never a shell); null when it fails or is not there. */
+  run(file: string, args: string[]): Promise<string | null>;
+  /** Reads a file; null when it cannot be read. */
+  readFile(path: string): Promise<string | null>;
+  home: string;
+}
+
+const systemReaders: SystemReaders = {
+  run,
+  readFile: (path) => readFile(path, 'utf8').catch(() => null),
+  home: homedir(),
+};
+
 /**
- * The proxy the system gives browsers, when there is one, in a few words; null when there is none.
- * Windows: the settings of the user (`Internet Settings`: a proxy server, a script). macOS: `scutil
- * --proxy`. Elsewhere: the environment (`http_proxy`, `https_proxy`, `all_proxy`, `auto_proxy`),
- * which Chromium follows there. Automatic detection (WPAD) is not looked for.
+ * The desktop whose proxy settings Chromium follows on Linux, as it tells them apart (from
+ * `XDG_CURRENT_DESKTOP`, `DESKTOP_SESSION`, `KDE_FULL_SESSION`, `GNOME_DESKTOP_SESSION_ID`); null
+ * for none, where Chromium follows the environment variables only.
  */
-export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+export function linuxDesktop(env: NodeJS.ProcessEnv): 'gnome' | 'kde' | 'other' | null {
+  const current = (env['XDG_CURRENT_DESKTOP'] ?? '').toLowerCase().split(':').filter(Boolean);
+  const session = (env['DESKTOP_SESSION'] ?? '').toLowerCase();
+  const names = [...current, session];
+  if (names.some((name) => ['gnome', 'unity', 'cinnamon', 'pantheon', 'budgie', 'mate', 'x-cinnamon', 'ubuntu', 'gnome-classic', 'gnome-flashback'].includes(name)) || env['GNOME_DESKTOP_SESSION_ID']) return 'gnome';
+  if (names.some((name) => name === 'kde' || name.startsWith('kde-') || name === 'plasma') || env['KDE_FULL_SESSION']) return 'kde';
+  if (names.some((name) => name !== '')) return 'other';
+  return null;
+}
+
+/**
+ * The proxy the system gives browsers, when there is one, in a few words, without credentials;
+ * null when there is none. Windows: the settings of the user (`Internet Settings`: a proxy server, a
+ * script). macOS: `scutil --proxy`. Linux, as Chromium reads it there: on a GNOME-like desktop the
+ * `org.gnome.system.proxy` mode (`gsettings get`, run without a shell); on KDE the `ProxyType` of
+ * `~/.config/kioslaverc`; on another desktop it cannot be ruled out; without a desktop, and on the
+ * other systems, the environment (`http_proxy`, `https_proxy`, `all_proxy`, `auto_proxy`). What
+ * cannot be read counts as a proxy: probing then does not start unless `probeContext.proxy` says
+ * it. Automatic detection (WPAD) is not looked for.
+ */
+export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, readers: SystemReaders = systemReaders): Promise<string | null> {
   if (platform === 'win32') {
-    const out = await run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings']);
+    const out = (await readers.run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'])) ?? '';
     const value = (name: string): string | undefined => new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.*)$`, 'im').exec(out)?.[1]?.trim();
     const script = value('AutoConfigURL');
-    if (script) return `a proxy script, ${script.replace(/\?.*$/, '')}`;
-    if (/^0x0*1$/i.test(value('ProxyEnable') ?? '') && value('ProxyServer')) return `${value('ProxyServer')}`;
+    if (script) return redactCredentials(`a proxy script, ${script.replace(/\?.*$/, '')}`);
+    if (/^0x0*1$/i.test(value('ProxyEnable') ?? '') && value('ProxyServer')) return redactCredentials(`${value('ProxyServer')}`);
     return null;
   }
   if (platform === 'darwin') {
-    const out = await run('scutil', ['--proxy']);
+    const out = (await readers.run('scutil', ['--proxy'])) ?? '';
     const on = (name: string): boolean => new RegExp(`\\b${name}\\s*:\\s*1\\b`).test(out);
     if (on('ProxyAutoConfigEnable') || on('ProxyAutoDiscoveryEnable')) return 'a proxy script';
-    for (const kind of ['HTTP', 'HTTPS', 'SOCKS']) if (on(`${kind}Enable`)) return `${kind} ${/\bHTTPProxy\s*:\s*(\S+)/.exec(out)?.[1] ?? ''}`.trim();
+    for (const kind of ['HTTP', 'HTTPS', 'SOCKS']) if (on(`${kind}Enable`)) return redactCredentials(`${kind} ${/\bHTTPProxy\s*:\s*(\S+)/.exec(out)?.[1] ?? ''}`.trim());
     return null;
+  }
+  if (platform === 'linux') {
+    const desktop = linuxDesktop(env);
+    if (desktop === 'gnome') {
+      const mode = await readers.run('gsettings', ['get', 'org.gnome.system.proxy', 'mode']);
+      if (mode === null) return 'the proxy settings of the desktop (GNOME), which could not be read';
+      const value = mode.trim().replace(/^'|'$/g, '');
+      if (value !== 'none') return `the proxy settings of the desktop (GNOME, mode ${value})`;
+    } else if (desktop === 'kde') {
+      const config = env['XDG_CONFIG_HOME'] || join(readers.home, '.config');
+      const text = await readers.readFile(join(config, 'kioslaverc'));
+      const type = text === null ? '0' : (/^\s*ProxyType\s*=\s*(\d+)/m.exec(text)?.[1] ?? '0');
+      if (type !== '0') return `the proxy settings of the desktop (KDE, ProxyType ${type})`;
+    } else if (desktop === 'other') {
+      return `the proxy settings of the desktop (${env['XDG_CURRENT_DESKTOP'] || env['DESKTOP_SESSION']}), which are not read here`;
+    }
   }
   for (const name of ['http_proxy', 'https_proxy', 'all_proxy', 'auto_proxy']) {
     const value = env[name] ?? env[name.toUpperCase()];
-    if (value) return `${name}=${value.replace(/\/\/[^@/]*@/, '//')}`;
+    if (value) return redactCredentials(`${name}=${value}`);
   }
   return null;
 }

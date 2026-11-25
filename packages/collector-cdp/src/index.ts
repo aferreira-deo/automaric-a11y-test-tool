@@ -20,8 +20,8 @@ import type { CdpSession, StopSignal } from './session.js';
 export { CollectionStoppedError } from './session.js';
 export { pageRestore } from './page.js';
 export type { CdpSession, StopSignal } from './session.js';
-export type { CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage } from './probe-host.js';
-export { ProbeReadRefused, ProbeRoutingError, isProbeReadRefused, isProbeRoutingError } from './probe-host.js';
+export type { CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage, ProbeReadLimits } from './probe-host.js';
+export { ProbeReadRefused, ProbeReadTooLarge, ProbeRoutingError, isProbeReadRefused, isProbeReadTooLarge, isProbeRoutingError } from './probe-host.js';
 
 /** How a collection is run. All optional. */
 export interface CollectOptions {

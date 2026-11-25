@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timers of the page on every click</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; }
+  nav a { display: inline-block; margin: 0 16px 8px 0; }
+  .spinner { display: none; width: 260px; height: 80px; background: #fde8ee; }
+  .spinner.on { display: block; }
+  #panel, #more, #details { width: 320px; height: 120px; background: #eef; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Timers of the page on every click</h1>
+  <p>What listens to every click on this page sets timers that have nothing to do with the control clicked: an analytics flush 3 s later, and a poll every 100 ms. They are the page's: what each control does is concluded on as on a page without them.</p>
+  <nav aria-label="Account">
+    <a id="opens" href="#" onclick="event.preventDefault(); document.getElementById('panel').hidden = false;">Delivery options</a>
+    <a id="details-link" href="#" onclick="event.preventDefault(); document.getElementById('details').hidden = false;">Returns</a>
+    <a id="wait-long" href="/name-role-value/roles.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin-long').classList.add('on'); setTimeout(() => { location.href = to; }, 6000);">Archive</a>
+  </nav>
+  <div id="spin-long" class="spinner">Taking you to the archive…</div>
+  <div id="panel" hidden>Standard, express or collection in store.</div>
+  <div id="details" hidden>Free returns within 30 days.</div>
+  <p>
+    <button id="disclosure" type="button" onclick="const more = document.getElementById('more'); more.hidden = !more.hidden;">Opening hours</button>
+  </p>
+  <div id="more" hidden>Monday to Friday, 9 to 18.</div>
+</main>
+<script>
+  // An analytics library: every click is queued, and the queue is sent 3 s later.
+  window.__queued = 0;
+  document.addEventListener('click', () => { window.__queued++; setTimeout(() => { window.__queued = 0; }, 3000); }, true);
+  // A poll started on every click, that changes nothing in the page (it watches for a session to expire).
+  document.addEventListener('click', () => { let left = 100; (function check() { if (--left > 0) setTimeout(check, 100); })(); }, true);
+</script>
+</body>
+</html>

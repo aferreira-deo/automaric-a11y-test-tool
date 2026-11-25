@@ -1027,7 +1027,7 @@ export interface NrvProbeLog {
   planned: number;
   /** Requests of the copies that were stopped, as `METHOD type origin+path`, sorted, without repeats. */
   blocked: string[];
-  /** Responses given to the copies while they loaded and while they were probed, counted: from the network (`fetched`) or from what was already fetched. */
+  /** Responses given to the copies while they loaded and while they were probed, counted: from the network (`fetched`) or from what was already fetched. The same read asked for again by one copy while it loads (a picture its browser did not keep) counts once. */
   allowed: number;
   /** Of those, requests the collector sent to a server for the copies: GET or HEAD only, while a copy loaded. */
   fetched: number;
@@ -1050,6 +1050,18 @@ export interface NrvProbeLog {
    * host read it from the browser of the page under test or was told it (`probeContext`).
    */
   route?: string;
+  /**
+   * The cookies sent with the reads of the copies: `browser`, those the probing Chromium attached to
+   * each request itself; `firstParty`, those only for the main frame of a copy and the page's own
+   * host, because the browser of the page may choose cookies otherwise (`cookiesDetail` says why);
+   * `withheld`, none, because this Chromium does not give them with a paused request. Absent when
+   * no copy was loaded.
+   */
+  cookies?: 'browser' | 'firstParty' | 'withheld';
+  /** With `cookies: firstParty`: why. */
+  cookiesDetail?: string;
+  /** Reads stopped because their response was larger than `probeReadMaxBytes` or `probeReadMaxEncodedBytes`. */
+  tooLarge?: number;
   /**
    * Why probing stopped early or did not start, when it did. `browserFailed`: the probing browser
    * did not start. `routing`: where the page under test's own requests go could not be read, or
@@ -2312,6 +2324,16 @@ export interface NameRoleValueConfig {
    * (`timerPending`, `info`).
    */
   activationTimerMaxMs: number;
+  /**
+   * A timer that sets itself again from its own callback (a poll every 100 ms) is a loop, not
+   * something still to happen, once it has done so more than this many times while the copy stayed
+   * quiet (no element or attribute changed): it is no longer waited for, and not `timerPending`.
+   * One whose runs change the page (an animation by script) is waited for as any other. Timers armed
+   * by what listens to every click (analytics, a delegated poll), told apart by an activation of a
+   * neutral spot of each copy before its first probe, are waited for only when due within
+   * `activationTimerMaxMs`, and never `timerPending`.
+   */
+  activationTimerChainMax: number;
   /** A CSS selector; elements that match it, or are inside an element that does, are never activated. */
   probeExcludeSelector: string;
   /**
@@ -2353,6 +2375,12 @@ export interface NameRoleValueConfig {
   probeCloneMaxCountDelta: number;
   /** What was fetched for the copies is kept for the later copies of the same scan, up to this many bytes. */
   probeCacheMaxBytes: number;
+  /** One read for a copy, decoded, at most: a larger one (a compression bomb) is stopped as soon as it goes over, the copy gets an error, and the survey counts it (`readsTooLarge`). 16 MiB. */
+  probeReadMaxBytes: number;
+  /** One read for a copy as the server sends it (compressed), at most: likewise. 16 MiB. */
+  probeReadMaxEncodedBytes: number;
+  /** Reads for the copies under way at once, at most; the others wait. 6. */
+  probeReadConcurrency: number;
   /**
    * Regular expressions (sources). A read of a copy's load whose address matches one is never sent
    * to a server: the copy gets an error. The document of the copy (the address of the page) is

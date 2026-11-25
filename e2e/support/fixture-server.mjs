@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gzipSync } from 'node:zlib';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 
 const root = fileURLToPath(new URL('../../fixtures/', import.meta.url));
 const port = Number(process.argv[2] ?? 4173);
@@ -237,8 +237,9 @@ function nrvPage(title, script = '') {
 <p id="data">loading</p></main>${script ? `<script>${script}</script>` : ''}</body></html>`;
 }
 const nrvServed = new Map();
+let nrvBomb;
 function nrv(pathname, request) {
-  const match = /^\/_nrv\/(write|nav|log|frame|autoframe|private|mocked|once)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
+  const match = /^\/_nrv\/(write|nav|log|frame|autoframe|private|mocked|once|bomb)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
   if (!match) return null;
   const [, kind, session, name = ''] = match;
   if (kind === 'log') return { status: 200, type: types['.json'], body: JSON.stringify(nrvHits.get(session) ?? []) };
@@ -258,6 +259,11 @@ function nrv(pathname, request) {
     if (nrvServed.has(key)) return { destroy: true };
     nrvServed.set(key, true);
     return { status: 200, type: types['.html'], body: nrvPage('Once') };
+  }
+  // A script of a few kilobytes that decodes to 32 MiB (a compression bomb), on a page to probe.
+  if (kind === 'bomb') {
+    if (name === 'bomb.js') return { status: 200, type: types['.js'], body: (nrvBomb ??= brotliCompressSync(Buffer.alloc(32 << 20, 32), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } })), headers: { 'content-encoding': 'br' } };
+    return { status: 200, type: types['.html'], body: nrvPage('Bomb').replace('</body>', '<script src="bomb.js"></script></body>') };
   }
   if (kind === 'frame') {
     return {

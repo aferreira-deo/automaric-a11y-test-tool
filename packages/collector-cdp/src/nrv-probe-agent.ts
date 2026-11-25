@@ -93,13 +93,15 @@ export interface ProbeAgent {
   prepare(key: number): Promise<ProbePrepared>;
   begin(key: number): { fields: string[]; url: string; fingerprint: string };
   activate(key: number): void;
+  /** The same activation on a throwaway element at the end of the body, removed afterwards: what reacts to it listens to every click. */
+  activateNeutral(): void;
   settle(): Promise<void>;
   observe(key: number): ProbeObserved;
   revealReverted(): boolean;
   /** Where the element is now, page coordinates; null when it has no box. */
   boxOf(key: number): AgentRect | null;
-  /** Waits until no element has been added, removed or changed, and no animation that ends has run, for `ms`; `max` at most. Text alone does not count. */
-  quiet(ms: number, max: number): Promise<void>;
+  /** Waits until no element has been added, removed or changed, and no animation that ends has run, for `ms`; `max` at most. Text alone does not count. True when it was quiet, false when `max` ran out. */
+  quiet(ms: number, max: number): Promise<boolean>;
   noise(ms: number): Promise<{ text: number; visibility: number }>;
   fingerprint(): string;
   restoreScroll(): void;
@@ -575,6 +577,29 @@ export function probeAgentFactory(options: ProbeAgentOptions): ProbeAgent {
       element.dispatchEvent(new Mouse('click', { ...init, buttons: 0, detail: 1 }));
     },
 
+    activateNeutral() {
+      const spot = document.createElement('span');
+      spot.setAttribute('aria-hidden', 'true');
+      spot.style.cssText = 'display:inline-block;width:1px;height:1px';
+      (document.body ?? document.documentElement).append(spot);
+      try {
+        const rect = spot.getBoundingClientRect();
+        const init = { bubbles: true, cancelable: true, composed: true, clientX: rect.left, clientY: rect.top, button: 0, view: window };
+        try {
+          window.dispatchEvent(new Event('a11y-vision:activation'));
+        } catch {
+          // No guard to tell.
+        }
+        spot.dispatchEvent(new PointerEvent('pointerdown', { ...init, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+        spot.dispatchEvent(new MouseEvent('mousedown', { ...init, buttons: 1 }));
+        spot.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+        spot.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+        spot.dispatchEvent(new MouseEvent('click', { ...init, buttons: 0, detail: 1 }));
+      } finally {
+        spot.remove();
+      }
+    },
+
     settle,
 
     observe(key) {
@@ -660,17 +685,17 @@ export function probeAgentFactory(options: ProbeAgentOptions): ProbeAgent {
         // Set below; the timers that call done() run after it is.
         // eslint-disable-next-line prefer-const
         let poll: ReturnType<typeof setInterval> | undefined;
-        const done = (): void => {
+        const done = (quiet: boolean): void => {
           for (const watch of watches) watch.disconnect();
           clearTimeout(timer);
           clearTimeout(limit);
           clearInterval(poll);
-          resolve();
+          resolve(quiet);
         };
-        const limit = setTimeout(done, max);
+        const limit = setTimeout(() => done(false), max);
         const again = (): void => {
           clearTimeout(timer);
-          timer = setTimeout(done, ms);
+          timer = setTimeout(() => done(true), ms);
         };
         for (const doc of documents()) {
           const watch = new MutationObserver((list) => {
@@ -830,7 +855,7 @@ export const GUARD_SCRIPT = `(() => {
   if (globalThis.${GUARD_GLOBAL}) return true;
   let top = null;
   try { if (window.top !== window && window.top.${GUARD_GLOBAL}) top = window.top.${GUARD_GLOBAL}; } catch {}
-  const own = { log: [], recording: false, timers: new Set(), activating: 0 };
+  const own = { log: [], recording: false, timers: new Set(), activating: 0, epoch: 0, baseline: false, pageWide: new Set(), running: null };
   const state = top ? top.state : own;
   const record = (kind, url) => { if (state.recording || kind === 'dialog' || kind === 'window' || kind === 'download' || kind === 'print') state.log.push({ kind, url: typeof url === 'string' ? url : (url && typeof url.href === 'string' ? url.href : '') }); };
   const blocked = (name) => new DOMException('Stopped while a11y-vision probes a copy of the page (' + name + ').', 'SecurityError');
@@ -912,18 +937,47 @@ export const GUARD_SCRIPT = `(() => {
   const leave = () => { state.activating = Math.max(0, state.activating - 1); };
   const ownTask = () => { state.activating++; try { nativeTimeout.call(view, leave, 0); } catch { leave(); } };
   view.addEventListener('${ACTIVATION_EVENT}', () => { if (state.recording) ownTask(); }, true);
+  // Where a timer was set, and to what: the same call in a script, with the same delay, is the same timer.
+  const signature = (handler, delay) => {
+    let frame = '';
+    try { frame = String(new Error().stack || '').split('\\n').slice(3, 4).join('').trim(); } catch {}
+    let source = '';
+    try { source = Function.prototype.toString.call(handler).slice(0, 160); } catch {}
+    return (Math.max(0, Number(delay) || 0)) + '|' + frame + '|' + source;
+  };
   patch(view, 'setTimeout', (original) => function (handler, delay, ...rest) {
     if (!state.recording || typeof handler !== 'function') return original.call(this, handler, delay, ...rest);
-    const token = { activation: state.activating > 0, due: Date.now() + Math.max(0, Number(delay) || 0) };
+    const parent = state.running;
+    const sig = signature(handler, delay);
+    const token = {
+      activation: state.activating > 0,
+      due: Date.now() + Math.max(0, Number(delay) || 0),
+      epoch: state.epoch,
+      sig,
+      // Set by what listens to every click (a neutral spot armed it too), or by such a timer: the page's, not the control's.
+      pageWide: state.baseline || state.pageWide.has(sig) || (parent ? parent.pageWide : false),
+      // How many times in a row this timer set itself again from its own callback (a poll).
+      chain: parent && parent.sig === sig ? parent.chain + 1 : 1,
+    };
     timers.add(token);
-    const id = original.call(this, function () { timers.delete(token); if (token.activation && state.recording) ownTask(); return handler.apply(this, arguments); }, delay, ...rest);
+    const id = original.call(this, function () {
+      timers.delete(token);
+      // A timer of an earlier activation (or of the neutral one) that runs now is not this activation's.
+      if (token.activation && state.recording && token.epoch === state.epoch) ownTask();
+      const before = state.running;
+      state.running = token;
+      try { return handler.apply(this, arguments); } finally { state.running = before; }
+    }, delay, ...rest);
     token.id = id;
     return id;
   });
   patch(view, 'clearTimeout', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
   patch(view, 'setInterval', (original) => function (handler, ...rest) {
     const id = original.call(this, handler, ...rest);
-    if (state.recording) timers.add({ id, interval: true, activation: state.activating > 0 });
+    if (state.recording) {
+      const sig = signature(handler, rest[0]);
+      timers.add({ id, interval: true, activation: state.activating > 0, sig, pageWide: state.baseline || state.pageWide.has(sig) || (state.running ? state.running.pageWide : false) });
+    }
     return id;
   });
   patch(view, 'clearInterval', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
@@ -959,21 +1013,52 @@ export const GUARD_SCRIPT = `(() => {
   view.addEventListener('submit', onSubmit, true);
   globalThis.${GUARD_GLOBAL} = {
     state,
-    begin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.recording = true; return true; },
-    take() { state.recording = false; const out = { entries: state.log.splice(0, state.log.length), pendingTimers: state.timers.size }; return out; },
-    // The activation's own timers that have not run: how many, and in how many ms the next one is due (-1: intervals only).
-    pending() {
+    begin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.epoch++; state.baseline = false; state.recording = true; return true; },
+    take() {
+      state.recording = false;
+      let pending = 0;
+      for (const token of state.timers) if (!token.pageWide) pending++;
+      const out = { entries: state.log.splice(0, state.log.length), pendingTimers: pending };
+      return out;
+    },
+    // Before the first probe of a copy: an activation of a neutral spot shows what listens to every click; the timers it sets are the page's.
+    baselineBegin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.epoch++; state.baseline = true; state.recording = true; return true; },
+    baselineEnd() {
+      let found = 0;
+      for (const token of state.timers) if (token.activation) { state.pageWide.add(token.sig); found++; }
+      state.recording = false;
+      state.baseline = false;
+      state.log.length = 0;
+      state.timers.clear();
+      return found;
+    },
+    // The activation's timers that have not run. Its own: how many, and in how many ms the next one is due (-1: intervals only);
+    // polls among them (set again from their own callback more than chainMax times); the page's (what listens to every click): when the next is due.
+    pending(chainMax) {
       const now = Date.now();
       let count = 0;
       let next = -1;
+      let polls = 0;
+      let pollNext = -1;
+      let pageNext = -1;
+      const sooner = (current, left) => (current < 0 || left < current ? left : current);
       for (const token of state.timers) {
         if (!token.activation) continue;
+        const left = Math.max(0, (token.due || 0) - now);
+        if (!token.interval && token.chain > chainMax) {
+          if (!token.pageWide) polls++;
+          pollNext = sooner(pollNext, left);
+          continue;
+        }
+        if (token.pageWide) {
+          if (!token.interval) pageNext = sooner(pageNext, left);
+          continue;
+        }
         count++;
         if (token.interval) continue;
-        const left = Math.max(0, token.due - now);
-        if (next < 0 || left < next) next = left;
+        next = sooner(next, left);
       }
-      return { count, next };
+      return { count, next, polls, pollNext, pageNext };
     },
   };
   return true;

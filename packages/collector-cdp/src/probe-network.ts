@@ -1,6 +1,6 @@
 import { NRV_SCRIPT_READ_TYPES } from '@a11y-vision/core';
 import type { NameRoleValueConfig, NrvNavigation, NrvProbeLog } from '@a11y-vision/core';
-import { isProbeReadRefused } from './probe-host.js';
+import { isProbeReadRefused, isProbeReadTooLarge } from './probe-host.js';
 import type { ProbeBrowser, ProbeFetchResponse } from './probe-host.js';
 
 /**
@@ -22,6 +22,16 @@ import type { ProbeBrowser, ProbeFetchResponse } from './probe-host.js';
  *   follows the routing of the page's browser and refuses what it cannot follow
  *   (`ProbeReadRefused`), and a read that `probeLoadDeny` matches is never sent. What failed is
  *   kept (`failureOf`), so that a copy that did not load says why.
+ * - The cookies of a read are never chosen here. The copy's context holds the cookies of the page
+ *   under test, and Chromium itself attaches to each paused request the `Cookie` header it would
+ *   send (SameSite with the frames above the request, Secure, prefixes, the public suffix list,
+ *   the credentials mode, each hop of a redirect): that header is sent as it is. Partitioned
+ *   cookies are not in it (Chromium adds them later, on the way out): they are not sent. Whether
+ *   this Chromium attaches the header is checked once (`checkCookies`); when it does not, no
+ *   cookie is sent at all. When the host says the page's browser may choose otherwise
+ *   (`firstPartyCookiesOnly`), the header goes only with reads of the main frame to the page's host.
+ * - At most `probeReadConcurrency` reads are under way at once, each within `probeReadMaxBytes`
+ *   decoded and `probeReadMaxEncodedBytes` as sent; one that goes over is stopped and counted.
  */
 
 interface PausedRequest {
@@ -29,15 +39,6 @@ interface PausedRequest {
   request: { url: string; method: string; headers?: Record<string, string> };
   resourceType: string;
   frameId?: string;
-}
-
-interface Cookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  sameSite?: string;
-  partitionKey?: { topLevelSite?: string } | string;
 }
 
 /** What a probe saw of the network while it ran. */
@@ -59,11 +60,13 @@ export interface CurrentCopy {
   mainFrameId: string;
   frames: Set<string>;
   url: string;
-  cookies(url: string): Promise<Cookie[]>;
 }
 
-/** Headers a request is never sent with by the collector: they are the connection's, or set again. */
+/** Headers a request is never sent with by the collector: they are the connection's, or set again. `cookie` is Chrome's, taken apart (see `fetchAndGive`). */
 const DROPPED_REQUEST_HEADERS = ['cookie', 'host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'accept-encoding', 'proxy-authorization', 'proxy-connection', 'te', 'trailer', 'expect'];
+
+/** The name of the cookie that shows whether the probing Chromium gives its own `Cookie` header with a paused request (`checkCookies`). */
+export const COOKIE_CHECK_NAME = 'a11y-vision-cookie-check';
 /** Headers of a response that do not describe the body given to the copy (it is decoded) or the connection. */
 const DROPPED_RESPONSE_HEADERS = ['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'alt-svc'];
 
@@ -112,6 +115,12 @@ export function siteOf(url: string): string {
 
 /** Second-level labels under which countries register names (`co.uk`, `gouv.fr`, `com.au`): the usual ones, not a full list. */
 const SECOND_LEVEL = ['co', 'com', 'net', 'org', 'gov', 'gouv', 'ac', 'edu', 'ne', 'or', 'go', 'gob', 'mil', 'nic', 'ltd', 'plc', 'asso', 'nom', 'sch', 'nhs', 'police'];
+
+/** A header of a paused request, whatever its case. */
+function headerOf(headers: Record<string, string> | undefined, name: string): string | undefined {
+  for (const [key, value] of Object.entries(headers ?? {})) if (key.toLowerCase() === name) return value;
+  return undefined;
+}
 
 function withoutFragment(url: string): string {
   const index = url.indexOf('#');
@@ -199,7 +208,11 @@ export class ProbeNetwork {
       for (const [target, context] of this.contextOf) if (context === this.current.browserContextId) this.retired.add(target);
     }
     this.current = copy;
+    this.loadGiven.clear();
   }
+
+  /** What the current copy was given while it loaded, by key. */
+  private readonly loadGiven = new Set<string>();
 
   /** From here, the requests of the current copy are a load: fetched from the server. */
   openLoad(): void {
@@ -273,6 +286,12 @@ export class ProbeNetwork {
   private async answer(event: PausedRequest): Promise<void> {
     const method = event.request.method.toUpperCase();
     const url = event.request.url;
+    // The navigation of the cookie check: what Chromium attached is read, and it goes nowhere.
+    if (this.cookieCheck && withoutFragment(url) === this.cookieCheck.url) {
+      this.cookieCheck.seen = headerOf(event.request.headers, 'cookie') ?? '';
+      await this.fail(event, 'Aborted');
+      return;
+    }
     const type = event.resourceType;
     const read = method === 'GET' || method === 'HEAD';
     const ours = this.belongs(event.frameId);
@@ -303,7 +322,7 @@ export class ProbeNetwork {
     if (!read) return stop();
     // A copy that loads: its own reads are fetched (a page view), or given what was fetched before.
     if (this.loading && ours) {
-      if (cached) return this.give(event, cached);
+      if (cached) return this.give(event, cached, key);
       return this.fetchAndGive(event, key, method);
     }
     // Probing: a navigation is the evidence that an element navigates, and is never followed.
@@ -325,8 +344,10 @@ export class ProbeNetwork {
     return stop();
   }
 
-  private async give(event: PausedRequest, response: ProbeFetchResponse): Promise<void> {
-    this.log.allowed++;
+  /** Gives a response; one a copy asks for again while it loads (`loadKey`: a picture its browser did not keep) is counted once. */
+  private async give(event: PausedRequest, response: ProbeFetchResponse, loadKey?: string): Promise<void> {
+    if (loadKey === undefined || !this.loadGiven.has(loadKey)) this.log.allowed++;
+    if (loadKey !== undefined) this.loadGiven.add(loadKey);
     await this.probe.browser.send('Fetch.fulfillRequest', {
       requestId: event.requestId,
       responseCode: response.status,
@@ -335,21 +356,31 @@ export class ProbeNetwork {
     });
   }
 
-  private async cookieHeader(url: string): Promise<string> {
-    const copy = this.current;
-    if (!copy) return '';
-    const cookies = await copy.cookies(url).catch(() => [] as Cookie[]);
-    const top = siteOf(copy.url);
-    const sameSite = siteOf(url) === top;
-    const kept = cookies.filter((cookie) => {
-      if (cookie.partitionKey) {
-        const partition = typeof cookie.partitionKey === 'string' ? cookie.partitionKey : (cookie.partitionKey.topLevelSite ?? '');
-        if (siteOf(partition) !== top) return false;
-      }
-      // A cookie of another site goes along only when it says so (SameSite=None), as Chrome does.
-      return sameSite || (cookie.sameSite ?? '').toLowerCase() === 'none';
-    });
-    return kept.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+  /** Whether the probing Chromium gives the `Cookie` header it would send with each paused request: undefined until checked. */
+  private browserCookies: boolean | undefined;
+  private cookieCheck: { url: string; seen: string | null } | null = null;
+
+  /**
+   * Checks, once, that this Chromium gives the `Cookie` header with a paused request. `prepare`
+   * sets a cookie for `url` in a context of the probing browser and sends a navigation there
+   * (never fetched: it is stopped here, as it pauses); `forget` removes the cookie. Without the
+   * header, no read carries a cookie: fewer cookies than the page sends, never more.
+   */
+  async checkCookies(prepare: (url: string, name: string, value: string) => Promise<void>, forget: (url: string, name: string) => Promise<void>): Promise<void> {
+    if (this.browserCookies !== undefined) return;
+    const value = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const url = `http://c${value}.cookie-check.a11y-vision.invalid/`;
+    this.cookieCheck = { url, seen: null };
+    try {
+      await prepare(url, COOKIE_CHECK_NAME, value);
+    } finally {
+      const seen = this.cookieCheck.seen ?? '';
+      this.cookieCheck = null;
+      this.browserCookies = seen.split(/;\s*/).includes(`${COOKIE_CHECK_NAME}=${value}`);
+      this.log.cookies = !this.browserCookies ? 'withheld' : this.probe.firstPartyCookiesOnly !== undefined ? 'firstParty' : 'browser';
+      if (this.browserCookies && this.probe.firstPartyCookiesOnly !== undefined) this.log.cookiesDetail = this.probe.firstPartyCookiesOnly;
+      await forget(url, COOKIE_CHECK_NAME).catch(() => undefined);
+    }
   }
 
   /** What went wrong when the collector read this address for a copy, in a few words; undefined when nothing did. */
@@ -368,6 +399,22 @@ export class ProbeNetwork {
 
   private readonly deny: RegExp[];
 
+  private reading = 0;
+  private readonly queued: (() => void)[] = [];
+
+  /** A place among the reads under way (`probeReadConcurrency` at most); call what it returns when the read is over. */
+  private async slot(): Promise<() => void> {
+    if (this.reading >= Math.max(1, this.config.probeReadConcurrency)) await new Promise<void>((resolve) => this.queued.push(resolve));
+    this.reading++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.reading--;
+      this.queued.shift()?.();
+    };
+  }
+
   /** Not sent, and why: recorded with the requests that were stopped. */
   private async refuse(event: PausedRequest, method: string, why: string): Promise<void> {
     this.blockedKinds.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)} (not sent: ${why})`);
@@ -382,8 +429,18 @@ export class ProbeNetwork {
       if (lower.startsWith(':') || DROPPED_REQUEST_HEADERS.includes(lower)) continue;
       headers[lower] = value;
     }
-    const cookie = await this.cookieHeader(event.request.url);
-    if (cookie !== '') headers['cookie'] = cookie;
+    // Chromium's own choice of cookies for this request, once it is known to give it; otherwise none. When the browser
+    // of the page may choose otherwise (its profile, its switches), only for the main frame, to the page's own host.
+    const firstParty = (): boolean => {
+      if (!this.current || event.frameId !== this.current.mainFrameId) return false;
+      try {
+        return new URL(event.request.url).host === new URL(this.current.url).host;
+      } catch {
+        return false;
+      }
+    };
+    const cookie = this.browserCookies === true && (this.probe.firstPartyCookiesOnly === undefined || firstParty()) ? headerOf(event.request.headers, 'cookie') : undefined;
+    if (cookie !== undefined && cookie !== '') headers['cookie'] = cookie;
     // The collector sends GET and HEAD and nothing else; the host refuses anything else too.
     if (method !== 'GET' && method !== 'HEAD') {
       this.log.unsafe++;
@@ -391,15 +448,23 @@ export class ProbeNetwork {
       return;
     }
     let response: ProbeFetchResponse;
+    const release = await this.slot();
     try {
-      response = await this.probe.fetch({ url: event.request.url, method, headers }, { timeoutMs: this.config.probeLoadTimeoutMs, maxBytes: this.config.probeCacheMaxBytes });
+      response = await this.probe.fetch(
+        { url: event.request.url, method, headers },
+        { timeoutMs: this.config.probeLoadTimeoutMs, maxBytes: this.config.probeReadMaxBytes, maxEncodedBytes: this.config.probeReadMaxEncodedBytes },
+      );
     } catch (error) {
       const message = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
       if (isProbeReadRefused(error)) return this.refuse(event, method, message);
+      const tooLarge = isProbeReadTooLarge(error);
+      if (tooLarge) this.log.tooLarge = (this.log.tooLarge ?? 0) + 1;
       this.failures.set(withoutFragment(event.request.url), `the read of ${shownUrl(event.request.url)} failed: ${message}`);
-      this.blockedKinds.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)} (unreachable)`);
+      this.blockedKinds.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)} (${tooLarge ? 'too large' : 'unreachable'})`);
       await this.fail(event, 'Failed');
       return;
+    } finally {
+      release();
     }
     this.log.fetched++;
     const kept = { ...response, headers: response.headers.filter((header) => !DROPPED_RESPONSE_HEADERS.includes(header.name.toLowerCase())) };
@@ -407,7 +472,7 @@ export class ProbeNetwork {
       this.cache.set(key, kept);
       this.cacheBytes += kept.size;
     }
-    await this.give(event, kept);
+    await this.give(event, kept, this.loading ? key : undefined);
   }
 
   /** The address without its fragment equals the copy's: only the fragment changed. */

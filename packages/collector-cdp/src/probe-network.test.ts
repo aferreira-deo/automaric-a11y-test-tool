@@ -2,8 +2,8 @@ import { defaultConfig, resolveNameRoleValue } from '@a11y-vision/core';
 import { describe, expect, it } from 'vitest';
 import { emptyProbeLog } from './nrv.js';
 import { ProbeNetwork, siteOf } from './probe-network.js';
-import { ProbeReadRefused } from './probe-host.js';
-import type { ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse } from './probe-host.js';
+import { ProbeReadRefused, ProbeReadTooLarge } from './probe-host.js';
+import type { ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeReadLimits } from './probe-host.js';
 
 const emptyProbeLogFor = () => emptyProbeLog('safe');
 
@@ -35,21 +35,33 @@ function fake(answer?: (request: ProbeFetchRequest) => Promise<ProbeFetchRespons
 }
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
-const paused = (requestId: string, method: string, url: string, resourceType: string, frameId: string | null = 'MAIN') => ({ requestId, request: { url, method, headers: { Accept: '*/*', Cookie: 'x=1' } }, resourceType, ...(frameId ? { frameId } : {}) });
+const paused = (requestId: string, method: string, url: string, resourceType: string, frameId: string | null = 'MAIN', cookie = 'sid=1') => ({ requestId, request: { url, method, headers: { Accept: '*/*', ...(cookie ? { Cookie: cookie } : {}) } }, resourceType, ...(frameId ? { frameId } : {}) });
+
+/** The cookie check, with a probing Chromium that attaches the Cookie header it would send to the check's navigation (or none). */
+async function checked(net: ProbeNetwork, emit: (event: string, params: unknown) => void, gives = true): Promise<void> {
+  await net.checkCookies(
+    (url, name, value) => {
+      emit('Fetch.requestPaused', paused('check', 'GET', url, 'Document', 'MAIN', gives ? `other=1; ${name}=${value}` : ''));
+      return tick().then(() => undefined);
+    },
+    () => Promise.resolve(),
+  );
+}
 
 async function network() {
   const parts = fake();
   const log = emptyProbeLogFor();
   const net = new ProbeNetwork(parts.probe, defaultConfig.nameRoleValue, log);
   await net.enable();
-  net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p', cookies: () => Promise.resolve([{ name: 'sid', value: '1', domain: 'shop.example', path: '/', sameSite: 'Lax' }]) });
+  net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p' });
+  await checked(net, parts.emit);
   return { ...parts, log, net };
 }
 
 describe('the network of the probing browser', () => {
   it('is held at the browser target from the start, and never continues a request', async () => {
     const { sent, emit, net } = await network();
-    expect(sent.map((entry) => entry.method)).toEqual(['Fetch.enable', 'Target.setDiscoverTargets']);
+    expect(sent.map((entry) => entry.method).slice(0, 2)).toEqual(['Fetch.enable', 'Target.setDiscoverTargets']);
     net.openLoad();
     emit('Fetch.requestPaused', paused('1', 'GET', 'https://shop.example/p', 'Document'));
     emit('Fetch.requestPaused', paused('2', 'POST', 'https://shop.example/api', 'XHR'));
@@ -65,6 +77,7 @@ describe('the network of the probing browser', () => {
     net.openLoad();
     emit('Fetch.requestPaused', paused('1', 'GET', 'https://shop.example/app.js', 'Script'));
     await tick();
+    // The cookies are those Chromium attached to the request, as they are.
     expect(fetched).toEqual([{ url: 'https://shop.example/app.js', method: 'GET', headers: { accept: '*/*', cookie: 'sid=1' } }]);
     // The body is decoded: its encoding is not passed on.
     const fulfilled = sent.find((entry) => entry.method === 'Fetch.fulfillRequest')!;
@@ -90,7 +103,7 @@ describe('the network of the probing browser', () => {
     emit('Fetch.requestPaused', paused('6', 'GET', 'https://shop.example/search?q=shoes', 'Document'));
     await tick();
     expect(fetched).toEqual([]);
-    const failed = sent.filter((entry) => entry.method === 'Fetch.failRequest').map((entry) => [entry.params['requestId'], entry.params['errorReason']]);
+    const failed = sent.filter((entry) => entry.method === 'Fetch.failRequest' && entry.params['requestId'] !== 'check').map((entry) => [entry.params['requestId'], entry.params['errorReason']]);
     expect(failed).toEqual([
       ['1', 'BlockedByClient'],
       ['2', 'BlockedByClient'],
@@ -116,32 +129,79 @@ describe('the network of the probing browser', () => {
     emit('Fetch.requestPaused', paused('1', 'GET', 'https://shop.example/late?x=1', 'Fetch', 'OLD-WORKER'));
     emit('Fetch.requestPaused', paused('2', 'GET', 'https://shop.example/none', 'Fetch', null));
     // The frames of a copy that is gone are never a copy's again.
-    net.setCurrent({ browserContextId: 'CTX2', mainFrameId: 'MAIN2', frames: new Set(['MAIN2']), url: 'https://shop.example/p', cookies: () => Promise.resolve([]) });
+    net.setCurrent({ browserContextId: 'CTX2', mainFrameId: 'MAIN2', frames: new Set(['MAIN2']), url: 'https://shop.example/p' });
     net.openLoad();
     emit('Fetch.requestPaused', paused('3', 'GET', 'https://shop.example/pagehide?x=1', 'Fetch', 'MAIN'));
     await tick();
     expect(fetched).toEqual([]);
   });
 
-  it('sends a cookie of another site only when it says SameSite=None', async () => {
+  it('sends the cookies Chromium chose for each request, as they are, and none before that is checked or when this Chromium does not give them', async () => {
     const parts = fake();
-    const net = new ProbeNetwork(parts.probe, defaultConfig.nameRoleValue, emptyProbeLogFor());
+    const log = emptyProbeLogFor();
+    const net = new ProbeNetwork(parts.probe, defaultConfig.nameRoleValue, log);
     await net.enable();
-    net.setCurrent({
-      browserContextId: 'CTX',
-      mainFrameId: 'MAIN',
-      frames: new Set(['MAIN']),
-      url: 'https://www.shop.example/p',
-      cookies: () =>
-        Promise.resolve([
-          { name: 'lax', value: '1', domain: 'cdn.other.example', path: '/' },
-          { name: 'none', value: '2', domain: 'cdn.other.example', path: '/', sameSite: 'None' },
-        ]),
-    });
+    net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://www.shop.example/p' });
     net.openLoad();
-    parts.emit('Fetch.requestPaused', paused('1', 'GET', 'https://cdn.other.example/lib.js', 'Script'));
+    // Not checked yet: no cookie at all.
+    parts.emit('Fetch.requestPaused', paused('1', 'GET', 'https://cdn.other.example/a.js', 'Script', 'MAIN', 'none=2'));
     await tick();
-    expect(parts.fetched[0]!.headers['cookie']).toBe('none=2');
+    await checked(net, parts.emit);
+    expect(log.cookies).toBe('browser');
+    // The check's own navigation went nowhere.
+    expect(parts.fetched.map((request) => request.url)).toEqual(['https://cdn.other.example/a.js']);
+    expect(parts.sent.find((entry) => entry.params['requestId'] === 'check')).toMatchObject({ method: 'Fetch.failRequest' });
+    parts.emit('Fetch.requestPaused', paused('2', 'GET', 'https://cdn.other.example/b.js', 'Script', 'MAIN', 'none=2'));
+    parts.emit('Fetch.requestPaused', paused('3', 'GET', 'https://cdn.other.example/c.js', 'Script', 'MAIN', ''));
+    await tick();
+    expect(parts.fetched.map((request) => request.headers['cookie'])).toEqual([undefined, 'none=2', undefined]);
+
+    const other = fake();
+    const withheld = new ProbeNetwork(other.probe, defaultConfig.nameRoleValue, log);
+    await withheld.enable();
+    withheld.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://www.shop.example/p' });
+    withheld.openLoad();
+    await checked(withheld, other.emit, false);
+    expect(log.cookies).toBe('withheld');
+    other.emit('Fetch.requestPaused', paused('4', 'GET', 'https://www.shop.example/a.js', 'Script', 'MAIN', 'sid=1'));
+    await tick();
+    expect(other.fetched.map((request) => request.headers['cookie'])).toEqual([undefined]);
+  });
+
+  it('has at most probeReadConcurrency reads under way, within the limits of one read, and counts one that was too large', async () => {
+    let open = 0;
+    let most = 0;
+    const waiting: (() => void)[] = [];
+    const seen: unknown[] = [];
+    const parts = fake((request) => {
+      open++;
+      most = Math.max(most, open);
+      return new Promise((resolve, reject) => {
+        waiting.push(() => {
+          open--;
+          if (request.url.endsWith('/bomb.js')) reject(new ProbeReadTooLarge('the response is larger than allowed decoded'));
+          else resolve({ status: 200, headers: [], body: '', size: 0 });
+        });
+      });
+    });
+    const probe = { ...parts.probe, fetch: (request: ProbeFetchRequest, limits: ProbeReadLimits) => (seen.push(limits), parts.probe.fetch(request, limits)) };
+    const log = emptyProbeLogFor();
+    const net = new ProbeNetwork(probe, resolveNameRoleValue({ probeReadConcurrency: 2 }), log);
+    await net.enable();
+    net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p' });
+    net.openLoad();
+    for (const name of ['a', 'b', 'c', 'bomb']) parts.emit('Fetch.requestPaused', paused(name, 'GET', `https://shop.example/${name}.js`, 'Script'));
+    await tick();
+    expect(open).toBe(2);
+    while (waiting.length > 0 || open > 0) {
+      waiting.shift()?.();
+      await tick();
+    }
+    expect(most).toBe(2);
+    expect(seen[0]).toEqual({ timeoutMs: defaultConfig.nameRoleValue.probeLoadTimeoutMs, maxBytes: 16 << 20, maxEncodedBytes: 16 << 20 });
+    expect(log.tooLarge).toBe(1);
+    net.disable();
+    expect(log.blocked).toEqual(['GET Script https://shop.example/bomb.js (too large)']);
   });
 });
 
@@ -151,7 +211,7 @@ describe('what is not sent', () => {
     const log = emptyProbeLogFor();
     const net = new ProbeNetwork(parts.probe, resolveNameRoleValue({ probeLoadDeny: deny }), log);
     await net.enable();
-    net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p', cookies: () => Promise.resolve([]) });
+    net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p' });
     net.openLoad();
     return { ...parts, log, net };
   };
