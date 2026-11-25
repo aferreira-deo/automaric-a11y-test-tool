@@ -1,13 +1,14 @@
-import { defaultConfig } from '@a11y-vision/core';
+import { defaultConfig, resolveNameRoleValue } from '@a11y-vision/core';
 import { describe, expect, it } from 'vitest';
 import { emptyProbeLog } from './nrv.js';
 import { ProbeNetwork, siteOf } from './probe-network.js';
-import type { ProbeBrowser, ProbeFetchRequest } from './probe-host.js';
+import { ProbeReadRefused } from './probe-host.js';
+import type { ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse } from './probe-host.js';
 
 const emptyProbeLogFor = () => emptyProbeLog('safe');
 
 /** A browser session that records what the network answers, and a host that records what it is asked to fetch. */
-function fake(): { probe: ProbeBrowser; sent: { method: string; params: Record<string, unknown> }[]; fetched: ProbeFetchRequest[]; emit: (event: string, params: unknown) => void } {
+function fake(answer?: (request: ProbeFetchRequest) => Promise<ProbeFetchResponse>): { probe: ProbeBrowser; sent: { method: string; params: Record<string, unknown> }[]; fetched: ProbeFetchRequest[]; emit: (event: string, params: unknown) => void } {
   const handlers = new Map<string, ((params: unknown) => void)[]>();
   const sent: { method: string; params: Record<string, unknown> }[] = [];
   const fetched: ProbeFetchRequest[] = [];
@@ -20,9 +21,11 @@ function fake(): { probe: ProbeBrowser; sent: { method: string; params: Record<s
       on: (event, handler) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
       off: () => undefined,
     },
+    route: 'direct',
     newPage: () => Promise.reject(new Error('not here')),
     fetch: (request) => {
       fetched.push(request);
+      if (answer) return answer(request);
       return Promise.resolve({ status: 200, headers: [{ name: 'content-type', value: 'text/plain' }, { name: 'content-encoding', value: 'gzip' }], body: 'b2s=', size: 2 });
     },
     refusedConnections: () => 0,
@@ -139,6 +142,47 @@ describe('the network of the probing browser', () => {
     parts.emit('Fetch.requestPaused', paused('1', 'GET', 'https://cdn.other.example/lib.js', 'Script'));
     await tick();
     expect(parts.fetched[0]!.headers['cookie']).toBe('none=2');
+  });
+});
+
+describe('what is not sent', () => {
+  const load = async (answer?: (request: ProbeFetchRequest) => Promise<ProbeFetchResponse>, deny: string[] = []) => {
+    const parts = fake(answer);
+    const log = emptyProbeLogFor();
+    const net = new ProbeNetwork(parts.probe, resolveNameRoleValue({ probeLoadDeny: deny }), log);
+    await net.enable();
+    net.setCurrent({ browserContextId: 'CTX', mainFrameId: 'MAIN', frames: new Set(['MAIN']), url: 'https://shop.example/p', cookies: () => Promise.resolve([]) });
+    net.openLoad();
+    return { ...parts, log, net };
+  };
+  const failed = (sent: { method: string; params: Record<string, unknown> }[]) => sent.filter((entry) => entry.method === 'Fetch.failRequest').map((entry) => [entry.params['requestId'], entry.params['errorReason']]);
+
+  it('a read of a load that probeLoadDeny lists is never fetched; the document of the copy always is', async () => {
+    const { sent, fetched, emit, net, log } = await load(undefined, ['.*']);
+    emit('Fetch.requestPaused', paused('1', 'GET', 'https://shop.example/p', 'Document'));
+    emit('Fetch.requestPaused', paused('2', 'GET', 'https://shop.example/api/data', 'Fetch'));
+    await tick();
+    expect(fetched.map((request) => request.url)).toEqual(['https://shop.example/p']);
+    expect(failed(sent)).toEqual([['2', 'BlockedByClient']]);
+    net.disable();
+    expect(log.blocked).toEqual(['GET Fetch https://shop.example/api/data (not sent: probeLoadDeny)']);
+  });
+
+  it('a read the host refuses is recorded with its reason; one that fails keeps what went wrong, for the copy that did not load', async () => {
+    const { sent, emit, net, log } = await load((request) =>
+      request.url.includes('/api/') ? Promise.reject(new ProbeReadRefused('the page under test routes this address itself')) : Promise.reject(new Error('socket hang up')),
+    );
+    emit('Fetch.requestPaused', paused('1', 'GET', 'https://shop.example/api/data?id=1', 'Fetch'));
+    emit('Fetch.requestPaused', paused('2', 'GET', 'https://shop.example/p#top', 'Document'));
+    await tick();
+    expect(failed(sent)).toEqual([
+      ['1', 'BlockedByClient'],
+      ['2', 'Failed'],
+    ]);
+    expect(net.failureOf('https://shop.example/p')).toBe('the read of https://shop.example/p failed: socket hang up');
+    expect(net.failureOf('https://shop.example/api/data?id=1')).toBeUndefined();
+    net.disable();
+    expect(log.blocked).toEqual(['GET Document https://shop.example/p (unreachable)', 'GET Fetch https://shop.example/api/data (not sent: the page under test routes this address itself)']);
   });
 });
 

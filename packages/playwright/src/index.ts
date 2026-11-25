@@ -38,7 +38,9 @@ export class A11yVision {
   /**
    * `probeContext`: what the copies of the page the name-role-value check probes in need beyond
    * what is read from the page (HTTP credentials, extra headers), as the context of the page has
-   * them. Probing never happens in `page`: see the README, "The probing safety model".
+   * them, and, when it cannot be read from the page's browser, where their reads go (`proxy`,
+   * `hostResolverRules`, `ignoreHTTPSErrors`) and the Chromium to probe in (`executablePath`,
+   * `channel`). Probing never happens in `page`: see the README, "The probing safety model".
    */
   constructor({ page, probeContext = {} }: { page: Page; probeContext?: ProbeContextOptions }) {
     this.#page = page;

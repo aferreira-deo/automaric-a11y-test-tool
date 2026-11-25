@@ -48,7 +48,7 @@ function flagged(candidate: NrvCandidate, flag: string): boolean {
   return candidate.flags.includes(flag);
 }
 
-function messageOf(candidate: NrvCandidate, element: NrvElement, config: { behaviourRoleStatus: Status }): { message: string; help: string } {
+function messageOf(candidate: NrvCandidate, element: NrvElement, config: { behaviourRoleStatus: Status; activationTimerMaxMs: number }): { message: string; help: string } {
   const lead = describe(element);
   const held = flagged(candidate, 'axIncomplete') ? ' Recorded as info because the accessibility tree could not be read in full.' : '';
   const axe = candidate.axeRule ? ` axe-core reports this too (${candidate.axeRule}).` : '';
@@ -149,6 +149,12 @@ function messageOf(candidate: NrvCandidate, element: NrvElement, config: { behav
                 ? 'tried to send a request that writes (another method than GET; the probe stopped it)'
                 : 'changed its own look';
       const level = config.behaviourRoleStatus === 'fail' ? '' : ' Confirm it: the role is inferred from what the link did.';
+      if (flagged(candidate, 'timerPending') && !flagged(candidate, 'requestBlocked')) {
+        return {
+          message: `${lead} is a link, and activating it ${what} without any navigation; but it also set a timer that had not run when the probe stopped waiting (${config.activationTimerMaxMs} ms after the activation), and it may navigate when that runs (a link that shows a spinner, then goes). Recorded as info: nothing is concluded while something is still to happen.${held}`,
+          help: HELP.linkButton,
+        };
+      }
       if (flagged(candidate, 'requestBlocked')) {
         return {
           message: `${lead} is a link, and activating it ${what} without any navigation; but it also asked for something the probe did not give it (${String(candidate.values['readsStopped'] ?? 0)} request(s) of a script stopped), and it may navigate once that comes back. Recorded as info: nothing is concluded from the page's reaction to the block.${held}`,
@@ -165,6 +171,12 @@ function messageOf(candidate: NrvCandidate, element: NrvElement, config: { behav
         return { message: `${lead} is a button that opened a new window and changed nothing in place (${String(candidate.values['navigations'] ?? '')}). Advisory: a button that opens a window (to share, to print) can be right.${held}`, help: HELP.linkButton };
       }
       const level = config.behaviourRoleStatus === 'fail' ? '' : ' Confirm it: the role is inferred from what the button did.';
+      if (flagged(candidate, 'timerPending')) {
+        return {
+          message: `${lead} is a button, and activating it went to another page or place (${String(candidate.values['navigations'] ?? '')}); but it also set a timer that had not run when the probe stopped waiting (${config.activationTimerMaxMs} ms after the activation). Recorded as info: nothing is concluded while something is still to happen.${held}`,
+          help: HELP.linkButton,
+        };
+      }
       return {
         message: `${lead} is a button, and activating it went to another page or place (${String(candidate.values['navigations'] ?? '')}), with no form submitted and no field value in the address. It acts as a link.${level}${held}`,
         help: HELP.linkButton,
@@ -200,7 +212,9 @@ function messageOf(candidate: NrvCandidate, element: NrvElement, config: { behav
       };
       const blocked = flagged(candidate, 'requestBlocked')
         ? ' Recorded as info: the activation asked for something the probe stopped (a request of a script, or a write), and the state may be set once that comes back; nothing is concluded from the page’s reaction to the block.'
-        : '';
+        : flagged(candidate, 'timerPending')
+          ? ` Recorded as info: the activation set a timer that had not run when the probe stopped waiting (${config.activationTimerMaxMs} ms after it), and the state may be set when it runs.`
+          : '';
       return { message: `${text[flag ?? 'lookChanged']}${blocked}${held}`, help: HELP.state };
     }
     default:
@@ -295,6 +309,7 @@ export const nameRoleValueCheck: Check = {
           ...(probe.clone
             ? { copyComparedWithPage: `interactive elements ${probe.clone.cloneInteractive} in the copy, ${probe.clone.pageInteractive} in the page; ${probe.clone.matched} of ${probe.clone.checked} elements to probe found alike, ${probe.clone.missing} not found` }
             : {}),
+          ...(probe.route ? { copyReadsRoute: probe.route } : {}),
           requestsBlocked: probe.blocked.length,
           ...(probe.blocked.length > 0 ? { blockedRequests: probe.blocked.join(' | ') } : {}),
           requestsAllowed: probe.allowed,
@@ -318,7 +333,14 @@ export const nameRoleValueCheck: Check = {
           : probe.unavailable
             ? ' Nothing was activated: this collection had no way to make a copy of the page to probe in (a bare CDP session or the extension), and the page under test itself is never probed. Link and button behaviour and state changes were not measured.'
             : ` Activated ${done} element(s) of ${probe.planned} that qualified, in ${probe.clones} copy(ies) of the page loaded in a browser of its own without network, never in the page under test (${probe.fetched} read(s) fetched for the copies as they loaded, ${probe.blocked.length} kind(s) of request stopped, ${probe.unsafe} write(s) let through, ${probe.escapes} connection(s) refused).`) +
-        (probe.stopped ? ` Probing stopped early (${probe.stopped}${probe.stoppedDetail ? `: ${probe.stoppedDetail}` : ''}).` : '') +
+        (probe.stopped === 'routing' || probe.stopped === 'browserFailed'
+          ? ` Probing did not start (${probe.stopped}${probe.stoppedDetail ? `: ${probe.stoppedDetail}` : ''}).`
+          : probe.stopped
+            ? ` Probing stopped early (${probe.stopped}${probe.stoppedDetail ? `: ${probe.stoppedDetail}` : ''}).`
+            : '') +
+        (probe.ran && probe.route
+          ? ` The reads of the copies went where the page's own requests go as far as the collector can see (${probe.route}); interception it cannot see (a service worker of the page, another CDP client, a proxy outside the browser) is not followed: list what it mocks in probeLoadDeny.`
+          : '') +
         (report.omitted > 0 ? ` ${report.omitted} further finding(s) are not listed (limit of ${settings.maxCandidates}).` : '') +
         (report.axeCoveredLeftOut > 0 ? ` ${report.axeCoveredLeftOut} finding(s) that axe-core also reports were left out (includeAxeCovered: false).` : '') +
         (survey.axComplete ? '' : ' The accessibility tree could not be read in full, so nothing is reported above info.'),

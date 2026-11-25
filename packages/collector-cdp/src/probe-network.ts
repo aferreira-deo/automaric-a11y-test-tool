@@ -1,5 +1,6 @@
 import { NRV_SCRIPT_READ_TYPES } from '@a11y-vision/core';
 import type { NameRoleValueConfig, NrvNavigation, NrvProbeLog } from '@a11y-vision/core';
+import { isProbeReadRefused } from './probe-host.js';
 import type { ProbeBrowser, ProbeFetchResponse } from './probe-host.js';
 
 /**
@@ -17,6 +18,10 @@ import type { ProbeBrowser, ProbeFetchResponse } from './probe-host.js';
  *   or also fetched when it is a read of `probeAllowedResourceTypes` (`probeReads: network`).
  *   Everything else is stopped and recorded: every other method, every navigation, every read
  *   that was not fetched before.
+ * - A read is sent where the page under test's own request would go, or not at all: the host
+ *   follows the routing of the page's browser and refuses what it cannot follow
+ *   (`ProbeReadRefused`), and a read that `probeLoadDeny` matches is never sent. What failed is
+ *   kept (`failureOf`), so that a copy that did not load says why.
  */
 
 interface PausedRequest {
@@ -134,6 +139,7 @@ export class ProbeNetwork {
     testUnblock?: RegExp,
   ) {
     this.testUnblock = testUnblock;
+    this.deny = config.probeLoadDeny.map((source) => new RegExp(source, 'u'));
   }
 
   /** Holds every request of the browser from here on. Called before any copy exists. */
@@ -346,7 +352,30 @@ export class ProbeNetwork {
     return kept.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
   }
 
+  /** What went wrong when the collector read this address for a copy, in a few words; undefined when nothing did. */
+  failureOf(url: string): string | undefined {
+    return this.failures.get(withoutFragment(url));
+  }
+
+  private readonly failures = new Map<string, string>();
+
+  /** A read of a copy's load that `probeLoadDeny` keeps from the server; never the document of the copy. */
+  private denied(event: PausedRequest): boolean {
+    if (this.deny.length === 0) return false;
+    if (event.resourceType === 'Document' && event.frameId === this.current?.mainFrameId) return false;
+    return this.deny.some((pattern) => pattern.test(event.request.url));
+  }
+
+  private readonly deny: RegExp[];
+
+  /** Not sent, and why: recorded with the requests that were stopped. */
+  private async refuse(event: PausedRequest, method: string, why: string): Promise<void> {
+    this.blockedKinds.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)} (not sent: ${why})`);
+    await this.fail(event, event.resourceType === 'Document' ? 'Aborted' : 'BlockedByClient');
+  }
+
   private async fetchAndGive(event: PausedRequest, key: string, method: 'GET' | 'HEAD'): Promise<void> {
+    if (this.denied(event)) return this.refuse(event, method, 'probeLoadDeny');
     const headers: Record<string, string> = {};
     for (const [name, value] of Object.entries(event.request.headers ?? {})) {
       const lower = name.toLowerCase();
@@ -364,7 +393,10 @@ export class ProbeNetwork {
     let response: ProbeFetchResponse;
     try {
       response = await this.probe.fetch({ url: event.request.url, method, headers }, { timeoutMs: this.config.probeLoadTimeoutMs, maxBytes: this.config.probeCacheMaxBytes });
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
+      if (isProbeReadRefused(error)) return this.refuse(event, method, message);
+      this.failures.set(withoutFragment(event.request.url), `the read of ${shownUrl(event.request.url)} failed: ${message}`);
       this.blockedKinds.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)} (unreachable)`);
       await this.fail(event, 'Failed');
       return;

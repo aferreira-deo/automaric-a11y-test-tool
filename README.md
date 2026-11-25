@@ -1058,11 +1058,11 @@ elements with listeners are read; the survey says when there were more.
 | `focusable-hidden` | Reached by Tab and ignored by the tree for `aria-hidden` | `fail` | `aria-hidden-focus` |
 | `nested-interactive` | A focusable control inside a link, a button or a control whose children are presentational. A link in a `summary` is not reported: HTML allows it there, and Chrome exposes both | `likely` | `nested-interactive` (presentational parents only) |
 | `required-context` | A tab outside a tab list, a menu item outside a menu, a tree item outside a tree, an option outside a list box (Chrome drops that role: flag `roleDropped`): `likely`. A custom radio outside a radiogroup: `advisory` | `likely`, `advisory` | `aria-required-parent` (not the radio) |
-| `link-acts-as-button` | A link that, activated, changed the page in place or tried to send a write, with no navigation and no scroll to a place: `behaviourRoleStatus` (`likely`); `info` (`requestBlocked`) when a request of a script it made was stopped, since it may navigate once that comes back. A link that points nowhere (no `href`, `#`, `#!`, `javascript:`) and runs a script, not activated or with nothing to show: `advisory` | `likely`, `advisory`, `info` | no |
-| `button-acts-as-link` | A button that, activated, went to another page or place and did nothing else: no write, no state of its own changed, nothing shown or hidden, not in a form, no field read: `behaviourRoleStatus`. One that opened a window and changed nothing: `advisory`. An `a href` to another address with `role="button"`, not activated: `advisory` | `likely`, `advisory` | no |
+| `link-acts-as-button` | A link that, activated, changed the page in place or tried to send a write, with no navigation and no scroll to a place: `behaviourRoleStatus` (`likely`); `info` (`requestBlocked`) when a request of a script it made was stopped, since it may navigate once that comes back, and `info` (`timerPending`) when a timer it set had not run `activationTimerMaxMs` (2 s) after it, since it may navigate when that runs. A link that points nowhere (no `href`, `#`, `#!`, `javascript:`) and runs a script, not activated or with nothing to show: `advisory` | `likely`, `advisory`, `info` | no |
+| `button-acts-as-link` | A button that, activated, went to another page or place and did nothing else: no write, no state of its own changed, nothing shown or hidden, not in a form, no field read: `behaviourRoleStatus` (`info`, `timerPending`, when a timer it set had not run yet). One that opened a window and changed nothing: `advisory`. An `a href` to another address with `role="button"`, not activated: `advisory` | `likely`, `advisory` | no |
 | `missing-state` | Read from markup: a custom checkbox, radio, switch or menu item without `aria-checked`, a combobox without `aria-expanded`, a slider or scrollbar without `aria-valuenow` (`likely`); a tab list in which no tab is selected (`likely`, once, on its first tab); a spin button without a value, a button with `aria-haspopup` or with `aria-controls` on a hidden element and no `aria-expanded` (`advisory`) | `likely`, `advisory` | `aria-required-attr` for the required states; no for the others |
-| `state-not-exposed` | Measured: activated, the control changed something and none of its states (expanded, pressed, checked, selected, value, disabled, name) changed; `info` (`requestBlocked`) when it made a request that the probe stopped | see "Value and state" | no |
-| `survey` | Counts, how the inventory was read and why the Tab walk ended (`walkStoppedBy`), what probing did (copies loaded and reused, how the first copy compared with the page, reads fetched, requests stopped, connections refused, why probing stopped, probes not done and why) | `info` | |
+| `state-not-exposed` | Measured: activated, the control changed something and none of its states (expanded, pressed, checked, selected, value, disabled, name) changed; `info` (`requestBlocked`) when it made a request that the probe stopped, `info` (`timerPending`) when a timer it set had not run yet | see "Value and state" | no |
+| `survey` | Counts, how the inventory was read and why the Tab walk ended (`walkStoppedBy`), what probing did (copies loaded and reused, how the first copy compared with the page, where the reads of the copies were sent (`copyReadsRoute`), reads fetched, requests stopped or not sent and why, connections refused, why probing stopped or did not start, probes not done and why) | `info` | |
 
 Every rule that axe-core also reports carries the flag `axeCovered` and `values.axeRule`. With
 `includeAxeCovered: false` (`--no-axe-overlap`) they are left out and the survey counts them
@@ -1164,6 +1164,7 @@ checked for their name. Every other control that is activated is compared before
 | Any other region shown or hidden, or its own look changed, without a second activation that confirms it | `advisory`, `regionChanged` or `lookChanged` |
 | A dialog appeared, a navigation, a write | not reported: no state is required on what opens a dialog |
 | Any of the above, and the activation made a request of a script that the probe stopped, or a write | `info`, `requestBlocked`: the state may be set once the request comes back (a panel that sets `aria-expanded` when its content has loaded); nothing is built on the page's reaction to the block |
+| Any of the above, and a timer the activation set had not run `activationTimerMaxMs` (2 s) after it (one due later, an interval) | `info`, `timerPending`: the state may be set when it runs |
 | The control hid itself (a "No" button of a feedback prompt replaced by the form it opens) | not reported: nobody can perceive a state on it |
 | New content added (load more), a live region, a status or a toast | not reported |
 
@@ -1196,7 +1197,12 @@ safety. It happens in a copy of the page, never in the page under test (see "The
 After the activation, at least `probeSettleMs` (150 ms) is waited, then until nothing in the copy has changed for
 `activationQuietMs` (150 ms): no element added or removed, no attribute changed, no animation that has an end still
 running; text alone does not count, so that a clock elsewhere does not hold the wait. At most
-`activationQuietMaxMs` (2 s). A component that animates a panel by script for 400 ms and sets `aria-expanded` when
+`activationQuietMaxMs` (2 s). Then, only when the activation set timers (`setTimeout` in its handlers, in the
+task of its events, and in what those timers run; not the page's other timers, such as a clock), each one due
+within `activationTimerMaxMs` (2 s) of the activation is waited for, and the copy again until it is quiet: a link
+that shows a spinner and goes to its address 450 ms or 1.2 s later navigates, and is a link. A timer due later, or
+an interval the activation started, is something still to happen: what the element did is then not concluded on
+(`timerPending`, `info`), and nothing more is waited for. A control that sets no timer is not slowed down. A component that animates a panel by script for 400 ms and sets `aria-expanded` when
 the animation ends is read after it ends. While probing, transitions and animations last 1 ms instead of their
 own duration, not 0: a transition of no duration fires no `transitionend`, and a component that sets
 `aria-expanded` when its collapse transition ends would never set it.
@@ -1231,10 +1237,12 @@ it happens in can reach. **The page under test is never activated, reloaded or c
    dedicated, shared and service workers, beacons, and `keepalive` requests a page sends as it goes away). No
    request is ever continued to the network: each one gets a response the collector fetched itself, in Node,
    with GET or HEAD and nothing else (the host refuses any other method a second time), or an error. The hold is
-   never lifted: when probing ends the browser is closed with every request still held.
+   never lifted: when probing ends the browser is closed with every request still held. Each of those reads is sent
+   where the page under test's own request would go, or not at all (see "Where the reads of the copies go").
 3. **Copies of the page.** Each copy is a page in a new, empty context of that browser, given what the page under
    test has, read and never written: its cookies (all of its context, HttpOnly and partitioned ones included,
-   from `Storage.getCookies`), the local and session storage of its documents (written into the copy before its
+   from `Network.getAllCookies` on the session of the page, which reads the page's own context; a test with
+   `e2e/name-role-value.spec.ts` checks that a page behind an HttpOnly session cookie is loaded signed in), the local and session storage of its documents (written into the copy before its
    scripts run), its viewport, language, time zone, user agent and colour scheme, plus HTTP credentials and headers
    the host passes on (`probeContext`; the CLI passes the credentials of the address). It is loaded at the address
    of the page. While it loads, and only then, its GET and HEAD requests are fetched from the server, or given what
@@ -1262,6 +1270,8 @@ it happens in can reach. **The page under test is never activated, reloaded or c
    (10 s, `probeLoadTimeoutMs` for a load), or crashes is destroyed, and probing stops there
    (`probeStopped:dialog`, `timeout`, `crash`). Probing as a whole is held to `probeBudgetMs`, the start of its
    browser and the loads included: when it runs out, the copy under way is destroyed (`probeStopped:budget`).
+   A copy that does not load stops probing too (`probeStopped:cloneFailed`), with what went wrong when its
+   document was read (the connection, the certificate, the host rules) in `probeStoppedDetail`.
    Nothing ever falls back to the page under test.
 7. **The copy must be the page.** Findings point to elements of the page under test. In each copy an element is
    found by its selector and must have the same tag, role and name, and the same text when it has no name; if
@@ -1290,8 +1300,65 @@ no failed request seen by its listeners; and after a scan it still downloads and
 stopped while it probes rejects and leaves the page working. One test lets one read through on purpose, in a mode
 only tests can set (`CollectOptions.probeTestUnblock`), and sees the server record it and nothing else: the tests
 can see a breach. Run against the code before this design, these tests fail on every case the review reported.
+Where the reads go is tested the same way: a page behind an HttpOnly session cookie is loaded signed in; a page
+whose browser maps its name to a staging server is read from that server while a second server, the one the
+name resolves to, gets nothing; a read the page mocks with `page.route` reaches no server and calls no route; a
+page that is offline, at a `file:` address or whose own address is routed is not probed; `probeLoadDeny` keeps
+what it lists from the server; and with `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` set, nothing of the
+attack pages reaches this machine (`packages/playwright/src/probe-fetch.test.ts` covers private addresses, the
+proxy and certificates).
+
+#### Where the reads of the copies go
+
+A read of a copy goes where the page under test's own request for that address would go, or nowhere. The host
+(the Playwright API, the CLI) reads that from the browser and the context of the page, without changing either,
+and sends the read itself, in Node:
+
+- **Its proxy**: the proxy of the page's context (`newContext({ proxy })`, read from Playwright in this process),
+  else the proxy of its browser (`--proxy-server` and `--proxy-bypass-list` on its command line, read with
+  `SystemInfo.getInfo`, which is what Playwright's `launch({ proxy })` writes), with Chromium's rules for what
+  bypasses it (loopback unless `<-loopback>`, `<local>`, patterns, address ranges). HTTP proxies are followed, with
+  the credentials Playwright was given; an HTTPS address goes through a tunnel (`CONNECT` to the proxy, as the
+  browser does).
+- **Its host rules**: `--host-resolver-rules` and `--host-rules` (`MAP pattern host[:port]`, `EXCLUDE pattern`,
+  `~NOTFOUND`): a name the browser of the page sends to a staging server is read from that server, with the name
+  in `Host`, and the server the name really resolves to gets nothing (a test checks it with two servers).
+- **Its certificates**: errors are ignored when the page's context (`ignoreHTTPSErrors`) or browser
+  (`--ignore-certificate-errors`) ignores them, and only then.
+- **Its routes**: a read whose address matches a route of the page or of its context (`page.route`,
+  `context.route`, `routeFromHAR`) never left the browser of the page, so it is not sent for a copy: the copy gets
+  an error, the survey lists it as not sent, and the route's handler is not called. A page whose own address is
+  routed is not probed at all (`probeStopped:routing`).
+- **Not the network of this machine for a public page**: a read of an address of this machine, of a private
+  network or of a link (`127.0.0.0/8`, `::1`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10`, `169.254/16`,
+  `fe80::/10`, `fc00::/7`, written as IPv6 too) is refused when the page under test is not itself on such an
+  address, so a page cannot use a scan to read a router or the metadata of a cloud. A name is resolved once, and
+  the connection goes to the address that was checked (a name that resolves elsewhere the next time changes
+  nothing). Through a proxy, the proxy resolves the name: only an address written in the URL, or `localhost`, is
+  checked there.
+
+When that cannot be read or followed, no copy is loaded and the survey says why (`probeStopped:routing`, with the
+reason in `probeStoppedDetail`, every element to probe `not-started`): a proxy script (`--proxy-pac-url`,
+`--proxy-auto-detect`), a SOCKS or HTTPS proxy, a proxy of the system (Windows' settings of the user, macOS's
+`scutil --proxy`, the `http_proxy` family of variables elsewhere), a browser driven from another process
+(`connect`, `connectOverCDP`: the proxy of its context cannot be read), a command line that cannot be read, a page
+that is offline (`navigator.onLine` false, Playwright's `setOffline`), a page that is not on http or https (a
+`file:` page). The host can be told what it cannot read: `new A11yVision({ page, probeContext: { proxy, hostResolverRules, ignoreHTTPSErrors } })`
+(`proxy: null` for none), and then it follows that. The survey says how the reads went (`copyReadsRoute`:
+`direct`, the proxy, the host rules, certificate errors ignored).
 
 **What it does not cover, stated plainly.**
+
+- **Interception the collector cannot see.** A service worker of the page that answers its requests (Mock Service
+  Worker, a cache of its own), interception by another CDP client (`Fetch.enable` from elsewhere), a proxy outside
+  the browser that the browser does not know of (a transparent proxy, a mock server that is an alias in DNS): the
+  page under test's requests are answered there, and the copies' reads go to the network. A test suite that mocks
+  that way lists what it mocks in `probeLoadDeny` (regular expressions of addresses: those reads of the copies are
+  never sent; `[".*"]` sends only the document of the copy), or sets `probe: "off"`. The survey says it in its
+  message.
+- **Resolution.** A name is resolved by this machine's resolver, as the system resolves it. A browser whose own
+  DNS (DNS over HTTPS) resolves a name to another address than the system does is not followed. Automatic proxy
+  detection (WPAD) of the system is not looked for: on a network that uses it, say the proxy in `probeContext`.
 
 - **Page views.** Each copy's load sends GET and HEAD requests to the site, with the cookies of the page under
   test: the document, its sub-resources, and what its scripts fetch while it loads (an API, analytics that use
@@ -1315,9 +1382,14 @@ can see a breach. Run against the code before this design, these tests fail on e
   IndexedDB, the Cache API, service workers (they are not registered in copies), and extra headers or credentials
   of the context that the caller does not pass in `probeContext`. A copy that renders differently because of that
   is caught by the comparison above, or its elements are not found alike.
-- Probing needs a host that can start a browser: the Playwright API (`playwright-core`'s own Chromium, launched
-  headless, whatever browser the page is in; probing is unavailable when the page is not in Chromium or Chromium
-  cannot be launched) and the CLI. A bare CDP session (`collectSnapshot` without `probeHost`) and the extension
+- Probing needs a host that can start a browser: the Playwright API and the CLI. The probing browser is the
+  executable of the page's browser when it is on this machine (a machine that runs it runs it again; the newest
+  Chromium of Playwright can be blocked where the page's is not, by Windows Smart App Control for one), else
+  Playwright's own Chromium, or what `probeContext.executablePath` or `channel` says; launched headless, with its
+  own proxy that refuses everything, whatever `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` says (with it,
+  Playwright's `proxy` option would let this machine's addresses past the proxy). Probing is unavailable when the
+  page is not in Chromium; when the probing browser does not start, the survey says so (`probeStopped:browserFailed`,
+  every element `not-started`) and the empty profile folder a failed launch leaves is removed. A bare CDP session (`collectSnapshot` without `probeHost`) and the extension
   activate nothing, and the survey says so (`probeUnavailable`).
 
 #### What a scan with probing costs, and what it does to the page
@@ -1363,13 +1435,13 @@ All under `nameRoleValue` in a config file, documented in `packages/core/src/typ
 (`maxElements`, `maxListenerElements`, `maxNameChars`, `maxCandidates`, `maxCaptures`), `maxControlAreaShare`, the
 name patterns, `titleOnlyStatus`, `placeholderOnlyStatus`, `generatedTextNameStatus`, `tabWalk`, `maxTabStops`, and
 for probing `maxProbes`, `probeBudgetMs`, `probeSettleMs`, `activationQuietMs`, `activationQuietMaxMs`,
-`probeExcludeSelector`, `probeReads`, `probeAllowedResourceTypes`, `probeAllowQueryStrings`, `probeConfirmToggle`,
+`activationTimerMaxMs`, `probeExcludeSelector`, `probeReads`, `probeAllowedResourceTypes`, `probeAllowQueryStrings`, `probeLoadDeny`, `probeConfirmToggle`,
 `maxProbeLoads` (30 copies at most), `probeLoadTimeoutMs`, `probeStepTimeoutMs`, `probeUnloadGraceMs`,
 `probeCloneMinMatchShare`, `probeCloneMaxMissingShare`, `probeCloneMaxCountDelta`, `probeCacheMaxBytes`, `ownChangeMinAreaCssPx2`,
 `revealMinAreaCssPx2`, `regionMaxAncestorLevels`, `quietMs`, `quietMaxMs`, `maxVisibilityElements` and the margins
 of the captures. `focus.maxTabsInElement` (10) is shared with the walk of the focus check. Renamed in this
 version: `maxProbeReloads` is `maxProbeLoads`, `reloadTimeoutMs` is `probeLoadTimeoutMs`; the old names are ignored.
-The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials, extraHTTPHeaders } })`.
+The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials, extraHTTPHeaders, proxy, hostResolverRules, ignoreHTTPSErrors, executablePath, channel } })`.
 
 ### Known limits of the name-role-value check
 

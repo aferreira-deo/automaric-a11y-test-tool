@@ -34,6 +34,7 @@ export const defaultConfig: Config = {
     probeSettleMs: 150,
     activationQuietMs: 150,
     activationQuietMaxMs: 2000,
+    activationTimerMaxMs: 2000,
     probeExcludeSelector: '[data-a11y-vision-no-probe]',
     probeReads: 'cache',
     probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],
@@ -47,6 +48,7 @@ export const defaultConfig: Config = {
     probeCloneMaxMissingShare: 0.2,
     probeCloneMaxCountDelta: 0.15,
     probeCacheMaxBytes: 268435456,
+    probeLoadDeny: [],
     generatedTextNameStatus: 'likely',
     ownChangeMinAreaCssPx2: 6,
     revealMinAreaCssPx2: 200,
@@ -594,6 +596,7 @@ export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): 
     probeSettleMs: duration(merged.probeSettleMs, 0, base.probeSettleMs),
     activationQuietMs: duration(merged.activationQuietMs, 0, base.activationQuietMs),
     activationQuietMaxMs: duration(merged.activationQuietMaxMs, 0, base.activationQuietMaxMs),
+    activationTimerMaxMs: duration(merged.activationTimerMaxMs, 0, base.activationTimerMaxMs),
     probeExcludeSelector: typeof merged.probeExcludeSelector === 'string' ? merged.probeExcludeSelector.trim() : base.probeExcludeSelector,
     probeReads: oneOf(merged.probeReads, ['cache', 'network'], base.probeReads),
     // A navigation, a script's own request, a beacon, a stream or a socket is never fetched, whatever the list says.
@@ -610,6 +613,15 @@ export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): 
     probeCloneMaxMissingShare: share(merged.probeCloneMaxMissingShare, base.probeCloneMaxMissingShare),
     probeCloneMaxCountDelta: share(merged.probeCloneMaxCountDelta, base.probeCloneMaxCountDelta),
     probeCacheMaxBytes: atLeast(merged.probeCacheMaxBytes, 0, base.probeCacheMaxBytes),
+    // A pattern that is not a regular expression denies every read but the document: what was meant to stay unsent must not be sent because of a typo.
+    probeLoadDeny: names(merged.probeLoadDeny, base.probeLoadDeny).map((source) => {
+      try {
+        new RegExp(source, 'u');
+        return source;
+      } catch {
+        return '.*';
+      }
+    }),
     generatedTextNameStatus: oneOf(merged.generatedTextNameStatus, ['likely', 'advisory'], base.generatedTextNameStatus),
     ownChangeMinAreaCssPx2: atLeast(merged.ownChangeMinAreaCssPx2, 0, base.ownChangeMinAreaCssPx2, false),
     revealMinAreaCssPx2: atLeast(merged.revealMinAreaCssPx2, 0, base.revealMinAreaCssPx2, false),

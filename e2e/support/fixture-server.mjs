@@ -229,11 +229,36 @@ function nrvRecord(session, entry) {
   nrvHits.set(session, list);
 }
 const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+/** A page with a disclosure to probe, and what it fetches as it loads. */
+function nrvPage(title, script = '') {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title></head><body><main><h1>${title}</h1>
+<button id="toggle" type="button" onclick="const p = document.getElementById('panel'); p.hidden = !p.hidden">Details</button>
+<div id="panel" hidden style="width:300px;height:120px;background:#eee">The details.</div>
+<p id="data">loading</p></main>${script ? `<script>${script}</script>` : ''}</body></html>`;
+}
+const nrvServed = new Map();
 function nrv(pathname, request) {
-  const match = /^\/_nrv\/(write|nav|log|frame|autoframe)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
+  const match = /^\/_nrv\/(write|nav|log|frame|autoframe|private|mocked|once)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
   if (!match) return null;
   const [, kind, session, name = ''] = match;
   if (kind === 'log') return { status: 200, type: types['.json'], body: JSON.stringify(nrvHits.get(session) ?? []) };
+  // A page behind a session cookie: without it, the server sends to its sign-in page.
+  if (kind === 'private') {
+    const signedIn = (request.headers.cookie ?? '').split(/;\s*/).includes(`nrv-auth=${session}`);
+    nrvRecord(session, `${request.method} private/${name} ${signedIn ? 'with-cookie' : 'without-cookie'}`);
+    if (name === 'page.html' && !signedIn) return { status: 302, type: 'text/plain', body: '', headers: { location: `/_nrv/private/${session}/login.html` } };
+    if (name === 'login.html') return { status: 200, type: types['.html'], body: '<!doctype html><html lang="en"><title>Sign in</title><h1>Sign in</h1></html>' };
+    return { status: 200, type: types['.html'], body: nrvPage('Account') };
+  }
+  // A page that reads an API as it loads; a test mocks that API (page.route), and the server must never see it.
+  if (kind === 'mocked') return { status: 200, type: types['.html'], body: nrvPage('Mocked', `fetch('/_nrv/write/${session}/api-data').then((r) => r.text()).then((t) => { document.getElementById('data').textContent = t; });`) };
+  // A page served once: what reads it again gets its connection closed.
+  if (kind === 'once') {
+    const key = `${session}/${name}`;
+    if (nrvServed.has(key)) return { destroy: true };
+    nrvServed.set(key, true);
+    return { status: 200, type: types['.html'], body: nrvPage('Once') };
+  }
   if (kind === 'frame') {
     return {
       status: 200,
@@ -265,6 +290,10 @@ const server = createServer(async (request, response) => {
     const reply = nrv(pathname, request);
     if (!reply) {
       response.writeHead(404).end();
+      return;
+    }
+    if (reply.destroy) {
+      response.socket?.destroy();
       return;
     }
     response.writeHead(reply.status, { 'content-type': reply.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*', ...reply.headers });

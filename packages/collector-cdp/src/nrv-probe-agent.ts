@@ -76,6 +76,8 @@ export interface CloneSourceRead {
   userAgent: string;
   language: string;
   timezone: string;
+  /** `navigator.onLine`: false when the page under test is offline (Playwright's `setOffline`), and its own requests go nowhere. */
+  online: boolean;
 }
 
 export interface ProbeAgent {
@@ -106,6 +108,8 @@ export interface ProbeAgent {
 export const PROBE_AGENT_GLOBAL = '__a11yVisionProbe';
 export const PROBE_WORLD_NAME = 'a11y-vision-probe';
 export const GUARD_GLOBAL = '__a11yVisionGuard';
+/** Dispatched on the window of the activated element by the agent as the activation begins: the guard counts the timers set from there as the activation's. */
+export const ACTIVATION_EVENT = 'a11y-vision:activation';
 
 export function probeAgentFactory(options: ProbeAgentOptions): ProbeAgent {
   const JOIN = ' >>> ';
@@ -553,6 +557,13 @@ export function probeAgentFactory(options: ProbeAgentOptions): ProbeAgent {
       const rect = element.getBoundingClientRect();
       const init = { bubbles: true, cancelable: true, composed: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0, view: element.ownerDocument.defaultView };
       const view = element.ownerDocument.defaultView;
+      // Tells the guard that what runs from here, in this task, is the activation's: the timers it sets are waited for.
+      try {
+        // `ACTIVATION_EVENT`, written out: this function is serialised.
+        (view ?? window).dispatchEvent(new Event('a11y-vision:activation'));
+      } catch {
+        // No guard to tell.
+      }
       const Pointer = view?.PointerEvent ?? PointerEvent;
       const Mouse = view?.MouseEvent ?? MouseEvent;
       element.dispatchEvent(new Pointer('pointerdown', { ...init, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
@@ -773,7 +784,7 @@ export function cloneSourceReader(): CloneSourceRead {
   } catch {
     // Left to the browser.
   }
-  return { storage: out, userAgent: navigator.userAgent, language: navigator.language, timezone };
+  return { storage: out, userAgent: navigator.userAgent, language: navigator.language, timezone, online: navigator.onLine };
 }
 
 /**
@@ -819,7 +830,7 @@ export const GUARD_SCRIPT = `(() => {
   if (globalThis.${GUARD_GLOBAL}) return true;
   let top = null;
   try { if (window.top !== window && window.top.${GUARD_GLOBAL}) top = window.top.${GUARD_GLOBAL}; } catch {}
-  const own = { log: [], recording: false, timers: new Set() };
+  const own = { log: [], recording: false, timers: new Set(), activating: 0 };
   const state = top ? top.state : own;
   const record = (kind, url) => { if (state.recording || kind === 'dialog' || kind === 'window' || kind === 'download' || kind === 'print') state.log.push({ kind, url: typeof url === 'string' ? url : (url && typeof url.href === 'string' ? url.href : '') }); };
   const blocked = (name) => new DOMException('Stopped while a11y-vision probes a copy of the page (' + name + ').', 'SecurityError');
@@ -892,19 +903,27 @@ export const GUARD_SCRIPT = `(() => {
   for (const name of ['HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement']) patchGetter(P(name), 'value', 'field');
   patch(view, 'FormData', (Original) => { const Wrapped = function (...args) { record('field'); return new Original(...args); }; Wrapped.prototype = Original.prototype; return Wrapped; });
   // Timers set while an activation runs: one that has not run yet is something still to happen.
+  // Those the activation itself set (in the task of its events, and in what those timers run) are
+  // the activation's: they are waited for (a link that shows a spinner and navigates 450 ms later).
+  // The agent says when the activation's task begins (an event on the window); it ends with the task.
   const timers = state.timers;
-  patch(view, 'setTimeout', (original) => function (handler, ...rest) {
-    if (!state.recording || typeof handler !== 'function') return original.call(this, handler, ...rest);
-    const token = {};
+  const nativeTimeout = view.setTimeout;
+  // Never below 0: begin() starts again from 0 while the end of an earlier task may still be due.
+  const leave = () => { state.activating = Math.max(0, state.activating - 1); };
+  const ownTask = () => { state.activating++; try { nativeTimeout.call(view, leave, 0); } catch { leave(); } };
+  view.addEventListener('${ACTIVATION_EVENT}', () => { if (state.recording) ownTask(); }, true);
+  patch(view, 'setTimeout', (original) => function (handler, delay, ...rest) {
+    if (!state.recording || typeof handler !== 'function') return original.call(this, handler, delay, ...rest);
+    const token = { activation: state.activating > 0, due: Date.now() + Math.max(0, Number(delay) || 0) };
     timers.add(token);
-    const id = original.call(this, function () { timers.delete(token); return handler.apply(this, arguments); }, ...rest);
+    const id = original.call(this, function () { timers.delete(token); if (token.activation && state.recording) ownTask(); return handler.apply(this, arguments); }, delay, ...rest);
     token.id = id;
     return id;
   });
   patch(view, 'clearTimeout', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
   patch(view, 'setInterval', (original) => function (handler, ...rest) {
     const id = original.call(this, handler, ...rest);
-    if (state.recording) timers.add({ id, interval: true });
+    if (state.recording) timers.add({ id, interval: true, activation: state.activating > 0 });
     return id;
   });
   patch(view, 'clearInterval', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
@@ -940,8 +959,22 @@ export const GUARD_SCRIPT = `(() => {
   view.addEventListener('submit', onSubmit, true);
   globalThis.${GUARD_GLOBAL} = {
     state,
-    begin() { state.log.length = 0; state.timers.clear(); state.recording = true; return true; },
+    begin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.recording = true; return true; },
     take() { state.recording = false; const out = { entries: state.log.splice(0, state.log.length), pendingTimers: state.timers.size }; return out; },
+    // The activation's own timers that have not run: how many, and in how many ms the next one is due (-1: intervals only).
+    pending() {
+      const now = Date.now();
+      let count = 0;
+      let next = -1;
+      for (const token of state.timers) {
+        if (!token.activation) continue;
+        count++;
+        if (token.interval) continue;
+        const left = Math.max(0, token.due - now);
+        if (next < 0 || left < next) next = left;
+      }
+      return { count, next };
+    },
   };
   return true;
 })()`;

@@ -1,6 +1,13 @@
 import { execFile } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { resolveConfig } from '@a11y-vision/core';
 import type { Finding } from '@a11y-vision/core';
@@ -290,6 +297,200 @@ test.describe('probing never touches the page under test, and nothing it activat
     } finally {
       await cdpSession.detach();
     }
+  });
+});
+
+/** Listens on this machine, on a port of its own, and on IPv6 too when it can: a name that resolves to either reaches it. */
+async function listen(handler: (request: IncomingMessage, response: ServerResponse) => void): Promise<{ port: number; close(): Promise<void> }> {
+  const v4 = createServer(handler);
+  await new Promise<void>((resolve) => v4.listen(0, '127.0.0.1', resolve));
+  const { port } = v4.address() as AddressInfo;
+  const v6: Server | null = await new Promise((resolve) => {
+    const server = createServer(handler);
+    server.once('error', () => resolve(null));
+    server.listen(port, '::1', () => resolve(server));
+  });
+  return {
+    port,
+    close: async () => {
+      for (const server of [v4, v6]) if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+const profileFolders = (): string[] => readdirSync(tmpdir()).filter((name) => name.startsWith('playwright_chromiumdev_profile-'));
+
+test.describe('the reads of the copies go where the page under test reads, or nowhere', () => {
+  test.slow();
+
+  test('a page behind a session cookie (HttpOnly): its copy is sent the cookie, loads signed in, and is probed', async ({ page, baseURL }) => {
+    const session = sessionOf('private');
+    await page.context().addCookies([{ name: 'nrv-auth', value: session, url: baseURL!, httpOnly: true, sameSite: 'Lax' }]);
+    await page.goto(`/_nrv/private/${session}/page.html`);
+    const values = survey((await nrv(page).analyze()).findings);
+    expect(values['probeStopped']).toBeUndefined();
+    expect(Number(values['probesDone'])).toBeGreaterThan(0);
+    // The page's own load, then the copy's, both signed in; nothing sent to the sign-in page.
+    expect(await hits(baseURL, session)).toEqual(['GET private/page.html with-cookie', 'GET private/page.html with-cookie']);
+  });
+
+  test('host rules of the page browser: the copies read from the server the page reads from, and the one the name resolves to gets nothing', async ({ playwright, baseURL }) => {
+    const realHits: string[] = [];
+    const real = await listen((request, response) => {
+      realHits.push(`${request.method} ${request.url}`);
+      response.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><html lang="en"><title>Real</title><p>The server the name resolves to.</p></html>');
+    });
+    // The name of the page is localhost; the browser of the page sends it to the fixture server (a staging server).
+    const staging = new URL(baseURL!).host;
+    const rules = `MAP localhost:${real.port} ${staging}`;
+    const browser = await playwright.chromium.launch({ args: [`--host-resolver-rules=${rules}`] });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`http://localhost:${real.port}/name-role-value/link-button.html`);
+      expect(realHits).toEqual([]);
+      const values = survey((await nrv(page).analyze()).findings);
+      expect(values['probeStopped']).toBeUndefined();
+      expect(Number(values['probesDone'])).toBeGreaterThan(0);
+      expect(String(values['copyReadsRoute'])).toContain(`host rules: ${rules}`);
+      expect(realHits).toEqual([]);
+    } finally {
+      await browser.close();
+      await real.close();
+    }
+  });
+
+  test('what the page under test mocks (page.route) is never sent for its copies, and the route is not called for them', async ({ page, baseURL }) => {
+    const session = sessionOf('mocked');
+    let routed = 0;
+    await page.route('**/_nrv/write/*/api-data', (route) => {
+      routed++;
+      return route.fulfill({ body: 'mocked' });
+    });
+    await page.goto(`/_nrv/mocked/${session}/page.html`);
+    await expect(page.locator('#data')).toHaveText('mocked');
+    const values = survey((await nrv(page).analyze()).findings);
+    expect(values['probeStopped']).toBeUndefined();
+    expect(Number(values['probesDone'])).toBeGreaterThan(0);
+    expect(String(values['blockedRequests'])).toContain('/api-data (not sent: the page under test routes this address itself');
+    await page.waitForTimeout(1000);
+    expect(await hits(baseURL, session)).toEqual([]);
+    expect(routed).toBe(1);
+  });
+
+  test('a page whose own address the test routes is not probed, and the survey says why', async ({ page }) => {
+    await page.route('**/name-role-value/link-button.html', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html lang="en"><title>Mock</title><main><a href="#" id="x" onclick="event.preventDefault(); document.body.append(document.createElement(\'hr\'))">Mocked</a></main></html>' }));
+    await page.goto('/name-role-value/link-button.html');
+    const values = survey((await nrv(page).analyze()).findings);
+    expect(values['probeStopped']).toBe('routing');
+    expect(String(values['probeStoppedDetail'])).toContain('routes its own address');
+    expect(String(values['probesNotDoneBy'])).toMatch(/^not-started \d+$/);
+    expect(values['copiesLoaded']).toBe(0);
+  });
+
+  test('probeLoadDeny keeps the reads it lists from the server, for what is mocked where the collector cannot see', async ({ page, baseURL }) => {
+    const session = sessionOf('deny');
+    await page.goto(`/_nrv/mocked/${session}/page.html`);
+    await expect(page.locator('#data')).toHaveText('cb && cb()');
+    const loaded = await hits(baseURL, session);
+    expect(loaded).toEqual(['GET write/api-data']);
+    const values = survey((await nrv(page).options({ nameRoleValue: { probeLoadDeny: ['/api-data$'] } }).analyze()).findings);
+    expect(Number(values['probesDone'])).toBeGreaterThan(0);
+    expect(String(values['blockedRequests'])).toContain('/api-data (not sent: probeLoadDeny)');
+    await page.waitForTimeout(1000);
+    expect(await hits(baseURL, session)).toEqual(loaded);
+  });
+
+  test('an offline page is not probed: its copies would read what it cannot', async ({ page, baseURL }) => {
+    const session = sessionOf('offline');
+    await page.goto(`/_nrv/mocked/${session}/page.html`);
+    await expect(page.locator('#data')).toHaveText('cb && cb()');
+    const loaded = await hits(baseURL, session);
+    await page.context().setOffline(true);
+    try {
+      const values = survey((await nrv(page).analyze()).findings);
+      expect(values['probeStopped']).toBe('routing');
+      expect(String(values['probeStoppedDetail'])).toContain('offline');
+      expect(String(values['probesNotDoneBy'])).toMatch(/^not-started \d+$/);
+    } finally {
+      await page.context().setOffline(false);
+    }
+    expect(await hits(baseURL, session)).toEqual(loaded);
+  });
+
+  test('a page at a file address is not probed, and says why', async ({ page }) => {
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../fixtures/name-role-value/link-button.html', import.meta.url))).href);
+    const values = survey((await nrv(page).analyze()).findings);
+    expect(values['probeStopped']).toBe('routing');
+    expect(String(values['probeStoppedDetail'])).toContain('file:');
+  });
+
+  test('a copy that does not load says what went wrong when its document was read', async ({ page, baseURL }) => {
+    const session = sessionOf('once');
+    await page.goto(`/_nrv/once/${session}/page.html`);
+    const values = survey((await nrv(page).analyze()).findings);
+    expect(values['probeStopped']).toBe('cloneFailed');
+    expect(String(values['probeStoppedDetail'])).toMatch(new RegExp(`the read of ${baseURL!.replace(/[.]/g, '\\.')}/_nrv/once/${session}/page\\.html failed: (socket hang up|read ECONNRESET)`));
+  });
+
+  test('a page on HTTPS with a certificate its context accepts (ignoreHTTPSErrors): its copies accept it too', async ({ browser }, testInfo) => {
+    const key = testInfo.outputPath('key.pem');
+    const cert = testInfo.outputPath('cert.pem');
+    const made = await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=127.0.0.1']).then(
+      () => true,
+      () => false,
+    );
+    test.skip(!made, 'openssl is needed to make a self-signed certificate');
+    const html = await readFile(fileURLToPath(new URL('../fixtures/name-role-value/link-button.html', import.meta.url)), 'utf8');
+    const server = createHttpsServer({ key: await readFile(key), cert: await readFile(cert) }, (_request, response) => response.writeHead(200, { 'content-type': 'text/html' }).end(html));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    try {
+      const page = await context.newPage();
+      await page.goto(`https://127.0.0.1:${(server.address() as AddressInfo).port}/name-role-value/link-button.html`);
+      const values = survey((await nrv(page).analyze()).findings);
+      expect(values['probeStopped']).toBeUndefined();
+      expect(Number(values['probesDone'])).toBeGreaterThan(0);
+      expect(String(values['copyReadsRoute'])).toContain('certificate errors ignored');
+    } finally {
+      await context.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test('a probing browser that does not start: the survey says so, and no profile folder is left behind', async ({ page }) => {
+    await page.goto('/name-role-value/link-button.html');
+    const before = new Set(profileFolders());
+    const missing = join(tmpdir(), 'a11y-vision-no-such-chromium', 'chrome.exe');
+    const values = survey((await new A11yVision({ page, probeContext: { executablePath: missing } }).withChecks(['name-role-value']).analyze()).findings);
+    expect(values['probeStopped']).toBe('browserFailed');
+    expect(String(values['probesNotDoneBy'])).toMatch(/^not-started \d+$/);
+    // Other workers start browsers too: what is left of a failed launch is an empty folder that stays.
+    await page.waitForTimeout(2000);
+    const left = profileFolders().filter((name) => !before.has(name) && readdirSync(join(tmpdir(), name)).length === 0);
+    expect(left).toEqual([]);
+  });
+
+  test('the dead proxy of the probing browser covers this machine whatever the environment of Playwright says', async ({ page, baseURL }) => {
+    const session = sessionOf('loopback-env');
+    await page.goto('/name-role-value/link-button.html');
+    // With it, Playwright's proxy option leaves loopback out of the proxy: this machine would be within reach of the probing browser.
+    process.env['PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK'] = '1';
+    let probe: Awaited<ReturnType<ReturnType<typeof playwrightProbeHost>['start']>>;
+    try {
+      probe = await playwrightProbeHost(page).start();
+    } finally {
+      delete process.env['PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK'];
+    }
+    try {
+      const copy = await probe.newPage({ url: `${baseURL}/`, viewport: { width: 800, height: 600 }, deviceScaleFactor: 1, userAgent: '', locale: '', colorScheme: 'light', timezoneId: '' });
+      // Nothing holds its requests here (the collector is not running): only the dead proxy stands between it and this machine.
+      await copy.cdp.send('Page.enable');
+      await copy.cdp.send('Page.navigate', { url: `${baseURL}/_nrv/nav/${session}/direct` });
+      await expect.poll(() => probe.refusedConnections(), { timeout: 5000 }).toBeGreaterThan(0);
+    } finally {
+      await probe.close();
+    }
+    expect(await hits(baseURL, session)).toEqual([]);
   });
 });
 

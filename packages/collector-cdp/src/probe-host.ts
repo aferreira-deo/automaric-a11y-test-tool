@@ -15,7 +15,37 @@ import type { CdpSession } from './session.js';
  * host (a bare CDP session, the extension) does not probe.
  */
 export interface ProbeHost {
+  /**
+   * Starts the probing browser. Rejects with a `ProbeRoutingError` when the reads of the copies
+   * cannot be sent where the page under test's own requests go (its routing cannot be read, or
+   * cannot be followed): nothing is then loaded. Any other rejection is a browser that did not start.
+   */
   start(): Promise<ProbeBrowser>;
+}
+
+/**
+ * The reads of the copies cannot be sent where the page under test's own requests go, so none is
+ * sent: a proxy the host cannot follow, routing it cannot read, a page that is not on http or https.
+ * Told apart by its name, so that a host built against another copy of this package is understood.
+ */
+export class ProbeRoutingError extends Error {
+  override readonly name = 'ProbeRoutingError';
+}
+
+export function isProbeRoutingError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ProbeRoutingError';
+}
+
+/**
+ * A read the host refused to send (an address the page under test routes itself, a private address
+ * for a public page): the copy gets an error, and the reason is recorded. Told apart by its name.
+ */
+export class ProbeReadRefused extends Error {
+  override readonly name = 'ProbeReadRefused';
+}
+
+export function isProbeReadRefused(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ProbeReadRefused';
 }
 
 /** What a copy is set up with, read from the page under test. */
@@ -52,11 +82,15 @@ export interface ProbeBrowser {
   browser: CdpSession;
   /** A page in a new context of its own, empty (no cookie, no storage, no history), on `about:blank`. */
   newPage(settings: CloneSettings): Promise<ProbePage>;
+  /** How the reads are sent, in a few words (`direct`, `proxy http://…`, host rules): for the survey. */
+  route: string;
   /**
    * Sends a read to a server on behalf of a copy, and returns the response, the body as base64.
    * GET and HEAD only: anything else is refused here as well as by the collector. Redirects are
-   * returned, not followed. Rejects when the server cannot be reached, when the body is larger
-   * than `maxBytes`, or after `timeoutMs`.
+   * returned, not followed. The read goes where the page under test's own request would go (its
+   * proxy, its host rules), or nowhere: a read the page routes itself, or one to a private address
+   * when the page is public, is refused (`ProbeReadRefused`). Rejects when the server cannot be
+   * reached, when the body is larger than `maxBytes`, or after `timeoutMs`, with what went wrong.
    */
   fetch(request: ProbeFetchRequest, limits: { timeoutMs: number; maxBytes: number }): Promise<ProbeFetchResponse>;
   /** Connections the probing browser opened by itself, all refused: what the interception did not see. */

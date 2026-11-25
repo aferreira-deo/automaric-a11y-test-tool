@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Links that go after a short wait</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; }
+  nav a { display: inline-block; margin: 0 16px 8px 0; }
+  .spinner { display: none; width: 260px; height: 80px; background: #fde8ee; }
+  .spinner.on { display: block; }
+  #panel, #more { width: 320px; height: 120px; background: #eef; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Links that go after a short wait</h1>
+  <p>A link that shows a spinner and goes to its address once a timer has run (a tracker that is given time, an exit animation) is a link. One whose timer is too long to wait for says nothing, either way.</p>
+  <nav aria-label="Account">
+    <a id="wait-450" href="/name-role-value/well-built.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin-450').classList.add('on'); setTimeout(() => { location.href = to; }, 450);">Checkout</a>
+    <a id="wait-1200" href="/name-role-value/names.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin-1200').classList.add('on'); setTimeout(() => { location.href = to; }, 1200);">Orders</a>
+    <a id="wait-long" href="/name-role-value/roles.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin-long').classList.add('on'); setTimeout(() => { location.href = to; }, 6000);">Archive</a>
+    <a id="opens" href="#" onclick="event.preventDefault(); document.getElementById('panel').hidden = false;">Delivery options</a>
+  </nav>
+  <div id="spin-450" class="spinner">Taking you to the checkout…</div>
+  <div id="spin-1200" class="spinner">Taking you to your orders…</div>
+  <div id="spin-long" class="spinner">Taking you to the archive…</div>
+  <div id="panel" hidden>Standard, express or collection in store.</div>
+  <p>
+    <button id="disclosure" type="button" onclick="const more = document.getElementById('more'); more.hidden = !more.hidden;">Opening hours</button>
+  </p>
+  <div id="more" hidden>Monday to Friday, 9 to 18.</div>
+</main>
+</body>
+</html>

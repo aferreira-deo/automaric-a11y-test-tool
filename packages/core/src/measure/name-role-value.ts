@@ -261,6 +261,8 @@ export interface ProbeReading {
   blockedReads: boolean;
   /** A script read a field of the page during the activation. */
   fieldRead: boolean;
+  /** A timer the activation set had not run when it was read: something was still to happen (a navigation after a spinner, perhaps). */
+  timerPending: boolean;
 }
 
 export function readProbe(probe: NrvProbe, config: NameRoleValueConfig): ProbeReading | null {
@@ -291,6 +293,7 @@ export function readProbe(probe: NrvProbe, config: NameRoleValueConfig): ProbeRe
     movedInPage: step.scrolled && !dialog && revealed.length === 0 && hidden.length === 0,
     blockedReads: (step.blockedReads ?? 0) > 0,
     fieldRead: step.fieldRead === true,
+    timerPending: step.timerPending === true,
   };
 }
 
@@ -422,6 +425,7 @@ function probeValues(probe: NrvProbe, reading: ProbeReading): Record<string, str
   if (reading.states.length > 0) values['statesChanged'] = reading.states.join(', ');
   if (probe.after?.blockedReads) values['readsStopped'] = probe.after.blockedReads;
   if (probe.after?.selfAnimating) values['changesWithoutActivation'] = true;
+  if (probe.after?.timerPending) values['timerPending'] = true;
   if (probe.again) {
     values['secondActivationHidesWhatAppeared'] = probe.again.revealReverted;
     values['secondActivationRestoresLook'] = probe.again.ownReverted;
@@ -584,11 +588,13 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
           const what = reading.dialog ? 'opensDialog' : reading.revealed.length > 0 || reading.hidden.length > 0 ? 'showsOrHides' : reading.states.length > 0 ? 'changesState' : reading.textChanged ? 'changesText' : reading.own ? 'changesLook' : 'sendsRequest';
           // A read the probe stopped may be why it did not navigate (a script that loads, then goes): nothing is built on that.
           const held = reading.blockedReads && !reading.sendsWrite;
+          // Nor on a timer of the activation that had not run yet: it may be the navigation.
+          const pending = reading.timerPending;
           add({
             ord: element.ord,
             rule: 'name-role-value/link-acts-as-button',
-            status: status(held ? 'info' : measured),
-            flags: flags('measured', what, ...(held ? ['requestBlocked'] : [])),
+            status: status(held || pending ? 'info' : measured),
+            flags: flags('measured', what, ...(held ? ['requestBlocked'] : []), ...(pending ? ['timerPending'] : [])),
             values: { ...textValues(element), href: element.href?.kind ?? 'none', ...probeValues(probe!, reading) },
             probe: probe!,
           });
@@ -608,7 +614,16 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
         const sendsFields = element.inForm || (reading?.fieldRead ?? false);
         if (reading && reading.navigated.length > 0 && !reading.dialog && !reading.submitted && !reading.sendsWrite && !actedInPlace && !sendsFields) {
           const kinds = [...new Set(reading.navigated.map((navigation) => navigation.kind))];
-          add({ ord: element.ord, rule: 'name-role-value/button-acts-as-link', status: status(measured), flags: flags('measured', ...kinds.map((kind) => `navigates:${kind}`)), values: { ...textValues(element), ...probeValues(probe!, reading) }, probe: probe! });
+          // A timer of the activation that had not run yet may still change something in place.
+          const pending = reading.timerPending;
+          add({
+            ord: element.ord,
+            rule: 'name-role-value/button-acts-as-link',
+            status: status(pending ? 'info' : measured),
+            flags: flags('measured', ...kinds.map((kind) => `navigates:${kind}`), ...(pending ? ['timerPending'] : [])),
+            values: { ...textValues(element), ...probeValues(probe!, reading) },
+            probe: probe!,
+          });
         } else if (reading && reading.newWindow && !reading.inPlace && !reading.submitted) {
           add({ ord: element.ord, rule: 'name-role-value/button-acts-as-link', status: status('advisory'), flags: flags('measured', 'newWindow'), values: { ...textValues(element), ...probeValues(probe!, reading) }, probe: probe! });
         } else if (unseen && element.tag === 'a' && element.href?.kind === 'url') {
@@ -639,12 +654,14 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
         else if (reading.own && reading.revealed.length === 0) found = { status: 'advisory', flag: 'lookChanged' };
         // The state may be set once a request comes back, and the probe stopped one: never built on the block.
         const held = reading.blockedReads || reading.sendsWrite;
+        // Or once a timer of the activation runs, one that had not run yet.
+        const pending = reading.timerPending;
         if (found) {
           add({
             ord: element.ord,
             rule: 'name-role-value/state-not-exposed',
-            status: status(held ? 'info' : found.status),
-            flags: flags('measured', found.flag, ...(held ? ['requestBlocked'] : [])),
+            status: status(held || pending ? 'info' : found.status),
+            flags: flags('measured', found.flag, ...(held ? ['requestBlocked'] : []), ...(pending ? ['timerPending'] : [])),
             values: { ...textValues(element), ...probeValues(probe, reading) },
             probe,
           });

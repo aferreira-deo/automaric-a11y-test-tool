@@ -4,6 +4,7 @@ import { GUARD_GLOBAL, GUARD_SCRIPT, PROBE_AGENT_GLOBAL, PROBE_WORLD_NAME, clone
 import type { CloneSourceRead, ProbeAgentOptions, ProbeObserved, ProbePrepared, ProbeStorage } from './nrv-probe-agent.js';
 import { captureScale, decodeBase64 } from './page.js';
 import type { Capture, StablePage } from './page.js';
+import { isProbeRoutingError } from './probe-host.js';
 import type { CloneSettings, ProbeBrowser, ProbeHost, ProbePage } from './probe-host.js';
 import { ProbeNetwork, pathOf, shownUrl } from './probe-network.js';
 import type { ActivationNetwork } from './probe-network.js';
@@ -19,8 +20,11 @@ import type { CdpSession, StopSignal } from './session.js';
  * 2. Every request held at the browser target (`ProbeNetwork`), from before the first copy loads
  *    until the browser is closed: pages, frames of every origin, dedicated, shared and service
  *    workers, beacons, requests sent as a page goes away. None is ever continued to the network.
- *    A copy that loads gets its GET and HEAD reads fetched by the collector (a page view);
- *    afterwards, only what was already fetched (`probeReads: cache`), and nothing else.
+ *    A copy that loads gets its GET and HEAD reads fetched by the collector (a page view), sent by
+ *    the host where the page under test's own requests go (its proxy, its host rules) or not at
+ *    all (what the page routes itself, `probeLoadDeny`, a private address for a public page);
+ *    afterwards, only what was already fetched (`probeReads: cache`), and nothing else. When that
+ *    routing cannot be followed, or the page under test is offline, no copy is loaded (`routing`).
  * 3. Copies of the page. Each copy is a page in a new, empty context of that browser, given the
  *    cookies, local and session storage, viewport, language, time zone, user agent and colour
  *    scheme of the page under test, and loaded at its address. Probes run there. A probe that
@@ -45,6 +49,8 @@ export interface CloneSource {
   settings: CloneSettings;
   cookies: Record<string, unknown>[];
   storage: ProbeStorage[];
+  /** The page under test is online (`navigator.onLine`): an offline page's own requests go nowhere, and so must the copies'. */
+  online: boolean;
 }
 
 export interface ProbeOptions {
@@ -89,6 +95,11 @@ function probeAgentOptions(config: Config): ProbeAgentOptions {
  * Reads, in the page under test, what its copies need: its cookies (all of its browser context,
  * HttpOnly and partitioned ones included), the local and session storage of its documents, and
  * its settings. Only reads.
+ *
+ * The cookies come from `Network.getAllCookies` on the session of the page, which reads the
+ * context of the page. Not `Storage.getCookies`: without a `browserContextId` it reads the
+ * default context of the browser (empty for a context Playwright made), and a page session may not
+ * name another. When that command is gone, the cookies for the addresses of the page's frames.
  */
 export async function readCloneSource(page: StablePage, environment: { url: string; viewport: { width: number; height: number }; colorScheme: 'light' | 'dark' }, config: Config): Promise<CloneSource> {
   const response = (await page.cdp.send('Runtime.evaluate', {
@@ -96,13 +107,23 @@ export async function readCloneSource(page: StablePage, environment: { url: stri
     contextId: page.contextId,
     returnByValue: true,
   })) as { result: { value?: CloneSourceRead } };
-  const read = response.result.value ?? { storage: [], userAgent: '', language: '', timezone: '' };
+  const read = response.result.value ?? { storage: [], userAgent: '', language: '', timezone: '', online: true };
+  const frameUrls = async (): Promise<string[]> => {
+    const urls = new Set<string>([environment.url]);
+    const visit = (tree: FrameTree): void => {
+      if (/^https?:/i.test(tree.frame.url)) urls.add(tree.frame.url);
+      for (const child of tree.childFrames ?? []) visit(child);
+    };
+    const { frameTree } = (await page.cdp.send('Page.getFrameTree').catch(() => ({ frameTree: null }))) as { frameTree: FrameTree | null };
+    if (frameTree) visit(frameTree);
+    return [...urls];
+  };
   const cookies = await page.cdp
-    .send('Storage.getCookies', {})
+    .send('Network.getAllCookies')
     .then((result) => (result as { cookies: Record<string, unknown>[] }).cookies)
-    .catch(() =>
+    .catch(async () =>
       page.cdp
-        .send('Network.getAllCookies')
+        .send('Network.getCookies', { urls: await frameUrls() })
         .then((result) => (result as { cookies: Record<string, unknown>[] }).cookies)
         .catch(() => [] as Record<string, unknown>[]),
     );
@@ -118,7 +139,13 @@ export async function readCloneSource(page: StablePage, environment: { url: stri
     },
     cookies,
     storage: read.storage,
+    online: read.online !== false,
   };
+}
+
+interface FrameTree {
+  frame: { url: string };
+  childFrames?: FrameTree[];
 }
 
 /** A cookie as `Storage.getCookies` gives it, as `Network.setCookies` takes it. */
@@ -201,6 +228,15 @@ export async function probeNameRoleValue(
     const element = survey.elements[target.ord]!;
     log.probes.push({ ord: target.ord, selector: element.selector, frame: element.frame, reason: target.reason, outcome: 'budget' });
   }
+  /** Probing never started: every element to probe says so. */
+  const notStarted = (stopped: NonNullable<NrvProbeLog['stopped']>, detail: string): ProbeResult => {
+    for (const entry of log.probes) entry.outcome = 'not-started';
+    log.stopped = stopped;
+    log.stoppedDetail = detail;
+    return { log };
+  };
+  // An offline page's own requests go nowhere: neither do the copies'.
+  if (!source.online) return notStarted('routing', 'the page under test is offline (navigator.onLine is false): its own requests go nowhere, so no copy is loaded');
 
   let probe: ProbeBrowser;
   const starting = host.start();
@@ -208,10 +244,13 @@ export async function probeNameRoleValue(
     probe = await within(starting, settings.probeLoadTimeoutMs);
   } catch (error) {
     starting.then((late) => late.close(), () => undefined).catch(() => undefined);
-    log.stopped = aborted() ? 'aborted' : error instanceof ProbeTimeout && error.budget ? 'budget' : 'cloneFailed';
-    log.stoppedDetail = `the probing browser did not start: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`;
-    return { log };
+    const message = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
+    if (aborted()) return notStarted('aborted', 'stopped before the probing browser started');
+    if (error instanceof ProbeTimeout) return notStarted(error.budget ? 'budget' : 'browserFailed', 'the probing browser did not start in time');
+    if (isProbeRoutingError(error)) return notStarted('routing', message);
+    return notStarted('browserFailed', `the probing browser did not start: ${message}`);
   }
+  log.route = probe.route;
   const network = new ProbeNetwork(probe, settings, log, options.testUnblock);
   let copy: Copy | null = null;
 
@@ -363,7 +402,11 @@ export async function probeNameRoleValue(
     network.openLoad();
     const loading = timed(raw, settings.probeLoadTimeoutMs);
     const navigated = (await loading.send('Page.navigate', { url: source.settings.url })) as { errorText?: string };
-    if (navigated.errorText) throw new CopyFailed(`the copy did not load (${navigated.errorText})`);
+    if (navigated.errorText) {
+      // What went wrong when its document was read, not only the error the copy was given.
+      const why = network.failureOf(source.settings.url);
+      throw new CopyFailed(`the copy did not load (${navigated.errorText}${why ? `: ${why}` : ''})`);
+    }
     const loadBy = Date.now() + settings.probeLoadTimeoutMs;
     for (;;) {
       const state = (await loading.send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true }).catch((error: unknown) => {
@@ -396,6 +439,23 @@ export async function probeNameRoleValue(
     await within(agent(target, `quiet(${settings.activationQuietMs}, ${settings.activationQuietMaxMs})`), settings.activationQuietMaxMs + settings.probeStepTimeoutMs);
     await agent(target, 'settle()');
     for (let tries = 0; network.busy() > 0 && tries < 40; tries++) await pause(25);
+  };
+
+  /**
+   * Then the timers the activation set are waited for, as long as one is due within
+   * `activationTimerMaxMs` of the activation (a link that shows a spinner and navigates 450 ms
+   * later), and what each did is waited for as above. Nothing is waited for when the activation set
+   * none. Returns whether one is still pending (due later, or an interval): something still to happen.
+   */
+  const waitTimers = async (target: Copy, activatedAt: number): Promise<boolean> => {
+    const bound = activatedAt + settings.activationTimerMaxMs;
+    for (;;) {
+      const pending = await guard<{ count: number; next: number }>(target, 'pending()');
+      if (!pending || pending.count === 0) return false;
+      if (pending.next < 0 || Date.now() + pending.next > bound) return true;
+      await pause(pending.next + 25);
+      await waitQuiet(target);
+    }
   };
 
   /** Pixels that changed in the box of the element between two captures of one clip, CSS px², or null when they cannot be compared. */
@@ -520,11 +580,13 @@ export async function probeNameRoleValue(
     const activatedAt = Date.now();
     await agent(target, `activate(${key})`);
     await waitQuiet(target);
+    const timerPending = await waitTimers(target, activatedAt);
     let observed = await agent<ProbeObserved>(target, `observe(${key})`);
     const after = await capture(target, ids.after, prepared.clip);
     const interval = Date.now() - activatedAt;
     const first = stepOf(target, observed, observed.removed ? null : await axState(target, backend), await guard(target, 'take()'), network.takeActivation());
     const step = first.step;
+    if (timerPending) step.timerPending = true;
     let changed = first.changed;
     step.ownChange = observed.scrolled || observed.removed ? null : ownChange(before, after, prepared, await agent<Box | null>(target, `boxOf(${key})`));
     // Pixels that change over the same interval without an activation (an animation, a ticker)
@@ -557,15 +619,17 @@ export async function probeNameRoleValue(
     const stateChanged = entry.before !== null && entry.before !== undefined && step.ax !== null && JSON.stringify(entry.before.states) !== JSON.stringify(step.ax.states);
     if (settings.probeConfirmToggle && !navigated && !dialog && !step.removed && (step.revealed.length > 0 || own || stateChanged)) {
       await guard(target, 'begin()');
+      const againAt = Date.now();
       await agent(target, `activate(${key})`);
       await waitQuiet(target);
+      const againPending = await waitTimers(target, againAt);
       observed = await agent<ProbeObserved>(target, `observe(${key})`);
       const reverted = await agent<boolean>(target, 'revealReverted()');
       const third = await capture(target, ids.again, prepared.clip);
       const second = stepOf(target, observed, observed.removed ? null : await axState(target, backend), await guard(target, 'take()'), network.takeActivation());
       if (second.changed) changed = true;
       const back = observed.scrolled || observed.removed ? null : ownChange(before, third, prepared, await agent<Box | null>(target, `boxOf(${key})`));
-      entry.again = { ...second.step, ownChange: back, revealReverted: reverted, ownReverted: back !== null && back < settings.ownChangeMinAreaCssPx2 };
+      entry.again = { ...second.step, ownChange: back, revealReverted: reverted, ownReverted: back !== null && back < settings.ownChangeMinAreaCssPx2, ...(againPending ? { timerPending: true } : {}) };
       entry.crops.again = ids.again;
     }
     network.endActivation();
@@ -579,9 +643,7 @@ export async function probeNameRoleValue(
     try {
       await within(network.enable());
     } catch (error) {
-      log.stopped = 'cloneFailed';
-      log.stoppedDetail = `the network of the probing browser could not be held: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`;
-      return { log };
+      return notStarted('browserFailed', `the network of the probing browser could not be held: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
     }
     let compared = false;
     for (const [index, entry] of log.probes.entries()) {

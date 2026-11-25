@@ -1,0 +1,42 @@
+{
+  "description": "Links that show a spinner and navigate once a timer has run (450 ms, 1.2 s) are links: the timers the activation set are waited for, up to activationTimerMaxMs (2 s), and the navigation is seen. A link whose timer is due after that (6 s) showed its spinner and has not navigated yet: info, timerPending, never likely. A link that only shows a panel acts as a button, and a button that shows and hides a part of the page without aria-expanded is a disclosure that does not expose its state: neither sets a timer, and both are reported as before.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#wait-long",
+      "check": "name-role-value",
+      "status": "info",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides",
+        "timerPending"
+      ]
+    },
+    {
+      "selector": "#opens",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    },
+    {
+      "selector": "#disclosure",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/state-not-exposed",
+      "flags": [
+        "measured",
+        "disclosure"
+      ]
+    }
+  ]
+}
