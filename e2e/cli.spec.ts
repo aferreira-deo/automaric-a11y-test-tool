@@ -57,7 +57,7 @@ test('focus-indicator is a default check: a fail exits 1 and lands in violations
 test('icon-contrast is a default check too, and can be selected alone', async ({ baseURL }, testInfo) => {
   const url = `${baseURL}/icon-contrast/svg-currentcolor.html`;
   const both = JSON.parse((await cli('scan', url)).stdout) as Report;
-  expect(new Set(both.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value']));
+  expect(new Set(both.a11yVision.findings.map((finding) => finding.check))).toEqual(new Set(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value', 'reflow']));
 
   const html = testInfo.outputPath('out', 'report.html');
   const crops = testInfo.outputPath('out', 'crops');

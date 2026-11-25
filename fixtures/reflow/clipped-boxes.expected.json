@@ -1,10 +1,10 @@
 {
-  "description": "Three boxes that clip what overflows them. At 320 by 800 a card of fixed height cuts off the end of its paragraph: content lost, a failure. The same with a button inside that may show the rest: likely. A title cut to one line with an ellipsis: advisory, truncated by design. At the baseline all three show their text in full.",
+  "description": "Three boxes that clip what overflows them. At 320 by 800 a card of fixed height cuts off the end of its paragraph: content lost, a failure. The same with a button inside that may show the rest: advisory. A title cut to one line with an ellipsis: advisory, truncated by design. At the baseline all three show their text in full.",
   "checks": ["reflow"],
   "exact": true,
   "expected": [
     { "selector": "#card", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] },
-    { "selector": "#teaser", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["revealControl"] },
+    { "selector": "#teaser", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["revealControl"] },
     { "selector": "#title", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["ellipsis"] },
     { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
   ]

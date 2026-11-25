@@ -107,6 +107,8 @@ export interface ReflowBox {
   popup?: boolean;
   /** It paints over what lies under it: a background colour that is not transparent, a background image, replaced content. */
   paints: boolean;
+  /** `display: inline`: laid out in the lines of text, whose rectangle spans the lines it wraps over. */
+  inline?: boolean;
   tag: string;
 }
 

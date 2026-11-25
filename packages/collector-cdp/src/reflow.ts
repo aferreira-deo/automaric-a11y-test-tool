@@ -129,6 +129,8 @@ export async function collectReflow(page: StablePage, config: Config, original: 
         continue;
       }
       test.top = top === 'a' || top === 'b' ? top : 'unknown';
+      // The text is painted over the box: nothing of it is covered, and there is nothing to capture.
+      if (candidate.kind === 'box' && top === 'a') continue;
       const victim = candidate.kind === 'text' && top === 'a' ? candidate.b : candidate.a;
       const cover = victim === candidate.a ? candidate.b : candidate.a;
       const base = `reflow/${fnv1a64(JSON.stringify([layout.pass, 'overlap', selectorOf(victim), selectorOf(cover)]))}`;

@@ -64,6 +64,8 @@ function cropLabel(id: string): string {
   if (id.startsWith('name-role-value/') && id.endsWith('-after.png')) return 'After activation';
   if (id.startsWith('name-role-value/') && id.endsWith('-again.png')) return 'After a second activation';
   if (id.startsWith('headings/') || id.startsWith('lists/') || id.startsWith('grouping/') || id.startsWith('name-role-value/')) return 'In context';
+  if (id.startsWith('reflow/') && id.endsWith('-other-hidden.png')) return 'At the viewport of the pass, the other element hidden';
+  if (id.startsWith('reflow/')) return 'At the viewport of the pass';
   return 'Capture';
 }
 

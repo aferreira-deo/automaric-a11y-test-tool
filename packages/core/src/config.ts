@@ -7,7 +7,7 @@ import type { ReflowConfig } from './reflow-types.js';
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value', 'reflow'],
   nameRoleValue: {
     probe: 'safe',
     includeAxeCovered: true,

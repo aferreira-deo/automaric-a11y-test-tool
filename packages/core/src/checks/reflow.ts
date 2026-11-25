@@ -83,7 +83,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.lost: {
       if (flags.has('notDisplayed')) {
         return {
-          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
+          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed${flags.has('offScreen') ? ` or moved wholly off screen (${String(v['textsMovedOffScreen'])})` : ''}, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
           help: HELP.notDisplayed,
         };
       }
@@ -100,7 +100,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
       if (flags.has('ellipsis') || flags.has('lineClamp')) return { message: `${base} The text is truncated with ${flags.has('ellipsis') ? 'an ellipsis' : 'a line clamp'}.${tail}`, help: HELP.truncated };
       if (flags.has('clipsAtBaseline')) return { message: `${base} Recorded as info because this element already hides part of what it holds at the baseline viewport, as the viewport of a carousel does.${tail}`, help: HELP.lost };
       if (flags.has('carousel')) return { message: `${base} Recorded as info because this element is the viewport of a carousel (scroll snapping or aria-roledescription).${tail}`, help: HELP.lost };
-      if (flags.has('revealControl')) return { message: `${base} Likely rather than a failure because a control inside it or beside it may show what is hidden.${tail}`, help: HELP.lost };
+      if (flags.has('revealControl')) return { message: `${base} Advisory rather than a failure because a control inside it or beside it (a button, a summary, an element with aria-expanded) may show what is hidden.${tail}`, help: HELP.lost };
       return { message: `${base}${tail}`, help: HELP.lost };
     }
     case REFLOW_RULES.overlap: {
@@ -133,7 +133,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.locked: {
       const first = related('firstUnreachable');
       const base = `${where}, the document does not scroll vertically (overflow-y: ${String(v['overflowY'])}) and ${String(v['unreachableTexts'])} element(s) with text, ${String(v['unreachableControls'])} control(s) and ${String(v['unreachableOther'])} other piece(s) of content lie below the viewport where no scroll container brings them.${first ? ` The first is ${first}.` : ''}${quote(candidate.sample)}${flags.has('fullScreenLayer') ? ' A fixed layer covers the whole viewport.' : ''}`;
-      if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the same content is out of reach at the baseline viewport.${tail}`, help: HELP.locked };
+      if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the document locks content out of reach at the baseline viewport as well (a dialog or a consent wall that stops scrolling while it is open does that at every size).${tail}`, help: HELP.locked };
       if (candidate.status === 'likely') return { message: `${base} Likely: what is out of reach is no text and no control.${tail}`, help: HELP.locked };
       return { message: `${base}${tail}`, help: HELP.locked };
     }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig, resolveConfig, resolveReflow } from '../config.js';
 import { runChecks } from '../run.js';
-import type { ReflowBox, ReflowClipBox, ReflowLayer, ReflowLayout, ReflowPassName, ReflowSurvey, ReflowText, ReflowViewport } from '../reflow-types.js';
+import type { ReflowClipBox, ReflowLayer, ReflowLayout, ReflowPassName, ReflowSurvey, ReflowText, ReflowViewport } from '../reflow-types.js';
 import type { Screenshot, Snapshot } from '../types.js';
 import { createImage, encodePng, fillRect } from './image.js';
 import { beyondAxisOf, horizontalLayout, inkConfirms, reflowInk, reflowPassReport, reflowPixelPlan, unionArea } from './reflow.js';
@@ -76,7 +76,9 @@ describe('reflow/two-dimensional-scroll', () => {
   it('is info when the same text lay beyond the edge at the baseline viewport', () => {
     const wideBase = layout('baseline', 1280, 720, { viewport: viewport(1280, 720, { scrollWidth: 2000 }), texts: [text(2, [2, 3], [[16, 100, 1900, 24]])] });
     const narrow = layout('narrow', 320, 800, { viewport: viewport(320, 800, { scrollWidth: 2000 }), texts: [text(2, [2, 3], [[16, 100, 1900, 24]])] });
-    expect(report(wideBase, narrow)).toMatchObject([{ status: 'info', flags: expect.arrayContaining(['atBaseline']) }]);
+    const [found] = report(wideBase, narrow);
+    expect(found?.status).toBe('info');
+    expect(found?.flags).toContain('atBaseline');
   });
 
   it('is info when only content that may need two dimensions lies beyond', () => {
@@ -109,6 +111,17 @@ describe('reflow/two-dimensional-scroll', () => {
     expect(report(base, inner)).toMatchObject([{ status: 'likely', key: 9, flags: ['innerScroller'] }]);
   });
 
+  it('looks beyond the left edge of a page laid out right to left, where its overflow goes', () => {
+    const rtl = layout('narrow', 320, 800, {
+      viewport: viewport(320, 800, { scrollWidth: 616, rtl: true }),
+      texts: [text(2, [2, 3], [[-280, 100, 584, 24]])],
+    });
+    expect(report(base, rtl)).toMatchObject([{ status: 'fail', key: 2, values: { reachBeyondCssPx: 279 } }]);
+    // Beyond the right edge, which is its start edge, nothing scrolls to it.
+    const start = layout('narrow', 320, 800, { viewport: viewport(320, 800, { rtl: true }), texts: [text(2, [2, 3], [[100, 100, 400, 24]])] });
+    expect(report(base, start)).toMatchObject([{ rule: 'reflow/content-lost', status: 'fail', flags: ['beforeStartEdge'] }]);
+  });
+
   it('applies on the vertical axis to a page laid out horizontally, at the short pass only', () => {
     const horizontal = layout('baseline', 1280, 720, { viewport: viewport(1280, 720, { scrollWidth: 1800, scrollHeight: 720 }) });
     expect(horizontalLayout(horizontal, settings)).toBe(true);
@@ -128,9 +141,9 @@ describe('reflow/content-lost', () => {
     expect(report(base, narrowWith(card))).toMatchObject([{ rule: 'reflow/content-lost', status: 'fail', key: 5, values: { linesCut: 2 }, flags: ['clippedByAncestor'] }]);
   });
 
-  it('is advisory for an ellipsis, likely with a control that may reveal, info for a carousel', () => {
+  it('is advisory for an ellipsis and with a control that may reveal, info for a carousel', () => {
     expect(report(base, narrowWith({ ...card, truncates: 'ellipsis' }))[0]).toMatchObject({ status: 'advisory', flags: ['clippedByAncestor', 'ellipsis'] });
-    expect(report(base, narrowWith({ ...card, revealControl: true }))[0]).toMatchObject({ status: 'likely', flags: ['clippedByAncestor', 'revealControl'] });
+    expect(report(base, narrowWith({ ...card, revealControl: true }))[0]).toMatchObject({ status: 'advisory', flags: ['clippedByAncestor', 'revealControl'] });
     expect(report(base, narrowWith({ ...card, carousel: true }))[0]).toMatchObject({ status: 'info', flags: ['carousel', 'clippedByAncestor'] });
   });
 
@@ -170,6 +183,14 @@ describe('reflow/content-lost', () => {
     expect(report(shown, gone)).toMatchObject([{ status: 'info', flags: ['notDisplayed'], values: { charsNotDisplayed: 300 } }]);
     expect(report(shown, { ...gone, disclosures: [12] })).toEqual([]);
   });
+
+  it('takes text moved wholly off screen (a closed off-canvas menu) for text not displayed, and text cut at the start edge for lost', () => {
+    const shown = layout('baseline', 1280, 720, { texts: [text(6, [6, 7], [[16, 100, 200, 24]], { chars: 300 })] });
+    const away = layout('narrow', 320, 800, { texts: [text(6, [6, 7], [[-300, 100, 200, 24]], { chars: 300 })] });
+    expect(report(shown, away)).toMatchObject([{ status: 'info', flags: ['notDisplayed', 'offScreen'] }]);
+    const half = layout('narrow', 320, 800, { texts: [text(6, [6, 7], [[-100, 100, 200, 24]], { chars: 300 })] });
+    expect(report(shown, half)).toMatchObject([{ status: 'fail', key: 6, flags: ['beforeStartEdge'] }]);
+  });
 });
 
 describe('reflow/text-overlap', () => {
@@ -201,14 +222,23 @@ describe('reflow/text-overlap', () => {
     expect(reflowPixelPlan(base, layered, settings)).toEqual([]);
   });
 
-  it('is likely from boxes alone between two texts, info for a text under a box, and nothing once pixels clear it', () => {
-    expect(report(base, narrow)).toMatchObject([{ rule: 'reflow/text-overlap', status: 'likely', key: 2, flags: ['geometryOnly', 'notTested', 'textOnText'] }]);
+  it('is likely from boxes alone between two texts that could not be captured, info beyond the limit of tests and for a text under a box, and nothing once pixels clear it', () => {
+    const [pair] = reflowPixelPlan(base, narrow, settings);
+    const unseen = { ...narrow, pixels: { [pair!.id]: { region: pair!.region, top: 'unknown' as const, crops: null, reason: 'not-in-view' as const } } };
+    expect(report(base, unseen)).toMatchObject([{ rule: 'reflow/text-overlap', status: 'likely', key: 2, flags: ['geometryOnly', 'notInView', 'textOnText'] }]);
+    expect(report(base, narrow)).toMatchObject([{ rule: 'reflow/text-overlap', status: 'info', key: 2, flags: ['geometryOnly', 'notTested', 'textOnText'] }]);
     const boxed = layout('narrow', 320, 800, {
       texts: [text(2, [2, 3], [[0, 100, 240, 24]])],
       boxes: [{ key: 7, span: [7, 8], rect: [0, 90, 320, 60], kind: 'box', chain: 0, paints: true, tag: 'div' }],
     });
     const boxBase = layout('baseline', 1280, 720, { texts: [text(2, [2, 3], [[0, 100, 500, 24]])], boxes: [{ key: 7, span: [7, 8], rect: [0, 400, 320, 60], kind: 'box', chain: 0, paints: true, tag: 'div' }] });
     expect(report(boxBase, boxed)).toMatchObject([{ status: 'info', flags: ['geometryOnly', 'notTested', 'textUnderBox'] }]);
+    // The hit test found the text over the box: nothing to report.
+    const [candidate] = reflowPixelPlan(boxBase, boxed, settings);
+    expect(report(boxBase, { ...boxed, pixels: { [candidate!.id]: { region: candidate!.region, top: 'a', crops: null } } })).toEqual([]);
+    // An inline box (a link with an icon that wraps over two lines) paints over no text.
+    const inline = { ...boxed, boxes: boxed.boxes.map((box) => ({ ...box, inline: true })) };
+    expect(reflowPixelPlan(boxBase, inline, settings)).toEqual([]);
   });
 
   /** A capture of 40 by 20 device pixels with ink drawn where asked. */
@@ -295,6 +325,14 @@ describe('reflow/scroll-locked', () => {
     expect(report(base, locked())).toMatchObject([{ rule: 'reflow/scroll-locked', status: 'fail', key: 0, values: { unreachableTexts: 1 } }]);
   });
 
+  it('is info when the document locks content out at the baseline too (a dialog, a consent wall)', () => {
+    const lockedBase = layout('baseline', 1280, 720, {
+      viewport: viewport(1280, 720, { overflowX: 'hidden', overflowY: 'hidden', scrollHeight: 2000 }),
+      texts: [text(2, [2, 3], [[16, 300, 600, 24]]), text(3, [3, 4], [[16, 1000, 600, 24]])],
+    });
+    expect(report(lockedBase, locked())).toMatchObject([{ status: 'info', flags: ['atBaseline'] }]);
+  });
+
   it('is nothing when a scroller of the page brings it into view', () => {
     const app = locked({
       clips: [clip(9, [0, 0, 320, 800], 'hidden', 'auto', { scroll: [320, 1400, 0, 0, 320, 800] })],
@@ -329,8 +367,12 @@ describe('what a pass measured', () => {
   const failing = layout('narrow', 320, 800, { viewport: viewport(320, 800, { scrollWidth: 616 }), texts: [text(2, [2, 3], [[16, 100, 600, 24]])] });
 
   it('is info when the viewport is not the one asked for, and likely at most when the layout did not settle', () => {
-    expect(report(base, { ...failing, viewport: { ...failing.viewport, width: 1280 } })[0]).toMatchObject({ status: 'info', flags: expect.arrayContaining(['viewportNotApplied']) });
-    expect(report(base, { ...failing, settled: false })[0]).toMatchObject({ status: 'likely', flags: expect.arrayContaining(['notSettled']) });
+    const elsewhere = report(base, { ...failing, viewport: { ...failing.viewport, width: 1280 } })[0];
+    expect(elsewhere?.status).toBe('info');
+    expect(elsewhere?.flags).toContain('viewportNotApplied');
+    const moving = report(base, { ...failing, settled: false })[0];
+    expect(moving?.status).toBe('likely');
+    expect(moving?.flags).toContain('notSettled');
   });
 
   it('lists at most maxFindingsPerRule findings of a rule', () => {

@@ -271,11 +271,11 @@ function lossOf(layout: Layout, rect: R, chain: number, layer: number | undefine
     if (lost(kept)) return { lost: true, by: 'fixed', shown: kept };
     return { lost: false, by: null, shown: kept };
   }
-  const minX = vp.rtl ? -Infinity : 0;
-  const edge = clampY(clampX(shown, minX, Infinity) ?? [0, 0, 0, 0], 0, Infinity);
+  // The start edge: the left of a document laid out left to right, the right of one laid out right to left.
+  const edge = clampY(clampX(shown, vp.rtl ? -Infinity : 0, vp.rtl ? vp.clientWidth : Infinity) ?? [0, 0, 0, 0], 0, Infinity);
   if (lost(edge)) return { lost: true, by: 'edge', shown: edge };
   shown = edge!;
-  const [, maxX] = layout.reach('x');
+  const [minX, maxX] = layout.reach('x');
   const inX = clampX(shown, minX, maxX);
   if (lost(inX)) return { lost: true, by: 'rootX', shown: inX };
   shown = inX!;
@@ -287,24 +287,33 @@ function lossOf(layout: Layout, rect: R, chain: number, layer: number | undefine
 
 interface ItemLoss {
   lines: number;
+  /** Lines of which nothing is shown. */
+  whole: number;
   by: LostBy | null;
   firstLine: R | null;
 }
 
 function textLoss(layout: Layout, text: ReflowText): ItemLoss {
   let lines = 0;
+  let whole = 0;
   let by: LostBy | null = null;
   let firstLine: R | null = null;
   for (const line of text.lines) {
     const loss = lossOf(layout, line, text.chain, text.layer, text.fontSize);
     if (!loss.lost) continue;
     lines++;
+    if (!loss.shown) whole++;
     if (by === null) {
       by = loss.by;
       firstLine = line;
     }
   }
-  return { lines, by, firstLine };
+  return { lines, whole, by, firstLine };
+}
+
+/** Wholly off screen where no scrolling reaches (before the start edge, or a fixed element outside the viewport): moved away on purpose, as a closed off-canvas menu is. */
+function offScreen(loss: ItemLoss, text: ReflowText): boolean {
+  return (loss.by === 'edge' || loss.by === 'fixed') && loss.whole === text.lines.length;
 }
 
 function controlLoss(layout: Layout, box: ReflowBox): LineLoss {
@@ -541,18 +550,25 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
     group.items.push(item);
     groups.set(id, group);
   };
+  const movedAway: ReflowText[] = [];
   for (const text of layout.data.texts) {
     if (text.transformed) continue;
     const loss = textLoss(layout, text);
     if (loss.lines === 0 || loss.by === null || loss.by === 'rootY') continue;
     const before = base.textByKey.get(text.key);
     if (!before || before.transformed || textLoss(base, before).lines > 0) continue;
+    if (offScreen(loss, text)) {
+      movedAway.push(text);
+      continue;
+    }
     add(loss.by, { key: text.key, lines: loss.lines, chars: Math.round((text.chars * loss.lines) / Math.max(1, text.lines.length)), first: loss.firstLine, sample: text.sample, control: false });
   }
   for (const box of layout.data.boxes) {
     if (box.kind !== 'control' || box.transformed) continue;
     const loss = controlLoss(layout, box);
     if (!loss.lost || loss.by === null || loss.by === 'rootY') continue;
+    // Wholly moved off screen, with the text it holds: counted with the text.
+    if ((loss.by === 'edge' || loss.by === 'fixed') && !loss.shown) continue;
     const before = base.boxByKey.get(box.key);
     if (!before || before.transformed || controlLoss(base, before).lost) continue;
     add(loss.by, { key: box.key, lines: 0, chars: 0, first: box.rect, sample: '', control: true });
@@ -584,7 +600,8 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
         status = 'info';
         flags.push('carousel');
       } else if (clip?.revealControl) {
-        status = 'likely';
+        // A control inside or beside it may show what it hides ("Read more", a menu button, arrows).
+        status = 'advisory';
         flags.push('revealControl');
       }
       flags.push('clippedByAncestor');
@@ -627,7 +644,10 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
   }
   // Text displayed at the baseline that a pass does not display at all.
   const shown = new Set(layout.data.texts.map((text) => text.key));
-  const missing = base.data.texts.filter((text) => !shown.has(text.key) && text.layer === undefined && textLoss(base, text).lines === 0);
+  const missing = [
+    ...base.data.texts.filter((text) => !shown.has(text.key) && text.layer === undefined && textLoss(base, text).lines === 0),
+    ...movedAway.flatMap((text) => base.textByKey.get(text.key) ?? []),
+  ];
   const hiddenChars = missing.reduce((sum, text) => sum + text.chars, 0);
   const before = new Set(base.data.disclosures);
   const newDisclosure = layout.data.disclosures.some((key) => !before.has(key));
@@ -640,8 +660,8 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
       key: missing[0]!.key,
       related: [],
       box: null,
-      flags: ['notDisplayed'],
-      values: { ...passValues(layout), textsNotDisplayed: missing.length, charsNotDisplayed: hiddenChars },
+      flags: movedAway.length > 0 ? ['notDisplayed', 'offScreen'] : ['notDisplayed'],
+      values: { ...passValues(layout), textsNotDisplayed: missing.length, charsNotDisplayed: hiddenChars, ...(movedAway.length > 0 ? { textsMovedOffScreen: movedAway.length } : {}) },
       capture: null,
       sample: missing[0]!.sample,
     });
@@ -675,7 +695,8 @@ function shownTexts(layout: Layout): Shown[] {
 
 function shownBoxes(layout: Layout): Shown[] {
   return layout.data.boxes.flatMap((box) => {
-    if (!box.paints || box.transformed || box.popup) return [];
+    // An inline box is laid out in the lines of text and paints over none of them; its rectangle spans the lines it wraps over.
+    if (!box.paints || box.transformed || box.popup || box.inline) return [];
     const shown = layout.through(box.rect, box.chain, 'all').rect;
     return shown ? [{ key: box.key, span: box.span, rects: [shown], item: box }] : [];
   });
@@ -852,6 +873,11 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
   let cleared = 0;
   for (const pair of plan) {
     const test = layout.data.pixels[pair.id];
+    // The browser's hit test finds the text over the box: the box paints under it.
+    if (pair.kind === 'box' && test?.top === 'a') {
+      cleared++;
+      continue;
+    }
     const flags: string[] = [pair.kind === 'text' ? 'textOnText' : 'textUnderBox'];
     // The covered one: the one the hit test found below the other (text on text); the text under a box.
     const victim = pair.kind === 'text' && test?.top === 'a' ? pair.b : pair.a;
@@ -877,7 +903,10 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
       if (confirmed.covered) flags.push('inkCovered');
       flags.push('pixelConfirmed');
     } else {
-      status = pair.kind === 'text' ? 'likely' : 'info';
+      // From boxes alone, two texts that meet are likely to be unreadable when the region could not
+      // be captured; beyond the limit of tests (`maxPixelChecks`) nothing was looked at, which is no
+      // evidence: info. A text under a box is info, as which of the two is painted on top is not known.
+      status = pair.kind === 'text' && test ? 'likely' : 'info';
       flags.push('geometryOnly');
       if (test?.reason) flags.push(test.reason === 'layer-over' ? 'layerOver' : test.reason === 'not-in-view' ? 'notInView' : 'notCaptured');
       else if (!test) flags.push('notTested');
@@ -1035,7 +1064,12 @@ function scrollLocked(base: Layout, layout: Layout): ReflowCandidate[] {
   if (total === 0) return [];
   let status: Status;
   const flags: string[] = [];
-  if (freshTexts.length + freshControls.length > 0) status = 'fail';
+  // A document that already locks content out at the baseline (a dialog that stops scrolling while
+  // it is open, a consent wall) has that problem at every size: not one of reflow.
+  if (known.size > 0) {
+    status = 'info';
+    flags.push('atBaseline');
+  } else if (freshTexts.length + freshControls.length > 0) status = 'fail';
   else if (freshOthers.length > 0) status = 'likely';
   else {
     status = 'info';

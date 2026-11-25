@@ -187,17 +187,12 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       lastChange = performance.now();
     });
     observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
-    let resize: ResizeObserver | null = null;
-    try {
-      resize = new ResizeObserver(() => {
-        lastResize = performance.now();
-        lastChange = lastResize;
-      });
-      resize.observe(document.documentElement);
-      if (document.body) resize.observe(document.body);
-    } catch {
-      resize = null;
-    }
+    const resize = new ResizeObserver(() => {
+      lastResize = performance.now();
+      lastChange = lastResize;
+    });
+    resize.observe(document.documentElement);
+    if (document.body) resize.observe(document.body);
     let fontsDone = false;
     void Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise((resolve) => setTimeout(resolve, options.fontsTimeoutMs))]).then(() => {
       fontsDone = true;
@@ -213,7 +208,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       if (now - start >= maxMs) break;
     }
     observer.disconnect();
-    resize?.disconnect();
+    resize.disconnect();
     return quiet || performance.now() - lastResize >= quietMs;
   }
 
@@ -419,6 +414,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const popup = context.popup || isPopup(element);
         const ruby = tag === 'ruby' ? key : context.ruby;
         const invisible = context.invisible || parseFloat(style.opacity) <= 0;
+        // What `content-visibility: hidden` holds is not painted, and still answers with the boxes of its last layout.
+        const contentInvisible = invisible || style.contentVisibility === 'hidden';
         const clipPath = context.clipPath || (style.clipPath !== 'none' && style.clipPath !== '');
 
         // What it clips.
@@ -473,7 +470,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           transformed,
           ruby,
           popup,
-          invisible,
+          invisible: contentInvisible,
           clipPath,
         };
 
@@ -482,7 +479,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         let chars = 0;
         let sample = '';
         // Text that paints: not under opacity 0 or a clip-path, visible, of a colour that is not transparent.
-        const textShown = !invisible && !clipPath && style.visibility === 'visible' && alphaOf(style.webkitTextFillColor || style.color) > 0;
+        const textShown = !contentInvisible && !clipPath && style.visibility === 'visible' && alphaOf(style.webkitTextFillColor || style.color) > 0;
         for (const node of childrenOf(element)) {
           if (node.nodeType === 3) {
             if (!textShown) continue;
@@ -556,7 +553,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
             });
           } else textsBeyond++;
         }
-        if (tag !== 'html' && tag !== 'body' && page[2] > 0 && page[3] > 0 && !invisible && !clipPath) {
+        // A box that shows: not under opacity 0 or a clip-path, and not `visibility: hidden` (an off-canvas menu that is closed).
+        if (tag !== 'html' && tag !== 'body' && page[2] > 0 && page[3] > 0 && !invisible && !clipPath && style.visibility === 'visible') {
           const kind: ReflowBox['kind'] | null = isControl(element) ? 'control' : ownExcept ? ownExcept : paintsOwn(element, style) && style.visibility === 'visible' ? 'box' : null;
           if (kind) {
             if (boxes.length < options.maxBoxes) {
@@ -570,6 +568,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
                 ...(transformed ? { transformed: true } : {}),
                 ...(popup ? { popup: true } : {}),
                 paints: paintsOwn(element, style) && style.visibility === 'visible',
+                ...(style.display === 'inline' ? { inline: true } : {}),
                 tag,
               });
             } else boxesBeyond++;
@@ -648,7 +647,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       const out: ReflowLayer[] = [];
       for (const element of found) {
         const style = getComputedStyle(element);
-        const visible = element.checkVisibility({ opacityProperty: true, visibilityProperty: true } as CheckVisibilityOptions);
+        const visible = element.checkVisibility({ opacityProperty: true, visibilityProperty: true });
         if (!visible) continue;
         const own = element.getBoundingClientRect();
         let painted: ReflowRect[] = [];
@@ -744,36 +743,48 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       if (first.ownerDocument !== document || second.ownerDocument !== document) return 'unknown';
       if (first.getRootNode() !== document || second.getRootNode() !== document) return 'unknown';
       const votes = { a: 0, b: 0, layer: 0 };
-      for (const fx of [0.25, 0.5, 0.75]) {
-        for (const fy of [0.25, 0.5, 0.75]) {
-          const x = region[0] + region[2] * fx - window.scrollX;
-          const y = region[1] + region[3] * fy - window.scrollY;
-          if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) continue;
-          for (const hit of document.elementsFromPoint(x, y)) {
-            const inA = composedContains(first, hit);
-            const inB = composedContains(second, hit);
-            if (inA && !inB) {
-              votes.a++;
-              break;
-            }
-            if (inB && !inA) {
-              votes.b++;
-              break;
-            }
-            if (inA && inB) break;
-            // Above both: a fixed or sticky element that is not one of them is in the way.
-            let floating = false;
-            for (let current: Node | null = hit; current; current = composedParent(current)) {
-              if (current.nodeType !== 1) continue;
-              const position = getComputedStyle(current as Element).position;
-              if (position === 'fixed' || position === 'sticky') floating = true;
-            }
-            if (floating && paintsOwn(hit, getComputedStyle(hit))) {
-              votes.layer++;
-              break;
-            }
+      // Layers that let the pointer through (`pointer-events: none`) are hit too: a style sheet that
+      // turns pointer events on is adopted and dropped within this one task, so nothing is painted with it.
+      const force = new CSSStyleSheet();
+      force.replaceSync('*,*::before,*::after{pointer-events:auto!important}');
+      const adopted = document.adoptedStyleSheets;
+      document.adoptedStyleSheets = [...adopted, force];
+      const vote = (x: number, y: number): void => {
+        for (const hit of document.elementsFromPoint(x, y)) {
+          const inA = composedContains(first, hit);
+          const inB = composedContains(second, hit);
+          if (inA && !inB) {
+            votes.a++;
+            return;
+          }
+          if (inB && !inA) {
+            votes.b++;
+            return;
+          }
+          if (inA && inB) return;
+          // Above both: a fixed or sticky element that is not one of them is in the way.
+          let floating = false;
+          for (let current: Node | null = hit; current; current = composedParent(current)) {
+            if (current.nodeType !== 1) continue;
+            const position = getComputedStyle(current as Element).position;
+            if (position === 'fixed' || position === 'sticky') floating = true;
+          }
+          if (floating && paintsOwn(hit, getComputedStyle(hit))) {
+            votes.layer++;
+            return;
           }
         }
+      };
+      try {
+        for (const fx of [0.25, 0.5, 0.75]) {
+          for (const fy of [0.25, 0.5, 0.75]) {
+            const x = region[0] + region[2] * fx - window.scrollX;
+            const y = region[1] + region[3] * fy - window.scrollY;
+            if (x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight) vote(x, y);
+          }
+        }
+      } finally {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== force);
       }
       if (votes.layer > 0) return 'layer';
       if (votes.a > votes.b) return 'a';

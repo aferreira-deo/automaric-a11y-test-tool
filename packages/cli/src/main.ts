@@ -111,7 +111,7 @@ Checks
       --checks <ids>    Comma-separated checks to run (default: ${defaultConfig.checks.join(', ')};
                         available: ${registeredChecks().join(', ')})
       --config <file>   JSON file with settings (checks, focus, icon, headings,
-                        lists, grouping, nameRoleValue, adjudication,
+                        lists, grouping, nameRoleValue, reflow, adjudication,
                         baseline, run, selector); the options given here
                         win over it
       --no-probe        name-role-value: activate nothing. Without it, controls
@@ -210,7 +210,7 @@ async function readConfigFile(file: string): Promise<ConfigInput> {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`The config file ${file} has to hold a JSON object.`);
   const input = value as Record<string, unknown>;
-  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'nameRoleValue', 'adjudication', 'baseline', 'run', 'selector']) {
+  for (const section of ['focus', 'icon', 'headings', 'lists', 'grouping', 'nameRoleValue', 'reflow', 'adjudication', 'baseline', 'run', 'selector']) {
     const part = input[section];
     if (part !== undefined && (part === null || typeof part !== 'object' || Array.isArray(part))) {
       throw new Error(`"${section}" in the config file ${file} has to be an object.`);

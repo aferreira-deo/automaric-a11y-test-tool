@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: offcanvas-menu</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .layout { display: grid; grid-template-columns: 240px 1fr; gap: 24px; padding: 16px; }
+      #sidebar a { display: block; padding: 4px 0; color: #0645ad; }
+      #docs-toggle { display: none; font: inherit; margin: 16px; }
+      /* Under 900 px the side navigation becomes an off-canvas panel: fixed, moved off screen to the left, as frameworks do. */
+      @media (max-width: 900px) {
+        .layout { display: block; }
+        #docs-toggle { display: inline-block; }
+        #sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: 260px; padding: 16px; background: #fff; transform: translateX(-100%); }
+        #more { visibility: hidden; }
+      }
+    </style>
+  </head>
+  <body>
+    <button id="docs-toggle" type="button" aria-expanded="false" aria-controls="sidebar">Browse the documentation</button>
+    <div class="layout">
+      <nav id="sidebar" aria-label="Documentation">
+        <a href="#">Getting started</a>
+        <a href="#">Installation</a>
+        <a href="#">Layout and grid</a>
+        <a href="#">Content and typography</a>
+        <a href="#">Forms and validation</a>
+        <a href="#">Components</a>
+        <div id="more"><a href="#">Helpers</a><a href="#">Utilities</a></div>
+      </nav>
+      <main>
+        <h1>Introduction</h1>
+        <p>The documentation is organised in sections, listed in the side navigation. On a small screen the navigation opens from the button at the top of the page.</p>
+      </main>
+    </div>
+  </body>
+</html>

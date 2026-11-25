@@ -1,0 +1,6 @@
+{
+  "description": "Under 900 px the side navigation becomes an off-canvas panel: fixed, moved wholly off screen to the left (part of it also visibility: hidden), and a button with aria-expanded opens it. Content moved away on purpose behind a disclosure control is not lost: nothing is reported but the survey.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}
