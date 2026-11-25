@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Channels that leave the page</title>
+<style>body{font:16px/1.5 Arial,Helvetica,sans-serif;margin:20px;color:#1a1a1a;background:#fff}button{font:inherit;margin:4px;padding:4px 8px;border:1px solid #595959;background:#fff;color:#1a1a1a}</style>
+</head>
+<body>
+<main>
+  <h1>Channels</h1>
+  <p>Each control writes to the fixture server by a way that is not a plain request of the page: APIs saved before a guard runs, fresh frames, workers, frames of another origin. A scan must leave no request under /_nrv/write/ or /_nrv/nav/.</p>
+  <button type="button" id="saved-open">Saved window.open</button>
+  <button type="button" id="fresh-open">Fresh frame window.open</button>
+  <button type="button" id="detached-blank">Detached link to a new tab</button>
+  <button type="button" id="saved-submit-blank">Saved submit to a new tab</button>
+  <button type="button" id="ws-fresh">WebSocket of a fresh frame</button>
+  <button type="button" id="shared-port">Message to an existing shared worker</button>
+  <button type="button" id="sw-port">Message to the service worker over a channel</button>
+  <button type="button" id="xframe-new">New frame of another origin</button>
+  <button type="button" id="srcdoc-form">Frame that sends a form</button>
+  <button type="button" id="blob-worker">New worker</button>
+  <button type="button" id="meta-refresh">Meta refresh</button>
+  <button type="button" id="loc-replace">location.replace</button>
+  <button type="button" id="fresh-beacon">Beacon of a fresh frame</button>
+  <form id="blankform" method="post" target="_blank"><input type="hidden" name="a" value="1"></form>
+</main>
+<script>
+  const S = new URLSearchParams(location.search).get('s') || 'manual';
+  const W = (name) => location.origin + '/_nrv/write/' + S + '/' + name;
+  const NAV = (name) => location.origin + '/_nrv/nav/' + S + '/' + name;
+  const other = location.origin.includes('127.0.0.1') ? location.origin.replace('127.0.0.1', 'localhost') : location.origin.replace('localhost', '127.0.0.1');
+  const $ = (id) => document.getElementById(id);
+  const on = (id, f) => $(id).addEventListener('click', f);
+  // Saved before anything else runs: a guard installed later would not see them.
+  const savedOpen = window.open;
+  const savedSubmit = HTMLFormElement.prototype.submit;
+  const shared = new SharedWorker('/name-role-value/attack-shared.js');
+  shared.port.start();
+  let swPort = null;
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.register('/name-role-value/attack-sw.js', { scope: '/name-role-value/' })
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => { const channel = new MessageChannel(); registration.active.postMessage('port', [channel.port2]); swPort = channel.port1; })
+      .catch(() => {});
+  }
+  const fresh = () => { const frame = document.createElement('iframe'); frame.style.cssText = 'width:1px;height:1px;border:0'; document.body.append(frame); return frame.contentWindow; };
+  $('blankform').action = W('saved-submit-blank');
+  on('saved-open', () => savedOpen.call(window, NAV('saved-open') + '?x=1'));
+  on('fresh-open', () => fresh().open(NAV('fresh-open') + '?x=1'));
+  on('detached-blank', () => { const a = document.createElement('a'); a.href = NAV('detached-blank') + '?x=1'; a.target = '_blank'; a.click(); });
+  on('saved-submit-blank', () => savedSubmit.call($('blankform')));
+  on('ws-fresh', () => { const view = fresh(); try { const socket = new view.WebSocket('ws://' + location.host + '/_nrv/ws/' + S); socket.onopen = () => socket.send('fresh'); } catch (error) { void error; } });
+  on('shared-port', () => shared.port.postMessage(W('shared-port')));
+  on('sw-port', () => swPort && swPort.postMessage(W('sw-port')));
+  on('xframe-new', () => { const frame = document.createElement('iframe'); frame.src = other + '/_nrv/autoframe/' + S; document.body.append(frame); });
+  on('srcdoc-form', () => { const frame = document.createElement('iframe'); frame.srcdoc = '<form method=post action="' + W('srcdoc-form') + '"><input name=a value=1></form><script>document.forms[0].submit()<\/script>'; document.body.append(frame); });
+  on('blob-worker', () => { window.keptWorker = new Worker(URL.createObjectURL(new Blob(['fetch(' + JSON.stringify(W('blob-worker')) + ', { method: "POST", body: "x" })'], { type: 'text/javascript' }))); });
+  on('meta-refresh', () => { const meta = document.createElement('meta'); meta.httpEquiv = 'refresh'; meta.content = '0;url=' + NAV('meta-refresh'); document.head.append(meta); });
+  on('loc-replace', () => location.replace(NAV('loc-replace')));
+  on('fresh-beacon', () => fresh().navigator.sendBeacon(W('fresh-beacon'), 'x'));
+</script>
+</body>
+</html>

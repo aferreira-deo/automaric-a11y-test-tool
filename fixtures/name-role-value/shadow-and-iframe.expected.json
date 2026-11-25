@@ -1,5 +1,5 @@
 {
-  "description": "Controls in an open shadow tree and in a same-origin frame. An icon button without a name in a shadow tree, and one in the frame, fail; a custom element that listens and takes focus without a role fails, one with its role given through ElementInternals does not; a focusable div that listens in the frame fails.",
+  "description": "Controls in an open shadow tree and in a same-origin frame. An icon button without a name in a shadow tree, and one in the frame, fail; a custom element that listens and takes focus without a role fails, one with its role given through ElementInternals does not; a focusable div that listens in the frame, and adds a message when activated, fails.",
   "checks": [
     "name-role-value"
   ],

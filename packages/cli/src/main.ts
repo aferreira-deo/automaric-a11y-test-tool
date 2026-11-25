@@ -116,8 +116,9 @@ Checks
                         win over it
       --no-probe        name-role-value: activate nothing. Without it, controls
                         are activated to see whether they act as links or
-                        buttons and expose their state, with every write to
-                        the network stopped and the page reloaded afterwards
+                        buttons and expose their state, in copies of the
+                        page in a browser of their own without network; each
+                        copy's load is a page view (GET) on the site
       --no-axe-overlap  name-role-value: leave out what axe-core also reports
                         (empty names of buttons, links and fields, required
                         states and context, focusable content under
@@ -610,7 +611,9 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         throw new Error(`The page answered with HTTP status ${response.status()}; an error page is not scanned in place of the page (--allow-http-errors scans it).`);
       }
       heldToOrigin(page.url());
-      const scanner = new A11yVision({ page }).options(input);
+      // The copies the name-role-value check probes in get the credentials of the address too, for its origin only.
+      const probeContext = target.credentials ? { httpCredentials: { ...target.credentials, origin: new URL(target.address).origin } } : {};
+      const scanner = new A11yVision({ page, probeContext }).options(input);
       if (withModel) {
         scanner.withAdjudication({}, { env, ...(values['no-ai-cache'] ? {} : { cacheFile: values['ai-cache'] ?? DEFAULT_CACHE_FILE }) });
       }

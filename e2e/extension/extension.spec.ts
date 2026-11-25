@@ -116,7 +116,7 @@ test('the name-role-value check activates nothing from the extension', async ({ 
   await scan(panel, ['name-role-value']);
   const findings = (await exportedJson(panel)).a11yVision.findings;
   const survey = findings.find((finding) => finding.rule === 'name-role-value/survey')!;
-  expect(survey.evidence.values).toMatchObject({ probe: 'off', probesDone: 0, reloads: 0 });
+  expect(survey.evidence.values).toMatchObject({ probe: 'off', probesDone: 0, copiesLoaded: 0 });
   expect(findings.filter((finding) => finding.evidence.flags.includes('measured'))).toEqual([]);
   // What the markup says is reported all the same.
   expect(findings.some((finding) => finding.selector === '#link-toggle' && finding.status === 'advisory')).toBe(true);

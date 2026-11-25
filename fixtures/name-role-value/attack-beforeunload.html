@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>An editor that keeps you</title>
+<style>body{font:16px/1.5 Arial,Helvetica,sans-serif;margin:20px;color:#1a1a1a;background:#fff}button{font:inherit;margin:4px;padding:4px 8px;border:1px solid #595959;background:#fff;color:#1a1a1a}</style>
+</head>
+<body>
+<main>
+  <h1>Editor</h1>
+  <p><a href="#x" id="anchor">A link in the page</a> <input aria-label="Title"></p>
+  <button type="button" id="edit">Add a paragraph</button>
+  <button type="button" id="edit-and-go">Add a paragraph and leave</button>
+  <p id="out"></p>
+</main>
+<script>
+  const S = new URLSearchParams(location.search).get('s') || 'manual';
+  const W = (name) => '/_nrv/write/' + S + '/' + name;
+  const arm = () => {
+    document.getElementById('out').textContent = 'Unsaved paragraph';
+    window.onbeforeunload = (event) => { event.preventDefault(); event.returnValue = ''; return ''; };
+    setInterval(() => fetch(W('autosave'), { method: 'POST', body: 'draft' }).catch(() => {}), 500);
+  };
+  document.getElementById('edit').addEventListener('click', arm);
+  document.getElementById('edit-and-go').addEventListener('click', () => { arm(); location.href = '/_nrv/nav/' + S + '/left-editor'; });
+</script>
+</body>
+</html>

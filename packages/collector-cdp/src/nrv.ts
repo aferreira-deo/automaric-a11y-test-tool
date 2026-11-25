@@ -1,5 +1,5 @@
 import { fnv1a64, isControlRole, nameRoleValueProbeTargets, nameRoleValueReport } from '@a11y-vision/core';
-import type { Config, NameRoleValueSurvey, NrvAx, NrvElement, NrvSource } from '@a11y-vision/core';
+import type { Config, NameRoleValueSurvey, NrvAx, NrvElement, NrvProbeLog, NrvSource } from '@a11y-vision/core';
 import { AGENT_GLOBAL } from './agent.js';
 import type { AgentElementInfo, AgentHeadingPrepared } from './agent.js';
 import { inDocumentOrder } from './accessibility.js';
@@ -196,32 +196,58 @@ async function inBatches<T, R>(items: T[], work: (item: T) => Promise<R>): Promi
  * records which elements Tab reaches and captures nothing. Cross-origin frames are stepped past
  * as the focus walk does.
  */
-export async function nrvTabWalk(page: StablePage, config: Config): Promise<void> {
+export async function nrvTabWalk(page: StablePage, config: Config): Promise<NonNullable<NameRoleValueSurvey['walkStoppedBy']>> {
   const { cdp, agent } = page;
   const visited = new Set<number>();
   let empty = 0;
   let opaqueKey: number | undefined;
   let opaqueStreak = 0;
   const opaqueKeys: number[] = [];
+  const skipped = new Set<number>();
   let lastOwn: number | null = null;
+  let previousKey: number | null = null;
+  let sameStreak = 0;
+  let stoppedBy: NonNullable<NameRoleValueSurvey['walkStoppedBy']> = 'limit';
   for (let stops = 0; stops < config.nameRoleValue.maxTabStops; ) {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB_KEY });
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB_KEY });
     await agent('settle()');
     const info = await agent<AgentElementInfo | null>('active()');
     if (!info) {
-      if (++empty >= 2) break;
+      previousKey = null;
+      if (++empty >= 2) {
+        stoppedBy = visited.size > 0 ? 'cycle' : 'no-focusable';
+        break;
+      }
       continue;
     }
     empty = 0;
+    // Tab moved inside the element it was on (the fields of a date input share one activeElement): not a cycle.
+    if (!info.opaqueFrame && info.key === previousKey) {
+      if (++sameStreak > config.focus.maxTabsInElement) {
+        stoppedBy = 'trapped';
+        break;
+      }
+      continue;
+    }
+    sameStreak = 0;
+    previousKey = info.key;
+    if (info.opaqueFrame && skipped.has(info.key)) {
+      stoppedBy = 'opaque-frame';
+      break;
+    }
     if (info.opaqueFrame && info.key === opaqueKey) {
       if (++opaqueStreak > config.focus.maxTabsInOpaqueFrame) {
+        for (const key of opaqueKeys) skipped.add(key);
         await agent(`skipFrames(${JSON.stringify(opaqueKeys)}, ${lastOwn})`);
         opaqueKey = undefined;
       }
       continue;
     }
-    if (visited.has(info.key)) break;
+    if (visited.has(info.key)) {
+      stoppedBy = 'cycle';
+      break;
+    }
     visited.add(info.key);
     opaqueKey = info.opaqueFrame ? info.key : undefined;
     opaqueStreak = 0;
@@ -230,6 +256,7 @@ export async function nrvTabWalk(page: StablePage, config: Config): Promise<void
     stops++;
   }
   await agent('blurActive()');
+  return stoppedBy;
 }
 
 /** The documents whose tree is read: the top one, and each frame the agent can look into. */
@@ -269,7 +296,19 @@ async function readableFrames(page: StablePage): Promise<FrameTree[]> {
  * captures into view; scroll positions are put back by `withStablePage`. Nothing on the page is
  * activated here: probing is `probeNameRoleValue`, later.
  */
-export async function collectNameRoleValue(page: StablePage, config: Config, walk: NameRoleValueSurvey['walk']): Promise<NameRoleValueSurvey> {
+/** What probing records before it has done anything. */
+export function emptyProbeLog(mode: NrvProbeLog['mode']): NrvProbeLog {
+  return { mode, ran: false, probes: [], planned: 0, blocked: [], allowed: 0, fetched: 0, unsafe: 0, escapes: 0, popups: 0, guarded: {}, clones: 0, reused: 0 };
+}
+
+export async function collectNameRoleValue(
+  page: StablePage,
+  config: Config,
+  walk: NameRoleValueSurvey['walk'],
+  walkStoppedBy?: NameRoleValueSurvey['walkStoppedBy'],
+  /** Interactive elements by markup before the collection began (`NRV_BEFORE_SCRIPT`). */
+  interactiveBefore?: number,
+): Promise<NameRoleValueSurvey> {
   const { cdp } = page;
   const settings = config.nameRoleValue;
   await page.agent('renderAll()');
@@ -334,15 +373,20 @@ export async function collectNameRoleValue(page: StablePage, config: Config, wal
 
   const read = await nrv<AgentNrvSurvey>('survey()');
 
-  // The node of each element, to look it up in the accessibility tree.
+  // The node of each element, to look it up in the accessibility tree; for a custom element, whether its shadow root is closed.
   const backendIds: (number | null)[] = [];
+  const closedShadow = new Set<number>();
   const list = await evaluate(page, `globalThis.${NRV_AGENT_GLOBAL}.surveyed()`, false);
   if (list.objectId) {
     const items = await arrayItems(page, list.objectId);
     backendIds.push(
-      ...(await inBatches(items, async (objectId) => {
+      ...(await inBatches(items.map((objectId, index) => ({ objectId, index })), async ({ objectId, index }) => {
         try {
-          const { node } = (await cdp.send('DOM.describeNode', { objectId })) as { node: { backendNodeId: number } };
+          const custom = read.elements[index]?.tag.includes('-') === true;
+          const { node } = (await cdp.send('DOM.describeNode', { objectId, depth: custom ? 1 : 0 })) as {
+            node: { backendNodeId: number; shadowRoots?: { shadowRootType?: string }[] };
+          };
+          if (custom && node.shadowRoots?.some((root) => root.shadowRootType === 'closed')) closedShadow.add(index);
           return node.backendNodeId;
         } catch {
           return null;
@@ -378,17 +422,19 @@ export async function collectNameRoleValue(page: StablePage, config: Config, wal
     const ax = backend === null || backend === undefined ? null : (axByNode.get(backend) ?? null);
     const sources = [...element.sources] as NrvSource[];
     if (ax && !ax.ignored && isControlRole(ax.role) && !sources.includes('role')) sources.push('role');
-    return { ...element, selector: '', frame: '', ax, sources: sources.sort() };
+    return { ...element, selector: '', frame: '', ax, sources: sources.sort(), ...(closedShadow.has(index) ? { closedShadow: true } : {}) };
   });
   const survey: NameRoleValueSurvey = {
     elements,
     total: read.total,
     axComplete,
     walk,
+    ...(walkStoppedBy ? { walkStoppedBy } : {}),
+    interactiveCount: interactiveBefore ?? read.interactive,
     listenersRead,
     listenersBeyond,
     captures: {},
-    probe: { mode: settings.probe, ran: false, probes: [], planned: 0, blocked: [], allowed: 0, unsafe: 0, popups: 0, guarded: {}, reloads: 0, framesEmptied: 0, storageRestored: { cookies: 0, localStorage: 0, sessionStorage: 0 } },
+    probe: emptyProbeLog(settings.probe),
   };
 
   // Names for what is reported, and for what may be activated: core says which.

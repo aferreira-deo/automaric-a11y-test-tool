@@ -31,13 +31,23 @@ export const defaultConfig: Config = {
     maxTabStops: 300,
     maxProbes: 30,
     probeBudgetMs: 60000,
-    probeSettleMs: 250,
+    probeSettleMs: 150,
+    activationQuietMs: 150,
+    activationQuietMaxMs: 2000,
     probeExcludeSelector: '[data-a11y-vision-no-probe]',
+    probeReads: 'cache',
     probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],
     probeAllowQueryStrings: false,
     probeConfirmToggle: true,
-    maxProbeReloads: 30,
-    reloadTimeoutMs: 15000,
+    maxProbeLoads: 30,
+    probeLoadTimeoutMs: 15000,
+    probeStepTimeoutMs: 10000,
+    probeUnloadGraceMs: 300,
+    probeCloneMinMatchShare: 0.9,
+    probeCloneMaxMissingShare: 0.2,
+    probeCloneMaxCountDelta: 0.15,
+    probeCacheMaxBytes: 268435456,
+    generatedTextNameStatus: 'likely',
     ownChangeMinAreaCssPx2: 6,
     revealMinAreaCssPx2: 200,
     maxVisibilityElements: 30000,
@@ -55,6 +65,7 @@ export const defaultConfig: Config = {
     maxTabStops: 300,
     maxForced: 100,
     maxTabsInOpaqueFrame: 50,
+    maxTabsInElement: 10,
     settleFrames: 2,
     settleTimeoutMs: 250,
     fontsTimeoutMs: 3000,
@@ -443,6 +454,9 @@ export function clampDuplicateUnderHeadingsStatus(value: unknown): 'advisory' | 
   return clampInversionStatus(value, 'likely');
 }
 
+/** Resource types that are never fetched for a copy after an activation (see `NameRoleValueConfig.probeAllowedResourceTypes`). */
+const NEVER_FETCHED_TYPES: readonly string[] = ['Document', 'Fetch', 'XHR', 'Ping', 'EventSource', 'WebSocket', 'Other', 'Prefetch', 'SignedExchange', 'CSPViolationReport', 'Preflight'];
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
@@ -578,13 +592,25 @@ export function resolveNameRoleValue(input: Partial<NameRoleValueConfig> = {}): 
     maxProbes: atLeast(merged.maxProbes, 0, base.maxProbes),
     probeBudgetMs: duration(merged.probeBudgetMs, 0, base.probeBudgetMs),
     probeSettleMs: duration(merged.probeSettleMs, 0, base.probeSettleMs),
+    activationQuietMs: duration(merged.activationQuietMs, 0, base.activationQuietMs),
+    activationQuietMaxMs: duration(merged.activationQuietMaxMs, 0, base.activationQuietMaxMs),
     probeExcludeSelector: typeof merged.probeExcludeSelector === 'string' ? merged.probeExcludeSelector.trim() : base.probeExcludeSelector,
-    // A navigation is never let through, whatever the list says.
-    probeAllowedResourceTypes: names(merged.probeAllowedResourceTypes, base.probeAllowedResourceTypes).filter((type) => type !== 'Document' && /^[A-Za-z]+$/.test(type)),
+    probeReads: oneOf(merged.probeReads, ['cache', 'network'], base.probeReads),
+    // A navigation, a script's own request, a beacon, a stream or a socket is never fetched, whatever the list says.
+    probeAllowedResourceTypes: names(merged.probeAllowedResourceTypes, base.probeAllowedResourceTypes).filter(
+      (type) => !NEVER_FETCHED_TYPES.includes(type) && /^[A-Za-z]+$/.test(type),
+    ),
     probeAllowQueryStrings: flag(merged.probeAllowQueryStrings, base.probeAllowQueryStrings),
     probeConfirmToggle: flag(merged.probeConfirmToggle, base.probeConfirmToggle),
-    maxProbeReloads: atLeast(merged.maxProbeReloads, 0, base.maxProbeReloads),
-    reloadTimeoutMs: duration(merged.reloadTimeoutMs, 1, base.reloadTimeoutMs),
+    maxProbeLoads: atLeast(merged.maxProbeLoads, 0, base.maxProbeLoads),
+    probeLoadTimeoutMs: duration(merged.probeLoadTimeoutMs, 1, base.probeLoadTimeoutMs),
+    probeStepTimeoutMs: duration(merged.probeStepTimeoutMs, 1, base.probeStepTimeoutMs),
+    probeUnloadGraceMs: duration(merged.probeUnloadGraceMs, 0, base.probeUnloadGraceMs),
+    probeCloneMinMatchShare: share(merged.probeCloneMinMatchShare, base.probeCloneMinMatchShare),
+    probeCloneMaxMissingShare: share(merged.probeCloneMaxMissingShare, base.probeCloneMaxMissingShare),
+    probeCloneMaxCountDelta: share(merged.probeCloneMaxCountDelta, base.probeCloneMaxCountDelta),
+    probeCacheMaxBytes: atLeast(merged.probeCacheMaxBytes, 0, base.probeCacheMaxBytes),
+    generatedTextNameStatus: oneOf(merged.generatedTextNameStatus, ['likely', 'advisory'], base.generatedTextNameStatus),
     ownChangeMinAreaCssPx2: atLeast(merged.ownChangeMinAreaCssPx2, 0, base.ownChangeMinAreaCssPx2, false),
     revealMinAreaCssPx2: atLeast(merged.revealMinAreaCssPx2, 0, base.revealMinAreaCssPx2, false),
     maxVisibilityElements: atLeast(merged.maxVisibilityElements, 0, base.maxVisibilityElements),

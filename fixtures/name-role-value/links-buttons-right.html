@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- From a review of the name-role-value check: patterns that are right, and must not be reported. -->
+<html lang="en"><head><meta charset="utf-8"><title>Links and buttons done right</title>
+<style>body{font:16px/1.4 Arial;margin:16px;color:#111;background:#fff}button{margin:3px;padding:3px 8px;font:inherit}
+.panel{border:1px solid #333;padding:6px;width:400px}#spy{position:fixed;top:0;right:0;background:#eee;padding:4px}
+dialog{border:1px solid #333}.sec{height:700px;border-top:1px solid #ccc}</style></head>
+<body>
+<div id="spy">Reading: Intro</div>
+<main>
+<h1>Links and buttons</h1>
+<h2><button type="button" id="acc-1" aria-expanded="false" aria-controls="faq-1">Shipping</button></h2>
+<div id="faq-1" class="panel" hidden>We ship everywhere.</div>
+<p><a href="/name-role-value/products" id="spa-link">Products</a> <a href="/name-role-value/login" id="modal-link">Sign in</a> <a href="#" id="noop">Nothing</a></p>
+<p><label for="q">Search</label> <input id="q" type="search"> <button type="button" id="search">Search</button></p>
+<p><button type="button" id="more">Load more</button></p><ul id="list"><li>Item 1</li></ul>
+<p><button type="button" id="back">Back</button> <a href="#sec-3" id="smooth">Go to part 3</a></p>
+<div role="tablist" aria-label="Info"><button role="tab" id="tab-a" aria-selected="true" aria-controls="pa">A</button><button role="tab" id="tab-b" aria-selected="false" aria-controls="pb" tabindex="-1">B</button></div>
+<div role="tabpanel" id="pa" aria-labelledby="tab-a">Panel A</div><div role="tabpanel" id="pb" aria-labelledby="tab-b" hidden>Panel B</div>
+<p><button type="button" id="lazy" aria-expanded="false" aria-controls="lazy-panel">Reviews</button></p><div id="lazy-panel" class="panel" hidden></div>
+<p><button type="button" id="slide" aria-expanded="false" aria-controls="slide-panel">Delivery details</button></p><div id="slide-panel" class="panel" style="display:none;overflow:hidden">Delivered in two days by our carrier.</div>
+<dialog id="login-dialog"><p>Sign in</p><button type="button" id="close-login">Close</button></dialog>
+<section class="sec" id="sec-1"><h2>Part 1</h2></section><section class="sec" id="sec-2"><h2>Part 2</h2></section><section class="sec" id="sec-3"><h2>Part 3</h2></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const on = (id, f) => $(id).addEventListener('click', f);
+// Accordion with deep links: the address carries the open panel.
+on('acc-1', () => { const open = $('acc-1').getAttribute('aria-expanded') === 'true'; $('acc-1').setAttribute('aria-expanded', String(!open)); $('faq-1').hidden = open; history.replaceState(null, '', open ? location.pathname : '#faq-1'); location.hash = open ? '' : 'faq-1'; });
+on('spa-link', (e) => { e.preventDefault(); history.pushState({}, '', '/name-role-value/products'); document.querySelector('h1').textContent = 'Products'; });
+on('modal-link', (e) => { e.preventDefault(); $('login-dialog').showModal(); history.pushState({}, '', '/name-role-value/login'); });
+on('noop', (e) => e.preventDefault());
+on('search', () => { location.href = '/name-role-value/search?q=' + encodeURIComponent($('q').value); });
+on('more', () => { const li = document.createElement('li'); li.textContent = 'Item 2'; $('list').append(li); history.pushState({}, '', '?page=2'); });
+on('back', () => history.back());
+on('smooth', (e) => { e.preventDefault(); $('sec-3').scrollIntoView({ behavior: 'instant' }); });
+addEventListener('scroll', () => { const y = scrollY; $('spy').textContent = 'Reading: ' + (y > 1500 ? 'Part 3' : y > 800 ? 'Part 2' : y > 100 ? 'Part 1' : 'Intro'); });
+for (const [t, p, o, q] of [['tab-a', 'pa', 'tab-b', 'pb'], ['tab-b', 'pb', 'tab-a', 'pa']]) on(t, () => { $(t).setAttribute('aria-selected', 'true'); $(o).setAttribute('aria-selected', 'false'); $(p).hidden = false; $(q).hidden = true; history.replaceState(null, '', '#' + p); });
+// Content loaded on first open; the state is set once it is there.
+on('lazy', async () => { const panel = $('lazy-panel'); panel.hidden = false; panel.textContent = 'Loading reviews…'; try { const r = await fetch('/name-role-value/reviews.txt?id=3'); panel.textContent = await r.text(); } catch { panel.textContent = 'Reviews could not be loaded.'; return; } $('lazy').setAttribute('aria-expanded', 'true'); });
+// A jQuery-like slide: animated by script for 400 ms, state set when it ends.
+on('slide', () => { const p = $('slide-panel'); const open = p.style.display !== 'none'; if (!open) { p.style.display = 'block'; p.style.height = '0px'; } const start = performance.now(); const full = 40;
+  const step = (now) => { const k = Math.min(1, (now - start) / 400); p.style.height = (open ? (1 - k) * full : k * full) + 'px'; if (k < 1) requestAnimationFrame(step); else { if (open) p.style.display = 'none'; p.style.height = ''; $('slide').setAttribute('aria-expanded', String(!open)); } };
+  requestAnimationFrame(step); });
+on('close-login', () => $('login-dialog').close());
+</script></body></html>

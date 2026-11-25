@@ -1,0 +1,18 @@
+{
+  "description": "Patterns that are right, from a review: names from content, images, labels, internals and generated text; a heading, a region that scrolls, a region with drag to scroll (a press listener only), a region with a canvas that animates by itself, a skip target; a custom element whose closed shadow root holds a button. None is a control without a role; nothing animated is taken for an effect. The only finding is the disabled button without a name.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#n-disabled",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "disabled"
+      ]
+    }
+  ]
+}

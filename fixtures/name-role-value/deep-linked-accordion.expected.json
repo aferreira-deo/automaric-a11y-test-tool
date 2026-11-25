@@ -1,0 +1,7 @@
+{
+  "description": "An accordion whose buttons set aria-expanded, show their panel and put it in the fragment, and a button that shows a status: buttons, whatever the address does. Nothing is reported above advisory.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": []
+}

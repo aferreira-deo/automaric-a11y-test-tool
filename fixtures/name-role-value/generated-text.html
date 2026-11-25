@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Names from generated content</title>
+<style>
+  body { font: 16px/1.5 Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; background: #fff; }
+  ol.references { counter-reset: backlink; }
+  /* The only text of each backlink is a counter, as in the references of an encyclopedia. */
+  a.backlink { counter-increment: backlink; text-decoration: none; margin-right: 4px; }
+  a.backlink::before { content: counter(backlink, lower-alpha); }
+  a.labelled::before { content: "\2191"; }
+  .icon-close::before { content: "Close"; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Notes</h1>
+  <p>Text with a note<sup id="ref-1"><a href="#note-1">[1]</a></sup> and another<sup id="ref-2"><a href="#note-2">[2]</a></sup>.</p>
+  <ol class="references">
+    <li id="note-1"><a class="backlink" href="#ref-1" id="back-1"></a> The first note.</li>
+    <li id="note-2"><a class="backlink" href="#ref-2" id="back-2"></a> The second note.</li>
+    <!-- A string in content is in Chrome's name: nothing to report. -->
+    <li id="note-3"><a class="labelled" href="#ref-1" id="back-3"></a> A note with an arrow.</li>
+  </ol>
+  <button type="button" class="icon-close" id="close-css"></button>
+</main>
+</body>
+</html>

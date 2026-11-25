@@ -39,6 +39,7 @@ const UNREACHED: Record<FocusWalk['stoppedBy'], string> = {
   'no-focusable': 'The Tab walk completed without reaching this element',
   limit: 'The Tab walk stopped at a configured limit before reaching this element',
   'opaque-frame': 'The Tab walk could not get past a cross-origin iframe and never reached this element',
+  trapped: 'The Tab walk ended at an element that kept focus for more Tab presses than maxTabsInElement, before reaching this element',
 };
 
 function evaluateStop(
@@ -406,6 +407,7 @@ export const focusIndicatorCheck: Check = {
       limit: 'a configured limit was reached',
       'opaque-frame': 'focus could not be moved past a cross-origin iframe',
       'no-focusable': 'nothing on the page takes focus',
+      trapped: 'focus stayed on one element for more Tab presses than maxTabsInElement (a focus trap)',
     }[walk.stoppedBy];
     const unreached =
       walk.unreached > 0

@@ -173,6 +173,9 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
   const skipped = new Set<number>();
   /** The last stop that is not a cross-origin frame: where the walk restarts from to step past one. */
   let lastOwnStop: number | null = null;
+  /** The element the previous press left focus on, null when it left it on the document. */
+  let previousKey: number | null = null;
+  let sameStreak = 0;
   for (;;) {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...TAB_KEY });
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...TAB_KEY });
@@ -180,6 +183,7 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
     const info = await agent<AgentElementInfo | null>('active()');
 
     if (!info) {
+      previousKey = null;
       // Focus is on the document: the walk is wrapping around, or nothing takes focus.
       if (++emptyStreak >= 2) {
         stoppedBy = stops.length > 0 ? 'cycle' : 'no-focusable';
@@ -188,6 +192,17 @@ export async function collectFocus(page: StablePage, config: FocusConfig): Promi
       continue;
     }
     emptyStreak = 0;
+    // Tab moved inside the element it was on (the day, month and year of a date input share one
+    // activeElement): not a cycle, up to `maxTabsInElement` presses in a row.
+    if (!info.opaqueFrame && info.key === previousKey) {
+      if (++sameStreak > config.maxTabsInElement) {
+        stoppedBy = 'trapped';
+        break;
+      }
+      continue;
+    }
+    sameStreak = 0;
+    previousKey = info.key;
 
     if (info.opaqueFrame && skipped.has(info.key)) {
       // Taken out of the Tab order and focus is in it again: there is no getting past it.

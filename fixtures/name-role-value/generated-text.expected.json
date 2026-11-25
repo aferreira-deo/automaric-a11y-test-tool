@@ -1,0 +1,28 @@
+{
+  "description": "Backlinks whose only text is a CSS counter: Chrome leaves counters out of the name, other browsers may not, so the empty name is likely, not a fail, and says why. A link whose generated content is a string, and a button named by a generated string, have the name.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#back-1",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "cssGeneratedText"
+      ]
+    },
+    {
+      "selector": "#back-2",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/missing-name",
+      "flags": [
+        "cssGeneratedText"
+      ]
+    }
+  ]
+}

@@ -57,6 +57,22 @@ const FIELD_ROLES: readonly string[] = ['textbox', 'searchbox', 'combobox', 'lis
 /** Activation by a pointer. */
 const POINTER_TYPES: readonly string[] = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'auxclick', 'dblclick'];
 
+/**
+ * What handles an activation: a click (which a key press on a control also fires), or a key. A
+ * press alone (`mousedown`, `pointerdown`, `touchstart` and their ends) is what dragging, drag to
+ * scroll, a selection or a ripple listen to: no proof of a control.
+ */
+const ACTIVATION_HANDLER_TYPES: readonly string[] = ['click', 'auxclick', 'dblclick', 'keydown', 'keyup', 'keypress'];
+
+/** Framework handlers of an activation, by the name of the prop or event (`react:onClick`, `jquery:keydown`, `ember:action`). */
+function activationFramework(element: NrvElement): boolean {
+  return element.framework.some((handler) => /(?:^ember:action$|:on(?:Click|DoubleClick|Key(?:Down|Up|Press))(?:Capture)?$|:(?:click|dblclick|keydown|keyup|keypress)$)/.test(handler));
+}
+
+/** Requests of these types, stopped after an activation, are what a script needs to go on: a reaction to their block is not a reaction to the activation. */
+const SCRIPT_READ_TYPES: readonly string[] = ['Fetch', 'XHR', 'Script', 'EventSource', 'Other', 'WebSocket', 'Prefetch'];
+export { SCRIPT_READ_TYPES as NRV_SCRIPT_READ_TYPES };
+
 /** States compared before and after an activation. A change of any of them, or of the name, is a state that is exposed. */
 const COMPARED_STATES: readonly string[] = ['expanded', 'pressed', 'checked', 'selected', 'valuenow', 'valuetext', 'disabled'];
 
@@ -191,7 +207,8 @@ export function navigatedBy(step: NrvStep): NrvNavigation[] {
     if (navigation.carriesFieldValue) return false;
     switch (navigation.kind) {
       case 'document':
-        return (navigation.method ?? 'GET') === 'GET';
+        // The same address again is a reload (a refresh, a language switch that sets a cookie): no place.
+        return (navigation.method ?? 'GET') === 'GET' && navigation.otherPath !== false;
       // A frame that loads something else is recorded and not taken for a navigation of the element:
       // on real pages it is a frame the page itself reloads (an embedded playground, an advert).
       case 'frame':
@@ -238,6 +255,12 @@ export interface ProbeReading {
   sendsWrite: boolean;
   /** Something changed in place: a dialog, a region shown or hidden, text elsewhere, the element's own look, or one of its states. */
   inPlace: boolean;
+  /** The page scrolled and nothing was shown or hidden: what a link to a place in the page does when it scrolls by script. */
+  movedInPage: boolean;
+  /** Reads a script asked for after the activation were stopped: what followed may be the page's reaction to that. */
+  blockedReads: boolean;
+  /** A script read a field of the page during the activation. */
+  fieldRead: boolean;
 }
 
 export function readProbe(probe: NrvProbe, config: NameRoleValueConfig): ProbeReading | null {
@@ -246,9 +269,11 @@ export function readProbe(probe: NrvProbe, config: NameRoleValueConfig): ProbeRe
   const revealed = meaningfulRegions(step.revealed, config);
   const hidden = meaningfulRegions(step.hidden, config);
   const dialog = step.revealed.some((region) => region.kind === 'dialog');
-  const own = step.ownChange !== null && step.ownChange >= config.ownChangeMinAreaCssPx2;
+  // Pixels of an element that change also without an activation (an animation, a ticker) say nothing of it.
+  const own = !step.selfAnimating && step.ownChange !== null && step.ownChange >= config.ownChangeMinAreaCssPx2;
   const states = changedStates(probe.before ?? null, step);
-  const textChanged = step.textChanged > 0;
+  // Text that changes because the page scrolled (a "you are reading" label) is the scroll's doing.
+  const textChanged = step.textChanged > 0 && !step.scrolled;
   return {
     navigated: navigatedBy(step),
     newWindow: step.navigations.some((navigation) => navigation.kind === 'window'),
@@ -262,6 +287,10 @@ export function readProbe(probe: NrvProbe, config: NameRoleValueConfig): ProbeRe
     states,
     sendsWrite: (step.writes ?? 0) > 0,
     inPlace: dialog || revealed.length > 0 || hidden.length > 0 || textChanged || own || states.length > 0,
+    // Scrolled the page to a place and showed nothing: a link to a place in the page that does its own scrolling.
+    movedInPage: step.scrolled && !dialog && revealed.length === 0 && hidden.length === 0,
+    blockedReads: (step.blockedReads ?? 0) > 0,
+    fieldRead: step.fieldRead === true,
   };
 }
 
@@ -278,26 +307,52 @@ function noRoleShape(element: NrvElement, config: NameRoleValueConfig): boolean 
   if (element.sources.includes('contenteditable') || ax.states['editable']) return false;
   if (element.insideControl !== '' || element.interactiveDescendants > 0 || element.isLabel) return false;
   if (element.areaShare > config.maxControlAreaShare) return false;
+  // A region that scrolls takes focus so that the keyboard can scroll it (and a drag to scroll listens to presses): not a control.
+  if (element.scrollable) return false;
+  // What a closed shadow root holds cannot be inspected: nothing is said of its host.
+  if (element.closedShadow) return false;
   return element.visible || element.sources.includes('tab');
 }
 
-/** Status of a control without a role, or null when it is not reported. See the README for the table. */
+/** It handles an activation by itself: a click or key listener of its own, or a framework handler of one. */
+function handlesActivation(element: NrvElement): boolean {
+  return element.listeners.some((type) => ACTIVATION_HANDLER_TYPES.includes(type)) || activationFramework(element);
+}
+
+/**
+ * Status of a control without a role, or null when it is not reported. See the README for the
+ * table. A `fail` needs an effect that the activation caused, measured: focusable in sequence, and
+ * activated, it navigated, changed the page in place or tried to send a write. Listeners alone are
+ * never a `fail`, and an activation that showed nothing never supports one.
+ */
 export function noRoleStatus(element: NrvElement, reading: ProbeReading | null, config: NameRoleValueConfig): Status | null {
   if (!noRoleShape(element, config)) return null;
-  const pointer = pointerListeners(element).length > 0;
-  const keyOnly = element.listeners.length > 0 && !pointer;
-  const framework = element.framework.length > 0;
+  const handler = handlesActivation(element);
+  // Presses only (mousedown, pointerdown, touchstart...), or a framework handler of something else.
+  const pressOnly = !handler && (pointerListeners(element).length > 0 || element.framework.length > 0);
   const focusable = sequentiallyFocusable(element);
-  const effect = reading !== null && (reading.navigated.length > 0 || reading.inPlace || reading.sendsWrite);
-  if (focusable && (pointer || effect)) return 'fail';
-  if ((focusable && (keyOnly || framework)) || ((pointer || framework) && element.sources.includes('cursor')) || effect) return 'likely';
-  if (pointer || framework) return 'advisory';
+  const cursor = element.sources.includes('cursor');
+  // What the activation caused. A change after a read the probe stopped may be the page's reaction to the block;
+  // a write may be a tracker that listens to every click of the document, when something there listens.
+  const effect = reading !== null && (reading.navigated.length > 0 || (reading.inPlace && !reading.blockedReads) || (reading.sendsWrite && !element.delegated));
+  if (focusable && effect) return 'fail';
+  if (effect || (focusable && handler) || (handler && cursor)) return 'likely';
+  if (handler || (pressOnly && (focusable || cursor))) return 'advisory';
   return null;
 }
 
-/** Which elements are activated, in which order. Probing takes them from the front, up to its limits. */
+/**
+ * Which elements are activated, in which order. Probing takes them from the front, up to its
+ * limits. First what static evidence leaves open: links that point nowhere (link or button?),
+ * elements that may be controls without a role, triggers (`aria-expanded`, `aria-controls`,
+ * `aria-haspopup`: is the state kept?), toggles (`aria-pressed`, a custom checkbox, switch or
+ * radio, a tab); then the other buttons and stateful roles; links with an address and a handler
+ * of their own last. Never: native fields (they keep their own state), plain links with an
+ * address and no handler, what submits a form.
+ */
 export function nameRoleValueProbeTargets(survey: NameRoleValueSurvey, config: NameRoleValueConfig): { ord: number; reason: NrvProbe['reason'] }[] {
-  const buckets: Record<NrvProbe['reason'], number[]> = { 'no-href': [], stateful: [], 'no-role': [], 'link-handler': [] };
+  const order = ['no-href', 'no-role', 'trigger', 'toggle', 'stateful', 'link-handler'] as const;
+  const buckets: Record<NrvProbe['reason'], number[]> = { 'no-href': [], 'no-role': [], trigger: [], toggle: [], stateful: [], 'link-handler': [] };
   for (const element of survey.elements) {
     const ax = element.ax;
     if (!ax || ax.ignored || !element.visible || element.excluded || element.disabled || ax.disabled || element.submits) continue;
@@ -308,17 +363,20 @@ export function nameRoleValueProbeTargets(survey: NameRoleValueSurvey, config: N
     const evidence = element.listeners.length > 0 || element.framework.length > 0 || element.delegated;
     if (!evidence) continue;
     const pointer = pointerListeners(element).length > 0 || element.framework.length > 0;
+    const has = (name: string): boolean => element.attrs[name] !== undefined;
     if (ax.role === 'link') {
       const kind = element.href?.kind;
       if (kind === undefined || kind === 'none' || kind === 'hash' || kind === 'hashbang' || kind === 'javascript') buckets['no-href'].push(element.ord);
       else if (pointer && kind !== 'empty') buckets['link-handler'].push(element.ord);
     } else if (['button', 'tab', 'switch', 'checkbox', 'radio', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'treeitem', 'option'].includes(ax.role)) {
-      buckets.stateful.push(element.ord);
+      if (has('aria-expanded') || has('aria-controls') || (has('aria-haspopup') && element.attrs['aria-haspopup'] !== 'false')) buckets.trigger.push(element.ord);
+      else if (has('aria-pressed') || ['tab', 'switch', 'checkbox', 'radio', 'menuitemcheckbox', 'menuitemradio'].includes(ax.role)) buckets.toggle.push(element.ord);
+      else buckets.stateful.push(element.ord);
     } else if (noRoleShape(element, config) && (pointer || element.sources.includes('cursor') || element.sources.includes('tabindex'))) {
       buckets['no-role'].push(element.ord);
     }
   }
-  return (['no-href', 'stateful', 'no-role', 'link-handler'] as const).flatMap((reason) => buckets[reason].map((ord) => ({ ord, reason })));
+  return order.flatMap((reason) => buckets[reason].map((ord) => ({ ord, reason })));
 }
 
 function axeCovered(candidate: NrvCandidate): boolean {
@@ -362,6 +420,8 @@ function probeValues(probe: NrvProbe, reading: ProbeReading): Record<string, str
   if (reading.dialog) values['dialogOpened'] = true;
   if (probe.after?.ownChange !== null && probe.after?.ownChange !== undefined) values['ownChangeCssPx2'] = Math.round(probe.after.ownChange);
   if (reading.states.length > 0) values['statesChanged'] = reading.states.join(', ');
+  if (probe.after?.blockedReads) values['readsStopped'] = probe.after.blockedReads;
+  if (probe.after?.selfAnimating) values['changesWithoutActivation'] = true;
   if (probe.again) {
     values['secondActivationHidesWhatAppeared'] = probe.again.revealReverted;
     values['secondActivationRestoresLook'] = probe.again.ownReverted;
@@ -416,9 +476,12 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
         const disabled = element.disabled || ax.disabled;
         // No box and taken out of the Tab order: a duplicate the author hid (an empty link beside the title of a card). Still announced in browse mode, so reported, as likely.
         const hiddenDuplicate = element.box === null && element.tabindex !== null && element.tabindex < 0;
-        const extra = [disabled ? 'disabled' : '', proven || disabled ? '' : 'notOperable', hiddenDuplicate ? 'noBoxNotInTabOrder' : ''].filter(Boolean);
+        // Its only visible text comes from CSS: Chrome leaves it out of the name, other browsers may not.
+        const generated = element.generatedText === true;
+        const extra = [disabled ? 'disabled' : '', proven || disabled ? '' : 'notOperable', hiddenDuplicate ? 'noBoxNotInTabOrder' : '', generated ? 'cssGeneratedText' : ''].filter(Boolean);
         const axeRule = axeNameRule(element);
-        add({ ord: element.ord, rule: 'name-role-value/missing-name', status: status(proven && !hiddenDuplicate ? 'fail' : 'likely'), flags: flags(...extra), values: textValues(element), ...(axeRule ? { axeRule } : {}) });
+        const nameStatus: Status = generated ? (proven ? config.generatedTextNameStatus : 'advisory') : proven && !hiddenDuplicate ? 'fail' : 'likely';
+        add({ ord: element.ord, rule: 'name-role-value/missing-name', status: status(nameStatus), flags: flags(...extra), values: textValues(element), ...(axeRule ? { axeRule } : {}) });
       } else {
         counts.named++;
         const problem = nameProblem(ax.name, element, config);
@@ -493,8 +556,10 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
     if (noRole !== null) {
       counts.noRoleCandidates++;
       const pointer = pointerListeners(element);
+      const handler = handlesActivation(element);
       const extra = [
         pointer.length > 0 ? 'pointerListener' : element.listeners.length > 0 ? 'keyListener' : '',
+        !handler && (pointer.length > 0 || element.framework.length > 0) ? 'pressOnly' : '',
         element.framework.length > 0 ? 'frameworkHandler' : '',
         sequentiallyFocusable(element) ? 'focusable' : 'notFocusable',
         element.sources.includes('cursor') ? 'cursorPointer' : '',
@@ -514,9 +579,19 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
         else if (reading.inPlace) counts.buttonBehaviour++;
       }
       if (ax.role === 'link') {
-        if (reading && reading.navigated.length === 0 && !reading.newWindow && !reading.submitted && (reading.inPlace || reading.sendsWrite)) {
+        // A link that scrolls the page to a place by script goes somewhere, as a link does.
+        if (reading && reading.navigated.length === 0 && !reading.newWindow && !reading.submitted && !reading.movedInPage && (reading.inPlace || reading.sendsWrite)) {
           const what = reading.dialog ? 'opensDialog' : reading.revealed.length > 0 || reading.hidden.length > 0 ? 'showsOrHides' : reading.states.length > 0 ? 'changesState' : reading.textChanged ? 'changesText' : reading.own ? 'changesLook' : 'sendsRequest';
-          add({ ord: element.ord, rule: 'name-role-value/link-acts-as-button', status: status(measured), flags: flags('measured', what), values: { ...textValues(element), href: element.href?.kind ?? 'none', ...probeValues(probe!, reading) }, probe: probe! });
+          // A read the probe stopped may be why it did not navigate (a script that loads, then goes): nothing is built on that.
+          const held = reading.blockedReads && !reading.sendsWrite;
+          add({
+            ord: element.ord,
+            rule: 'name-role-value/link-acts-as-button',
+            status: status(held ? 'info' : measured),
+            flags: flags('measured', what, ...(held ? ['requestBlocked'] : [])),
+            values: { ...textValues(element), href: element.href?.kind ?? 'none', ...probeValues(probe!, reading) },
+            probe: probe!,
+          });
         } else if (unseen) {
           const kind = element.href?.kind;
           const noTarget = element.tag !== 'a' && element.tag !== 'area' ? !element.href : kind === 'none' || kind === 'hash' || kind === 'hashbang' || kind === 'javascript';
@@ -526,7 +601,12 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
           }
         }
       } else if (!element.submits) {
-        if (reading && reading.navigated.length > 0 && !reading.dialog && !reading.submitted && !reading.sendsWrite) {
+        // A button that changed its own state or part of the page is a button, whatever the address does
+        // (an accordion that keeps the open panel in the fragment). One that belongs to a form, or read a
+        // field, falls under the exception for what sends a form, whatever the field holds.
+        const actedInPlace = reading !== null && (reading.states.length > 0 || reading.revealed.length > 0 || reading.hidden.length > 0 || reading.dialog || reading.own);
+        const sendsFields = element.inForm || (reading?.fieldRead ?? false);
+        if (reading && reading.navigated.length > 0 && !reading.dialog && !reading.submitted && !reading.sendsWrite && !actedInPlace && !sendsFields) {
           const kinds = [...new Set(reading.navigated.map((navigation) => navigation.kind))];
           add({ ord: element.ord, rule: 'name-role-value/button-acts-as-link', status: status(measured), flags: flags('measured', ...kinds.map((kind) => `navigates:${kind}`)), values: { ...textValues(element), ...probeValues(probe!, reading) }, probe: probe! });
         } else if (reading && reading.newWindow && !reading.inPlace && !reading.submitted) {
@@ -557,7 +637,18 @@ export function nameRoleValueReport(survey: NameRoleValueSurvey, config: NameRol
         else if (swap && !reading.own) found = null;
         else if (regions) found = { status: 'advisory', flag: fixedOnly ? 'fixedRegion' : 'regionChanged' };
         else if (reading.own && reading.revealed.length === 0) found = { status: 'advisory', flag: 'lookChanged' };
-        if (found) add({ ord: element.ord, rule: 'name-role-value/state-not-exposed', status: status(found.status), flags: flags('measured', found.flag), values: { ...textValues(element), ...probeValues(probe, reading) }, probe });
+        // The state may be set once a request comes back, and the probe stopped one: never built on the block.
+        const held = reading.blockedReads || reading.sendsWrite;
+        if (found) {
+          add({
+            ord: element.ord,
+            rule: 'name-role-value/state-not-exposed',
+            status: status(held ? 'info' : found.status),
+            flags: flags('measured', found.flag, ...(held ? ['requestBlocked'] : [])),
+            values: { ...textValues(element), ...probeValues(probe, reading) },
+            probe,
+          });
+        }
       }
     }
   }

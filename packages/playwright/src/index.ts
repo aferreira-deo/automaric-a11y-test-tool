@@ -7,6 +7,8 @@ import { buildResult, resolveConfig } from '@a11y-vision/core';
 import type { AdjudicationInput, CheckId, ConfigInput, Png, ScanResult, Snapshot } from '@a11y-vision/core';
 import type { Page } from 'playwright-core';
 import { loadVerdictCache, saveVerdictCache } from './cache-file.js';
+import { playwrightProbeHost } from './probe-host.js';
+import type { ProbeContextOptions } from './probe-host.js';
 
 /** How the adjudicator layer is run from here. All optional. */
 export interface AdjudicationRuntime {
@@ -29,11 +31,18 @@ export interface AdjudicationRuntime {
  */
 export class A11yVision {
   readonly #page: Page;
+  readonly #probeContext: ProbeContextOptions;
   #config: ConfigInput = {};
   #runtime: AdjudicationRuntime = {};
 
-  constructor({ page }: { page: Page }) {
+  /**
+   * `probeContext`: what the copies of the page the name-role-value check probes in need beyond
+   * what is read from the page (HTTP credentials, extra headers), as the context of the page has
+   * them. Probing never happens in `page`: see the README, "The probing safety model".
+   */
+  constructor({ page, probeContext = {} }: { page: Page; probeContext?: ProbeContextOptions }) {
     this.#page = page;
+    this.#probeContext = probeContext;
   }
 
   withChecks(checks: CheckId[]): this {
@@ -90,7 +99,9 @@ export class A11yVision {
     };
     let snapshot: Snapshot;
     try {
-      snapshot = await collectSnapshot(cdp, config);
+      // Probing happens in a browser of its own, in copies of the page; never in this page.
+      const probing = config.checks.includes('name-role-value') && config.nameRoleValue.probe === 'safe';
+      snapshot = await collectSnapshot(cdp, config, probing ? { probeHost: playwrightProbeHost(this.#page, this.#probeContext) } : {});
     } finally {
       await session.detach();
       await this.#restoreEmulation();
@@ -136,5 +147,7 @@ export class A11yVision {
 }
 
 export { loadVerdictCache, saveVerdictCache } from './cache-file.js';
+export { playwrightProbeHost } from './probe-host.js';
+export type { ProbeContextOptions } from './probe-host.js';
 export type { Adjudicator, AdjudicationStats, VerdictCache } from '@a11y-vision/adjudicators';
 export type { AdjudicationConfig, AdjudicationInput, CheckId, ConfigInput, Finding, ScanResult, Status } from '@a11y-vision/core';

@@ -21,6 +21,9 @@
   <!-- True positives: operable, and no role of a control. -->
   <section>
     <div class="fake pointer" tabindex="0" id="div-focusable">Download the brochure</div>
+    <p id="brochure-note"></p>
+    <!-- Operable too, but what it does cannot be seen: listeners and focus alone are no fail. -->
+    <div class="fake pointer" tabindex="0" id="div-focusable-silent">Save the brochure</div>
     <span class="fake pointer" id="span-pointer">Show the map</span>
     <span class="fake" id="span-plain">Print</span>
     <a class="fake" tabindex="0" id="a-nohref-focusable">Next photo</a>
@@ -59,7 +62,8 @@
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
-  $('div-focusable').addEventListener('click', () => { document.title = 'Downloaded'; });
+  $('div-focusable').addEventListener('click', () => { $('brochure-note').textContent = 'The brochure is being downloaded.'; });
+  $('div-focusable-silent').addEventListener('click', () => { document.title = 'Saved'; });
   $('span-pointer').addEventListener('click', () => { $('photo-panel').hidden = !$('photo-panel').hidden; });
   $('span-plain').onclick = () => { document.title = 'Printed'; };
   $('a-nohref-focusable').addEventListener('click', () => { $('photo-panel').hidden = false; });

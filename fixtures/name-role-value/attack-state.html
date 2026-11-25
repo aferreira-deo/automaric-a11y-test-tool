@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Client state a click changes</title>
+<style>body{font:16px/1.5 Arial,Helvetica,sans-serif;margin:20px;color:#1a1a1a;background:#fff}button{font:inherit;margin:4px;padding:4px 8px;border:1px solid #595959;background:#fff;color:#1a1a1a}</style>
+</head>
+<body>
+<main>
+  <h1>State</h1>
+  <p>Each control changes what the browser keeps for the site: cookies of another path, partitioned cookies, a cookie from a picture, the origin private file system, IndexedDB, the Cache API, storage, the history. A scan must leave the page under test with all of it as it was.</p>
+  <button type="button" id="cookie-path">Cookie of another path</button>
+  <button type="button" id="cookie-partitioned">Partitioned cookie</button>
+  <button type="button" id="cookie-img">Cookie from a picture</button>
+  <button type="button" id="cookie-store">cookieStore</button>
+  <button type="button" id="opfs">File in the private file system</button>
+  <button type="button" id="idb-saved">IndexedDB, saved method</button>
+  <button type="button" id="idb-fresh">IndexedDB of a fresh frame</button>
+  <button type="button" id="cache-fresh">Cache of a fresh frame</button>
+  <button type="button" id="ls">localStorage</button>
+  <button type="button" id="ss">sessionStorage</button>
+  <button type="button" id="push">pushState</button>
+  <button type="button" id="save-on-leave">Add to basket (saved when you leave)</button>
+</main>
+<script>
+  const S = new URLSearchParams(location.search).get('s') || 'manual';
+  const W = (name) => '/_nrv/write/' + S + '/' + name;
+  const $ = (id) => document.getElementById(id);
+  const on = (id, f) => $(id).addEventListener('click', f);
+  const savedPut = IDBObjectStore.prototype.put;
+  let db = null;
+  const open = indexedDB.open('nrv-state', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('s');
+  open.onsuccess = () => { db = open.result; };
+  const fresh = () => { const frame = document.createElement('iframe'); frame.style.cssText = 'width:1px;height:1px;border:0'; document.body.append(frame); return frame.contentWindow; };
+  on('cookie-path', () => { document.cookie = 'nrv-path=1; path=/elsewhere'; });
+  on('cookie-partitioned', () => { document.cookie = 'nrv-partitioned=1; Secure; SameSite=None; Partitioned; path=/'; });
+  on('cookie-img', () => { new Image().src = W('setcookie.png'); });
+  on('cookie-store', () => { if (window.cookieStore) cookieStore.set({ name: 'nrv-store', value: '1', path: '/elsewhere2' }).catch(() => {}); });
+  on('opfs', async () => { const dir = await navigator.storage.getDirectory(); const handle = await dir.getFileHandle('nrv-probe.txt', { create: true }); const writable = await handle.createWritable(); await writable.write('written'); await writable.close(); });
+  on('idb-saved', () => { if (db) savedPut.call(db.transaction('s', 'readwrite').objectStore('s'), 'v', 'saved'); });
+  on('idb-fresh', () => { const view = fresh(); const request = view.indexedDB.open('nrv-state', 1); request.onsuccess = () => { request.result.transaction('s', 'readwrite').objectStore('s').put('v', 'fresh'); }; });
+  on('cache-fresh', () => { const view = fresh(); view.caches.open('nrv-state').then((cache) => cache.put('/nrv-x', new view.Response('x'))).catch(() => {}); });
+  on('ls', () => localStorage.setItem('nrv-ls', '1'));
+  on('ss', () => sessionStorage.setItem('nrv-ss', '1'));
+  on('push', () => history.pushState({}, '', '/name-role-value/other-route'));
+  let armed = false;
+  on('save-on-leave', () => { armed = true; });
+  addEventListener('pagehide', () => {
+    if (!armed) return;
+    localStorage.setItem('nrv-basket', 'item-42');
+    document.cookie = 'nrv-basket=1; path=/';
+  });
+  if (localStorage.getItem('nrv-basket')) fetch(W('sync-on-load'), { method: 'POST', body: localStorage.getItem('nrv-basket') });
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- From a review of the name-role-value check: patterns that are right, and must not be reported. -->
+<html lang="en"><head><meta charset="utf-8"><title>Deep-linked accordion</title>
+<style>body{font:16px/1.4 Arial;margin:16px;color:#111;background:#fff}button{margin:3px;padding:3px 8px;font:inherit}.panel{border:1px solid #333;padding:6px;width:400px}</style></head>
+<body><main><h1>FAQ</h1>
+<h2><button type="button" id="acc-1" aria-expanded="false" aria-controls="faq-1">Shipping</button></h2>
+<div id="faq-1" class="panel" hidden>We ship everywhere.</div>
+<h2><button type="button" id="acc-2" aria-expanded="false" aria-controls="faq-2">Returns</button></h2>
+<div id="faq-2" class="panel" hidden>Within thirty days.</div>
+<button type="button" id="copy">Copy the link to this page</button><p id="msg" role="status"></p>
+</main>
+<script>
+for (const n of [1, 2]) document.getElementById('acc-' + n).addEventListener('click', () => {
+  const b = document.getElementById('acc-' + n); const p = document.getElementById('faq-' + n);
+  const open = b.getAttribute('aria-expanded') === 'true';
+  b.setAttribute('aria-expanded', String(!open)); p.hidden = open;
+  if (!open) location.hash = 'faq-' + n;
+});
+document.getElementById('copy').addEventListener('click', () => { document.getElementById('msg').textContent = 'Copied'; });
+</script></body></html>

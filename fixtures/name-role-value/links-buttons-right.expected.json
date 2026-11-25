@@ -1,0 +1,7 @@
+{
+  "description": "Links and buttons that do what their role says, from a review: an accordion button that keeps its panel in the fragment, a router link, a link that opens a sign-in dialog with a route, a search button that sends an empty field, a button that loads more, a back button, a link that scrolls to a part of the page beside a label that follows the scroll, tabs, a disclosure whose state is set when its content has loaded (the probe stops that request: nothing is built on it), and one whose state is set when a 400 ms animation ends. None is reported above advisory.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": []
+}

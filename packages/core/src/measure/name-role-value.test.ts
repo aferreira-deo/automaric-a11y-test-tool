@@ -59,7 +59,7 @@ function survey(elements: NrvElement[], probes: NrvProbe[] = [], extra: Partial<
     listenersRead: true,
     listenersBeyond: 0,
     captures: {},
-    probe: { mode: 'safe', ran: probes.length > 0, probes, planned: probes.length, blocked: [], allowed: 0, unsafe: 0, popups: 0, guarded: {}, reloads: 0, framesEmptied: 0, storageRestored: { cookies: 0, localStorage: 0, sessionStorage: 0 } },
+    probe: { mode: 'safe', ran: probes.length > 0, probes, planned: probes.length, blocked: [], allowed: 0, fetched: 0, unsafe: 0, escapes: 0, popups: 0, guarded: {}, clones: 0, reused: 0 },
     ...extra,
   };
 }
@@ -136,20 +136,53 @@ describe('names that do not name', () => {
 
 describe('controls without a role', () => {
   const focusableDiv = element({ tabindex: 0, listeners: ['click'], sources: ['listener', 'tabindex'] });
-  it('follow the table of the README', () => {
-    expect(noRoleStatus(focusableDiv, null, config)).toBe('fail');
+  const acted = () => readProbe(probe(0, ax('generic'), step({ revealed: [region()] })), config);
+  const nothing = () => readProbe(probe(0, ax('generic'), step()), config);
+  it('follow the table of the README: a fail needs an effect the activation caused', () => {
+    expect(noRoleStatus(focusableDiv, acted(), config)).toBe('fail');
+    // Listeners and focus alone, or an activation that showed nothing, are no fail.
+    expect(noRoleStatus(focusableDiv, null, config)).toBe('likely');
+    expect(noRoleStatus(focusableDiv, nothing(), config)).toBe('likely');
     expect(noRoleStatus(element({ tabindex: 0, listeners: ['keydown'], sources: ['listener', 'tabindex'] }), null, config)).toBe('likely');
     expect(noRoleStatus(element({ listeners: ['click'], sources: ['listener', 'cursor'] }), null, config)).toBe('likely');
     expect(noRoleStatus(element({ framework: ['react:onClick'], sources: ['framework', 'cursor'] }), null, config)).toBe('likely');
     expect(noRoleStatus(element({ listeners: ['click'], sources: ['listener'] }), null, config)).toBe('advisory');
+    expect(noRoleStatus(element({ listeners: ['click'], sources: ['listener'] }), acted(), config)).toBe('likely');
     expect(noRoleStatus(element({ sources: ['cursor'] }), null, config)).toBeNull();
+  });
+
+  it('a press alone (drag, selection, ripple) is no proof of a control', () => {
+    const drag = element({ tabindex: 0, listeners: ['mousedown'], sources: ['listener', 'tabindex'] });
+    expect(noRoleStatus(drag, null, config)).toBe('advisory');
+    expect(noRoleStatus(drag, nothing(), config)).toBe('advisory');
+    expect(noRoleStatus(element({ listeners: ['pointerdown'], sources: ['listener'] }), null, config)).toBeNull();
   });
 
   it('a framework handler alone is not enough for a fail; seen acting, it is', () => {
     const react = element({ tabindex: 0, framework: ['react:onClick'], sources: ['framework', 'tabindex'] });
     expect(noRoleStatus(react, null, config)).toBe('likely');
-    const reading = readProbe(probe(0, ax('generic'), step({ revealed: [region()] })), config);
-    expect(noRoleStatus(react, reading, config)).toBe('fail');
+    expect(noRoleStatus(react, acted(), config)).toBe('fail');
+  });
+
+  it('an effect the activation may not have caused is no effect: a reaction to a stopped read, a write where the document listens to every click', () => {
+    const afterBlock = readProbe(probe(0, ax('generic'), step({ revealed: [region()], blockedReads: 1 })), config);
+    expect(noRoleStatus(focusableDiv, afterBlock, config)).toBe('likely');
+    const write = readProbe(probe(0, ax('generic'), step({ writes: 1 })), config);
+    expect(noRoleStatus(focusableDiv, write, config)).toBe('fail');
+    expect(noRoleStatus({ ...focusableDiv, delegated: true }, write, config)).toBe('likely');
+  });
+
+  it('a region that scrolls and a host of a closed shadow root are not candidates', () => {
+    expect(noRoleStatus({ ...focusableDiv, scrollable: true }, acted(), config)).toBeNull();
+    expect(noRoleStatus({ ...focusableDiv, tag: 'x-buy', closedShadow: true }, acted(), config)).toBeNull();
+  });
+
+  it('pixels of the element that change also without an activation are no effect', () => {
+    const animated = readProbe(probe(0, ax('generic'), step({ ownChange: 500, selfAnimating: true })), config)!;
+    expect(animated.own).toBe(false);
+    expect(animated.inPlace).toBe(false);
+    expect(noRoleStatus(focusableDiv, animated, config)).toBe('likely');
+    expect(readProbe(probe(0, ax('generic'), step({ ownChange: 500 })), config)!.own).toBe(true);
   });
 
   it('leave out containers, labels, what is inside a control and what holds one', () => {
@@ -170,6 +203,8 @@ describe('what an activation did', () => {
     expect(nav({ kind: 'document', url: 'https://a/b', method: 'GET', otherPath: true })).toBe(1);
     expect(nav({ kind: 'document', url: 'https://a/b', method: 'POST', otherPath: true })).toBe(0);
     expect(nav({ kind: 'document', url: 'https://a/search', method: 'GET', carriesFieldValue: true })).toBe(0);
+    // The same address again: a reload, not a place.
+    expect(nav({ kind: 'document', url: 'https://a/b', method: 'GET', otherPath: false })).toBe(0);
     expect(nav({ kind: 'history', url: 'https://a/other', otherPath: true })).toBe(1);
     expect(nav({ kind: 'history', url: 'https://a/same', otherPath: false })).toBe(0);
     expect(nav({ kind: 'replace', url: 'https://a/other', otherPath: true })).toBe(0);
@@ -231,6 +266,52 @@ describe('the report', () => {
   it('a button that writes and then navigates is a button: the exception of the owner', () => {
     const probes = [probe(0, ax('button', 'Save'), step({ ax: ax('button', 'Save'), writes: 1, navigations: [{ kind: 'history', url: 'https://a/done', otherPath: true }] }))];
     expect(rules(nameRoleValueReport(survey([button()], probes), config))).toEqual([]);
+  });
+
+  it('a button that changed its state or part of the page is a button, whatever the address does', () => {
+    const fragment = { kind: 'fragment' as const, url: '#faq-1', targetFound: true };
+    const probes = [
+      // An accordion that keeps its open panel in the fragment.
+      probe(0, ax('button', 'Shipping', { states: { expanded: 'false' } }), step({ ax: ax('button', 'Shipping', { states: { expanded: 'true' } }), revealed: [region()], navigations: [fragment] })),
+      // Only the address changed: it acts as a link.
+      probe(1, ax('button', 'Save'), step({ ax: ax('button', 'Save'), navigations: [fragment] })),
+    ];
+    expect(rules(nameRoleValueReport(survey([button(), button()], probes), config))).toEqual([[1, 'button-acts-as-link', 'likely']]);
+  });
+
+  it('a button of a form, or one that read a field, that navigates sends the form: not reported, whatever the field holds', () => {
+    const search = { kind: 'document' as const, url: 'https://a/search', method: 'GET', otherPath: true, carriesFieldValue: false };
+    const probes = [probe(0, ax('button', 'Search'), step({ ax: ax('button', 'Search'), navigations: [search], fieldRead: true })), probe(1, ax('button', 'Go'), step({ ax: ax('button', 'Go'), navigations: [search] }))];
+    expect(rules(nameRoleValueReport(survey([button(), button({ inForm: true })], probes), config))).toEqual([]);
+  });
+
+  it('a link that scrolls to a place, with a label beside it that follows the scroll, is a link', () => {
+    const link = element({ tag: 'a', href: { kind: 'fragment', target: '', download: false, sameDocument: true, words: '#part-3' }, ax: ax('link', 'Part 3', { focusable: true }), sources: ['native', 'role'], listeners: ['click'] });
+    const probes = [probe(0, ax('link', 'Part 3'), step({ ax: ax('link', 'Part 3'), scrolled: true, textChanged: 1 }))];
+    expect(rules(nameRoleValueReport(survey([link], probes), config))).toEqual([]);
+  });
+
+  it('nothing is built on the reaction of the page to a request the probe stopped', () => {
+    const expanded = ax('button', 'Reviews', { states: { expanded: 'false' } });
+    const link = element({ tag: 'a', href: { kind: 'hash', target: '', download: false, sameDocument: true }, ax: ax('link', 'More', { focusable: true }), sources: ['native', 'role'], listeners: ['click'] });
+    const probes = [
+      probe(0, expanded, step({ ax: expanded, revealed: [region()], blockedReads: 1 })),
+      probe(1, ax('link', 'More'), step({ ax: ax('link', 'More'), textChanged: 1, blockedReads: 2 })),
+    ];
+    const report = nameRoleValueReport(survey([button({ attrs: { 'aria-expanded': 'false' } }), link], probes), config);
+    expect(rules(report)).toEqual([
+      [0, 'state-not-exposed', 'info'],
+      [1, 'link-acts-as-button', 'info'],
+    ]);
+    for (const candidate of report.candidates) expect(candidate.flags).toContain('requestBlocked');
+  });
+
+  it('an empty name whose only visible text is generated by CSS is likely, and says so', () => {
+    const backlink = element({ tag: 'a', href: { kind: 'fragment', target: '', download: false, sameDocument: true }, ax: ax('link', '', { focusable: true }), sources: ['native', 'role', 'tab'], text: '', generatedText: true });
+    const report = nameRoleValueReport(survey([backlink]), config);
+    expect(rules(report)).toEqual([[0, 'missing-name', 'likely']]);
+    expect(report.candidates[0]!.flags).toContain('cssGeneratedText');
+    expect(rules(nameRoleValueReport(survey([backlink]), resolveNameRoleValue({ generatedTextNameStatus: 'advisory' })))[0]![2]).toBe('advisory');
   });
 
   it('a disclosure, a toggle and a stuck aria-expanded; a swap of slides is nothing', () => {
@@ -303,12 +384,38 @@ describe('what is activated', () => {
       { ord: 0, reason: 'stateful' },
     ]);
   });
+
+  it('what static evidence leaves open first: links that point nowhere, controls without a role, triggers, toggles; links with an address last', () => {
+    const listened = { listeners: ['click'] };
+    const targets = nameRoleValueProbeTargets(
+      survey([
+        element({ tag: 'a', href: { kind: 'url', target: '', download: false, sameDocument: false }, ax: ax('link', 'Shop'), sources: ['native', 'role'], ...listened }),
+        button(listened),
+        button({ ...listened, attrs: { 'aria-pressed': 'false' } }),
+        button({ ...listened, attrs: { 'aria-expanded': 'false' } }),
+        element({ tabindex: 0, sources: ['listener', 'tabindex'], ...listened }),
+        element({ tag: 'a', ax: ax('link', 'More'), sources: ['listener'], ...listened }),
+        // A plain link with an address and nothing that listens: never.
+        element({ tag: 'a', href: { kind: 'url', target: '', download: false, sameDocument: false }, ax: ax('link', 'Home'), sources: ['native', 'role'] }),
+      ]),
+      config,
+    );
+    expect(targets.map((target) => [target.ord, target.reason])).toEqual([
+      [5, 'no-href'],
+      [4, 'no-role'],
+      [3, 'trigger'],
+      [2, 'toggle'],
+      [1, 'stateful'],
+      [0, 'link-handler'],
+    ]);
+  });
 });
 
 describe('the check', () => {
   it('only fails what the tree measured, whatever the candidate said', () => {
     const elements = [button({ ax: ax('button', '', { focusable: true }) }), element({ tabindex: 0, listeners: ['click'], sources: ['listener', 'tabindex'] })];
-    const snapshot: Snapshot = { environment: { url: 'https://example.test/', devicePixelRatio: 2, viewport: { width: 1280, height: 720 }, colorScheme: 'light' }, nameRoleValue: survey(elements), nodes: [], axTree: [], screenshots: { tiles: [], clips: {} } };
+    const acted = [probe(1, ax('generic'), step({ revealed: [region()] }))];
+    const snapshot: Snapshot = { environment: { url: 'https://example.test/', devicePixelRatio: 2, viewport: { width: 1280, height: 720 }, colorScheme: 'light' }, nameRoleValue: survey(elements, acted), nodes: [], axTree: [], screenshots: { tiles: [], clips: {} } };
     const findings = runChecks(snapshot, resolveConfig({ checks: ['name-role-value'] }));
     expect(findings.map((finding) => [finding.rule, finding.status])).toEqual([
       ['name-role-value/missing-name', 'fail'],
@@ -322,7 +429,9 @@ describe('the check', () => {
 
 describe('settings', () => {
   it('take only the values each option allows', () => {
-    const resolved = resolveNameRoleValue({ probe: 'yes' as never, behaviourRoleStatus: 'advisory' as never, titleOnlyStatus: 'fail' as never, maxProbes: -3, genericNamePattern: '(', probeAllowedResourceTypes: ['Document', 'Image', 'bad type'] });
+    const resolved = resolveNameRoleValue({ probe: 'yes' as never, behaviourRoleStatus: 'advisory' as never, titleOnlyStatus: 'fail' as never, maxProbes: -3, genericNamePattern: '(', probeAllowedResourceTypes: ['Document', 'Image', 'bad type', 'XHR', 'Fetch', 'Ping', 'Other', 'EventSource'], probeReads: 'everything' as never, generatedTextNameStatus: 'fail' as never });
+    expect(resolved.probeReads).toBe('cache');
+    expect(resolved.generatedTextNameStatus).toBe('likely');
     expect(resolved.probe).toBe('safe');
     expect(resolved.behaviourRoleStatus).toBe('likely');
     expect(resolved.titleOnlyStatus).toBe('advisory');

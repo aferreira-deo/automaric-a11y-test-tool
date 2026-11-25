@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reads that write, timers, leaving</title>
+<style>body{font:16px/1.5 Arial,Helvetica,sans-serif;margin:20px;color:#1a1a1a;background:#fff}button{font:inherit;margin:4px;padding:4px 8px;border:1px solid #595959;background:#fff;color:#1a1a1a}#bg{width:40px;height:20px}</style>
+</head>
+<body>
+<main>
+  <h1>Reads</h1>
+  <p>Each control makes a read the server takes for an action (a picture, a script, a style sheet, a font with or without a query), later (timers), or when the page goes away (pagehide, keepalive). A scan must leave no request under /_nrv/write/.</p>
+  <button type="button" id="img-path">Like (picture)</button>
+  <button type="button" id="css-bg">Background picture</button>
+  <button type="button" id="script-path">Vote (script)</button>
+  <button type="button" id="import">Dynamic import</button>
+  <button type="button" id="stylesheet">Style sheet</button>
+  <button type="button" id="prefetch">Prefetch</button>
+  <button type="button" id="font-query">Font with a query</button>
+  <button type="button" id="delayed">Add to basket (debounced)</button>
+  <button type="button" id="arm-pagehide">Keep in memory, save on leave</button>
+  <button type="button" id="delayed-quiet">Debounced, nothing shown</button>
+  <button type="button" id="breach">Read with a query</button>
+  <div id="bg"></div>
+  <p id="out"></p>
+</main>
+<script>
+  const S = new URLSearchParams(location.search).get('s') || 'manual';
+  const W = (name) => '/_nrv/write/' + S + '/' + name;
+  const $ = (id) => document.getElementById(id);
+  const on = (id, f) => $(id).addEventListener('click', f);
+  on('img-path', () => { new Image().src = W('img-path-like-42.png'); });
+  on('css-bg', () => { $('bg').style.backgroundImage = 'url(' + W('css-bg.png') + ')'; });
+  on('script-path', () => { const script = document.createElement('script'); script.src = W('script-path-vote-7.js'); document.head.append(script); });
+  on('import', () => { import(W('import-path.js')).catch(() => {}); });
+  on('stylesheet', () => { const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = W('stylesheet.css'); document.head.append(link); });
+  on('prefetch', () => { const link = document.createElement('link'); link.rel = 'prefetch'; link.href = W('prefetch'); document.head.append(link); });
+  on('font-query', () => { new FontFace('Probe', 'url(' + W('font.woff2') + '?x=1)').load().catch(() => {}); });
+  on('delayed', () => {
+    $('out').textContent = 'Added';
+    for (const ms of [300, 500, 700, 900, 1200, 1600, 2200, 3000]) {
+      setTimeout(() => { fetch(W('delayed-get-' + ms) + '?id=1', { keepalive: true }).catch(() => {}); new Image().src = W('delayed-img-' + ms) + '?id=1'; }, ms);
+    }
+  });
+  let armed = false;
+  on('arm-pagehide', () => { armed = true; $('out').textContent = 'Kept'; });
+  on('delayed-quiet', () => { for (const ms of [400, 800, 1500, 3000, 6000]) setTimeout(() => { new Image().src = W('quiet-img-' + ms) + '?id=1'; }, ms); });
+  // Used by the test that shows a request that gets through is seen (e2e/name-role-value.spec.ts).
+  on('breach', () => { fetch(W('breach') + '?id=1').catch(() => {}); });
+  addEventListener('pagehide', () => {
+    if (!armed) return;
+    fetch(W('pagehide-get') + '?x=1', { keepalive: true }).catch(() => {});
+    navigator.sendBeacon(W('pagehide-beacon'), 'x');
+    new Image().src = W('pagehide-img') + '?x=1';
+    localStorage.setItem('nrv-pagehide', 'basket');
+    document.cookie = 'nrv-pagehide=1; path=/';
+  });
+  if (localStorage.getItem('nrv-pagehide')) fetch(W('sync-on-load'), { method: 'POST', body: localStorage.getItem('nrv-pagehide') });
+</script>
+</body>
+</html>

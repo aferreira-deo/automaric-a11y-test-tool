@@ -1,0 +1,15 @@
+{
+  "description": "Focusable content under aria-hidden is reported whatever stands before it in the Tab order: an element with inner Tab stops (the fields of a date input, the controls of a video) keeps activeElement while Tab moves inside it, and the walk goes on past it instead of ending there.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#hidden-link",
+      "check": "name-role-value",
+      "status": "fail",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/focusable-hidden"
+    }
+  ]
+}

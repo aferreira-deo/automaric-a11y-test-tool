@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A page in the middle of a test</title>
+<style>body{font:16px/1.5 Arial,Helvetica,sans-serif;margin:20px;color:#1a1a1a;background:#fff}button{font:inherit;margin:4px;padding:4px 8px;border:1px solid #595959;background:#fff;color:#1a1a1a}</style>
+</head>
+<body>
+<main>
+  <h1>Routes</h1>
+  <p>The test that scans this page has routes, listeners and downloads of its own: after the scan they work as before, and nothing of the scan shows in them.</p>
+  <button type="button" id="post">Order</button>
+  <button type="button" id="get">Add (GET)</button>
+  <button type="button" id="nav">Go</button>
+  <button type="button" id="open-panel" aria-expanded="false" aria-controls="panel">Details</button>
+  <div id="panel" hidden><p>Panel</p></div>
+  <a id="dl" href="/name-role-value/attack-download.txt" download>Download the notes</a>
+</main>
+<script>
+  const S = new URLSearchParams(location.search).get('s') || 'manual';
+  const W = (name) => '/_nrv/write/' + S + '/' + name;
+  const on = (id, f) => document.getElementById(id).addEventListener('click', f);
+  on('post', () => fetch(W('caller-post'), { method: 'POST', body: 'x' }));
+  on('get', () => fetch(W('caller-get') + '?id=1'));
+  on('nav', () => { location.href = '/_nrv/nav/' + S + '/caller-nav'; });
+  on('open-panel', () => { const panel = document.getElementById('panel'); panel.hidden = !panel.hidden; document.getElementById('open-panel').setAttribute('aria-expanded', String(!panel.hidden)); });
+</script>
+</body>
+</html>

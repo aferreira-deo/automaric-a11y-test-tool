@@ -228,8 +228,9 @@ function nrvRecord(session, entry) {
   list.push(entry);
   nrvHits.set(session, list);
 }
+const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 function nrv(pathname, request) {
-  const match = /^\/_nrv\/(write|nav|log|frame)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
+  const match = /^\/_nrv\/(write|nav|log|frame|autoframe)\/([\w-]+)(?:\/([\w.-]+))?$/.exec(pathname);
   if (!match) return null;
   const [, kind, session, name = ''] = match;
   if (kind === 'log') return { status: 200, type: types['.json'], body: JSON.stringify(nrvHits.get(session) ?? []) };
@@ -240,8 +241,19 @@ function nrv(pathname, request) {
       body: `<!doctype html><html lang="en"><title>Frame</title><button>Pay now</button><script>addEventListener('message', () => fetch('/_nrv/write/${session}/frame-post', { method: 'POST', body: 'x' }));</script></html>`,
     };
   }
+  // A frame of another origin that writes as soon as it loads: a click that creates it writes.
+  if (kind === 'autoframe') {
+    return { status: 200, type: types['.html'], body: `<!doctype html><html lang="en"><title>Frame</title><p>Third party</p><script>fetch('/_nrv/write/${session}/autoframe-post', { method: 'POST', body: 'x' });</script></html>` };
+  }
   nrvRecord(session, `${request.method} ${kind}/${name}`);
   if (kind === 'nav') return { status: 200, type: types['.html'], body: '<!doctype html><html lang="en"><title>Landed</title><h1>You left the page</h1></html>' };
+  // A picture that sets cookies for this path and for another one.
+  if (name.startsWith('setcookie')) {
+    return { status: 200, type: 'image/png', body: PNG_1PX, headers: { 'set-cookie': [`nrv-img=${session}; Path=/`, `nrv-img-other=${session}; Path=/elsewhere`] } };
+  }
+  if (name.endsWith('.png')) return { status: 200, type: 'image/png', body: PNG_1PX };
+  if (name.endsWith('.css')) return { status: 200, type: types['.css'], body: '/* nrv */' };
+  if (name.endsWith('.js')) return { status: 200, type: types['.js'], body: '/* nrv */' };
   return { status: 200, type: 'text/plain', body: 'cb && cb()' };
 }
 
@@ -255,7 +267,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(404).end();
       return;
     }
-    response.writeHead(reply.status, { 'content-type': reply.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+    response.writeHead(reply.status, { 'content-type': reply.type, 'cache-control': 'no-store', 'access-control-allow-origin': '*', ...reply.headers });
     response.end(reply.body);
     return;
   }

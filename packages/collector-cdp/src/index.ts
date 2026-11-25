@@ -8,7 +8,10 @@ import { collectHeadings } from './headings.js';
 import { collectIcons } from './icons.js';
 import { collectLists } from './lists.js';
 import { collectNameRoleValue, nrvTabWalk } from './nrv.js';
-import { probeNameRoleValue } from './nrv-probe.js';
+import { probeNameRoleValue, readCloneSource } from './nrv-probe.js';
+import { NRV_BEFORE_SCRIPT } from './nrv-agent.js';
+import type { CloneSource } from './nrv-probe.js';
+import type { ProbeHost } from './probe-host.js';
 import { markAccessibility } from './accessibility.js';
 import { withStablePage } from './page.js';
 import { gateSession, stopReason } from './session.js';
@@ -17,6 +20,7 @@ import type { CdpSession, StopSignal } from './session.js';
 export { CollectionStoppedError } from './session.js';
 export { pageRestore } from './page.js';
 export type { CdpSession, StopSignal } from './session.js';
+export type { CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage } from './probe-host.js';
 
 /** How a collection is run. All optional. */
 export interface CollectOptions {
@@ -44,6 +48,18 @@ export interface CollectOptions {
   restoreStepTimeoutMs?: number;
   /** Called when, after a stop, the page did not answer in time while it was put back: it may not be as it was. */
   onRestoreIncomplete?: () => void;
+  /**
+   * Where the name-role-value check may activate controls: a browser of its own, in which copies of
+   * the page are loaded (see `ProbeHost`). Without it nothing is activated, whatever
+   * `nameRoleValue.probe` says, and the survey says so. The page under test is never probed.
+   */
+  probeHost?: ProbeHost;
+  /**
+   * For the tests of the probing safety only: reads whose address matches are fetched from the
+   * server for the copies while they are probed, so that a test can show that a request that gets
+   * through is seen. Never set by the Playwright API, the CLI or a configuration file.
+   */
+  probeTestUnblock?: RegExp;
 }
 
 /** Long enough for a capture that is being taken to come back, short enough for a stop to feel like one. */
@@ -117,7 +133,7 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
   const stopped = (): void => {
     if (signal?.aborted) throw stopReason(signal);
   };
-  const attempt = async (): Promise<{ from: MainDocument; to: MainDocument | null; snapshot?: Snapshot; error?: unknown }> => {
+  const attempt = async (): Promise<{ from: MainDocument; to: MainDocument | null; snapshot?: Snapshot; source?: CloneSource; error?: unknown }> => {
     // The document that is read is one that has been parsed: asked again after the wait, as
     // the page may have gone to another document while it was waited for.
     stopped();
@@ -130,13 +146,12 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
       from = now;
     }
     let snapshot: Snapshot | undefined;
+    let source: CloneSource | undefined;
     let error: unknown;
-    /** The document probing left the page on, when it reloaded it: that is not the page going elsewhere. */
-    let reloaded: string | undefined;
     try {
       const once = await collectOnce(cdp, config, signal, options);
       snapshot = once.snapshot;
-      reloaded = once.reloadedLoaderId;
+      source = once.source;
     } catch (caught) {
       error = caught ?? new Error('Collection failed.');
     }
@@ -145,15 +160,32 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     const now = await mainDocument(cdp).catch(() => null);
     return {
       from,
-      to: now && now.loaderId !== from.loaderId && now.loaderId !== reloaded ? now : null,
+      to: now && now.loaderId !== from.loaderId ? now : null,
       ...(snapshot ? { snapshot } : {}),
+      ...(source ? { source } : {}),
       ...(error !== undefined ? { error } : {}),
     };
   };
 
+  /**
+   * Probing comes once the page under test has been read and put back, and never touches it: it
+   * happens in copies of the page, in a browser of the host (see `nrv-probe.ts`).
+   */
+  const probed = async (snapshot: Snapshot, source: CloneSource | undefined): Promise<Snapshot> => {
+    if (snapshot.nameRoleValue && config.nameRoleValue.probe === 'safe') {
+      const { log } = await probeNameRoleValue(options.probeHost, source, config, snapshot.nameRoleValue, snapshot.screenshots.clips, {
+        ...(signal ? { signal } : {}),
+        ...(options.probeTestUnblock ? { testUnblock: options.probeTestUnblock } : {}),
+      });
+      snapshot.nameRoleValue.probe = log;
+      stopped();
+    }
+    return snapshot;
+  };
+
   const first = await attempt();
   if (!first.to) {
-    if (first.snapshot) return first.snapshot;
+    if (first.snapshot) return probed(first.snapshot, first.source);
     throw first.error;
   }
   await waitForDocument(waiting, 'loaded', config.focus.navigationTimeoutMs);
@@ -169,14 +201,20 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     throw new Error(`The page went from ${first.from.url} to ${first.to.url} while it was being read, and reading it there failed: ${reason}`);
   }
   second.snapshot.environment.navigatedFrom = first.from.url;
-  return second.snapshot;
+  return probed(second.snapshot, second.source);
 }
 
-async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<{ snapshot: Snapshot; reloadedLoaderId?: string }> {
+async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<{ snapshot: Snapshot; source?: CloneSource }> {
   // Everything below goes through the gate, the restoring of the page included: it is opened for that.
   const gate = gateSession(raw, signal);
   const cdp = gate.session;
   const world = await createWorld(cdp);
+  // The page as it is before anything is done to it: what a copy of it is compared with.
+  let interactiveBefore: number | undefined;
+  if (config.checks.includes('name-role-value')) {
+    const counted = (await world.evaluate(NRV_BEFORE_SCRIPT).catch(() => null))?.result.value;
+    if (typeof counted === 'number') interactiveBefore = counted;
+  }
   const { reducedMotion, mediaType, ...environment } = await readEnvironment(world);
   const snapshot: Snapshot = {
     environment,
@@ -190,7 +228,7 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
   const lists = config.checks.includes('lists');
   const grouping = config.checks.includes('grouping');
   const nrv = config.checks.includes('name-role-value');
-  let reloadedLoaderId: string | undefined;
+  let source: CloneSource | undefined;
   if (focus || icons || headings || lists || grouping || nrv) {
     const original = { ...environment, reducedMotion, mediaType };
     await withStablePage(cdp, world, original, config, snapshot.screenshots.clips, async (page) => {
@@ -198,7 +236,7 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
       if (focus) snapshot.focus = await collectFocus(page, config.focus);
       // The name-role-value check reuses that walk; without it, it walks the page itself, also first.
       const walk = focus ? 'focus' : nrv && config.nameRoleValue.tabWalk ? 'own' : 'none';
-      if (nrv && walk === 'own') await nrvTabWalk(page, config);
+      const walkStoppedBy = walk === 'own' ? await nrvTabWalk(page, config) : walk === 'focus' ? snapshot.focus?.stoppedBy : undefined;
       if (icons) snapshot.icons = await collectIcons(page, config.icon);
       // Last: they read the page as the other collectors left it and only scroll. What the
       // accessibility tree exposes as headings, lists, form controls and groups is read once for all, with everything
@@ -214,16 +252,14 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
         if (lists) snapshot.lists = await collectLists(page, config, exposed.headings && exposed.lists);
         if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
-      if (nrv) snapshot.nameRoleValue = await collectNameRoleValue(page, config, walk);
+      if (nrv) snapshot.nameRoleValue = await collectNameRoleValue(page, config, walk, walkStoppedBy, interactiveBefore);
       // What each element that was named is, hashed here: the text it is made from stays in this function.
       const signatures: Record<string, string> = {};
       for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
       snapshot.signatures = signatures;
-      // Last of all: activating controls changes the page, and may reload it. Nothing reads it after this.
-      if (nrv && snapshot.nameRoleValue && config.nameRoleValue.probe === 'safe') {
-        const probed = await probeNameRoleValue(page, config, snapshot.nameRoleValue);
-        snapshot.nameRoleValue.probe = probed.log;
-        reloadedLoaderId = probed.loaderId;
+      // What copies of the page need to render like it, for probing. Read only.
+      if (nrv && config.nameRoleValue.probe === 'safe' && options.probeHost) {
+        source = await readCloneSource(page, { url: environment.url, viewport: environment.viewport, colorScheme: environment.colorScheme }, config);
       }
     }, {
       before: () => gate.release(options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS),
@@ -233,5 +269,5 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
   }
-  return { snapshot, ...(reloadedLoaderId ? { reloadedLoaderId } : {}) };
+  return { snapshot, ...(source ? { source } : {}) };
 }

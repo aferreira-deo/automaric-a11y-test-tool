@@ -51,7 +51,7 @@ export interface Capture {
   scale: number;
 }
 
-function decodeBase64(data: string): Png {
+export function decodeBase64(data: string): Png {
   return Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
 }
 

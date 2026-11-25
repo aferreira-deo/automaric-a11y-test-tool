@@ -1,75 +1,73 @@
 import { changedPixels, decodePng, fnv1a64, nameRoleValueProbeTargets } from '@a11y-vision/core';
-import type { Config, NameRoleValueSurvey, NrvAxState, NrvNavigation, NrvProbe, NrvProbeLog, NrvStep } from '@a11y-vision/core';
-import { GUARD_SCRIPT, PROBE_AGENT_GLOBAL, PROBE_WORLD_NAME, probeAgentFactory } from './nrv-probe-agent.js';
-import type { ProbeAgentOptions, ProbeObserved, ProbePrepared, ProbeStorage } from './nrv-probe-agent.js';
+import type { Box, Config, NameRoleValueSurvey, NrvAxState, NrvElement, NrvNavigation, NrvProbe, NrvProbeLog, NrvStep, Screenshot } from '@a11y-vision/core';
+import { GUARD_GLOBAL, GUARD_SCRIPT, PROBE_AGENT_GLOBAL, PROBE_WORLD_NAME, cloneSourceReader, probeAgentFactory, storageSeedScript } from './nrv-probe-agent.js';
+import type { CloneSourceRead, ProbeAgentOptions, ProbeObserved, ProbePrepared, ProbeStorage } from './nrv-probe-agent.js';
+import { captureScale, decodeBase64 } from './page.js';
 import type { Capture, StablePage } from './page.js';
+import type { CloneSettings, ProbeBrowser, ProbeHost, ProbePage } from './probe-host.js';
+import { ProbeNetwork, pathOf, shownUrl } from './probe-network.js';
+import type { ActivationNetwork } from './probe-network.js';
+import type { CdpSession, StopSignal } from './session.js';
 
 /**
  * Probing: activating controls to see what they do, so that what a link or a button is, and
- * whether a state is exposed, can be measured instead of guessed. The safety model, in order:
+ * whether a state is exposed, can be measured instead of guessed. It never happens in the page
+ * under test. The safety model, in order:
  *
- * 1. Nothing a click starts reaches the network as a write. The Fetch domain pauses every request
- *    of the page (its frames in this process, its dedicated workers) and lets through only GET and
- *    HEAD of `probeAllowedResourceTypes` (style sheets, scripts, images, fonts, media): reads that
- *    render the page. Every other method, every request of a script (`Fetch`, `XHR`), beacons and
- *    `<a ping>` (`Ping`), `EventSource`, `Other`, and every navigation (`Document`) is stopped, and
- *    recorded. A navigation that is stopped is the evidence that a control navigates.
- * 2. Requests that this session cannot see are taken away before they can be made: frames of
- *    another origin (other processes) are emptied while probing; the service worker is bypassed
- *    (`Network.setBypassServiceWorker`), so the page's requests reach the network, and the Fetch
- *    domain, directly; what the page could send to it, to a shared worker, over a WebSocket, a data
- *    channel or a BroadcastChannel is stopped by the guard of the main world (`GUARD_SCRIPT`).
- * 3. Activation is synthetic: events dispatched from script carry no user activation, so the
- *    browser keeps closed what needs one (popups, file pickers, fullscreen, payment, clipboard).
- *    The guard also stops new windows, downloads, printing, dialogs, form submission, permission
- *    prompts and writes to IndexedDB and the Cache API. A window that opens all the same is closed
- *    and counted (`popups`), and JavaScript dialogs are dismissed.
- * 4. The page is put back: cookies, local and session storage are read before probing and written
- *    back after it (and before every reload); a probe that changed the page (its markup, its
- *    address) is followed by a reload, so that each probe starts from the page as it loads; the
- *    emptied frames are filled again. When an element was activated on the document the page is on
- *    at the end, the page is reloaded once more (writes still stopped while it unloads), which also
- *    ends whatever a script of that document still had pending.
+ * 1. A browser of its own. The host starts a browser for probing only (`ProbeHost`), whose
+ *    network goes nowhere: every connection it opens by itself goes to a proxy that refuses it.
+ * 2. Every request held at the browser target (`ProbeNetwork`), from before the first copy loads
+ *    until the browser is closed: pages, frames of every origin, dedicated, shared and service
+ *    workers, beacons, requests sent as a page goes away. None is ever continued to the network.
+ *    A copy that loads gets its GET and HEAD reads fetched by the collector (a page view);
+ *    afterwards, only what was already fetched (`probeReads: cache`), and nothing else.
+ * 3. Copies of the page. Each copy is a page in a new, empty context of that browser, given the
+ *    cookies, local and session storage, viewport, language, time zone, user agent and colour
+ *    scheme of the page under test, and loaded at its address. Probes run there. A probe that
+ *    changed its copy (or may have: a request, a timer, a write to storage) ends with the copy
+ *    destroyed; the next copy loads only once the old one is gone and `probeUnloadGraceMs` has
+ *    passed, with everything stopped. A probe that demonstrably changed nothing leaves its copy
+ *    to the next probe. When probing is over, the browser is closed with every request still held.
+ * 4. The guard (`GUARD_SCRIPT`), in every document of a copy before the page's scripts: windows,
+ *    dialogs, downloads, form submission, sockets, permission prompts are stopped and recorded.
+ *    Defence in depth: the network holds whatever the guard does.
  *
- * Never activated: anything inside or as a submit button of a form, fields, file inputs, links
- * to a new window or a download, disabled and hidden elements, frames, media, and what matches
- * `probeExcludeSelector`. What a page does on its own, without a click (timers), is not
- * stopped by any of this except the network block, which holds for the whole of probing.
+ * The page under test is read (`readCloneSource`: cookies, storage, settings) and never changed,
+ * activated or reloaded by probing.
  */
-
-interface FrameTree {
-  /** `url` has no fragment; `urlFragment` is the fragment with its `#`. */
-  frame: { id: string; url: string; urlFragment?: string; loaderId: string };
-  childFrames?: FrameTree[];
-}
-
-interface PausedRequest {
-  requestId: string;
-  request: { url: string; method: string };
-  resourceType: string;
-  frameId?: string;
-}
-
-interface Cookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  expires: number;
-  httpOnly: boolean;
-  secure: boolean;
-  session: boolean;
-  sameSite?: string;
-  priority?: string;
-  sourceScheme?: string;
-  sourcePort?: number;
-  partitionKey?: unknown;
-}
 
 export interface ProbeResult {
   log: NrvProbeLog;
-  /** The loader of the document the page ends on, when probing reloaded it: the collection must not take that for a navigation. */
-  loaderId?: string;
+}
+
+/** What a copy needs from the page under test. */
+export interface CloneSource {
+  settings: CloneSettings;
+  cookies: Record<string, unknown>[];
+  storage: ProbeStorage[];
+}
+
+export interface ProbeOptions {
+  signal?: StopSignal;
+  /** Test only: reads whose address matches are fetched for the copies while probing (see `CollectOptions.probeTestUnblock`). */
+  testUnblock?: RegExp;
+}
+
+class ProbeTimeout extends Error {
+  constructor(readonly budget: boolean) {
+    super(budget ? 'The probing budget ran out.' : 'The copy of the page did not answer in time.');
+  }
+}
+
+class CopyFailed extends Error {}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/** A value of the accessibility tree as text: strings, numbers and booleans as they are, anything else as JSON. */
+function valueText(value: unknown): string {
+  return typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value);
 }
 
 function probeAgentOptions(config: Config): ProbeAgentOptions {
@@ -83,306 +81,170 @@ function probeAgentOptions(config: Config): ProbeAgentOptions {
     clipSideCssPx: settings.probeClipSideCssPx,
     clipAboveCssPx: settings.probeClipAboveCssPx,
     clipBelowCssPx: settings.probeClipBelowCssPx,
+    itemTextMaxChars: settings.itemTextMaxChars,
   };
 }
 
-/** Origin and path of an address: no query, no fragment, no credentials. */
-function shownUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'data:' || parsed.protocol === 'blob:') return `${parsed.protocol}…`;
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return '(not an address)';
-  }
+/**
+ * Reads, in the page under test, what its copies need: its cookies (all of its browser context,
+ * HttpOnly and partitioned ones included), the local and session storage of its documents, and
+ * its settings. Only reads.
+ */
+export async function readCloneSource(page: StablePage, environment: { url: string; viewport: { width: number; height: number }; colorScheme: 'light' | 'dark' }, config: Config): Promise<CloneSource> {
+  const response = (await page.cdp.send('Runtime.evaluate', {
+    expression: `(${cloneSourceReader.toString()})()`,
+    contextId: page.contextId,
+    returnByValue: true,
+  })) as { result: { value?: CloneSourceRead } };
+  const read = response.result.value ?? { storage: [], userAgent: '', language: '', timezone: '' };
+  const cookies = await page.cdp
+    .send('Storage.getCookies', {})
+    .then((result) => (result as { cookies: Record<string, unknown>[] }).cookies)
+    .catch(() =>
+      page.cdp
+        .send('Network.getAllCookies')
+        .then((result) => (result as { cookies: Record<string, unknown>[] }).cookies)
+        .catch(() => [] as Record<string, unknown>[]),
+    );
+  return {
+    settings: {
+      url: environment.url,
+      viewport: environment.viewport,
+      deviceScaleFactor: config.focus.deviceScaleFactor,
+      userAgent: read.userAgent,
+      locale: read.language,
+      colorScheme: environment.colorScheme,
+      timezoneId: read.timezone,
+    },
+    cookies,
+    storage: read.storage,
+  };
 }
 
-function pathOf(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return url;
-  }
+/** A cookie as `Storage.getCookies` gives it, as `Network.setCookies` takes it. */
+function cookieParam(cookie: Record<string, unknown>): Record<string, unknown> {
+  const { size, session, expires, partitionKeyOpaque, sameParty, ...rest } = cookie;
+  void size;
+  void partitionKeyOpaque;
+  void sameParty;
+  return { ...rest, ...(session === true || typeof expires !== 'number' || expires <= 0 ? {} : { expires }) };
 }
 
-function withoutFragment(url: string): string {
-  const index = url.indexOf('#');
-  return index < 0 ? url : url.slice(0, index);
-}
-
-/** A value of the accessibility tree as text: strings, numbers and booleans as they are, anything else as JSON. */
-function valueText(value: unknown): string {
-  return typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** A copy of the page, in a context of its own. */
+interface Copy {
+  page: ProbePage;
+  /** The page session, every command bounded (`ProbeTimeout`). */
+  cdp: CdpSession;
+  contextId: number;
+  frames: Set<string>;
+  /** A JavaScript dialog opened (one that got past the guard, or `beforeunload`). */
+  dialog: boolean;
+  crashed: boolean;
+  /** An earlier probe may have changed it: it is not used again. */
+  dirty: boolean;
+  /** Navigations the page session reported (a fragment, a navigation that a dialog cancelled). */
+  navigations: NrvNavigation[];
+  /** Probes it served. */
+  served: number;
 }
 
 /**
- * Activates the elements core chose (`nameRoleValueProbeTargets`) and records what each did, in
- * `survey.probe`. Runs at the end of a collection, inside `withStablePage`, after every other
- * collector has read the page and after the signatures of the elements were taken: from here on
- * the page is changed, and may be reloaded. The emulation of `withStablePage` (scale, reduced
- * motion, focus) holds across reloads; the isolated world of the main agent does not, and is not
- * used any more.
+ * Activates the elements core chose (`nameRoleValueProbeTargets`) in copies of the page, and
+ * records what each did. Without a host, nothing is activated (`unavailable`).
  */
-export async function probeNameRoleValue(page: StablePage, config: Config, survey: NameRoleValueSurvey): Promise<ProbeResult> {
-  const { cdp } = page;
+export async function probeNameRoleValue(
+  host: ProbeHost | undefined,
+  source: CloneSource | undefined,
+  config: Config,
+  survey: NameRoleValueSurvey,
+  clips: Record<string, Screenshot>,
+  options: ProbeOptions = {},
+): Promise<ProbeResult> {
   const settings = config.nameRoleValue;
   const log = survey.probe;
   const targets = nameRoleValueProbeTargets(survey, settings).filter((target) => survey.elements[target.ord]?.selector);
   log.planned = targets.length;
   if (settings.probe !== 'safe' || targets.length === 0 || settings.maxProbes === 0) return { log };
-  log.ran = true;
+  if (!host || !source) {
+    log.unavailable = true;
+    return { log };
+  }
   const started = Date.now();
-
-  const blocked = new Set<string>();
-  const handlers: { event: string; handler: (params: unknown) => void }[] = [];
-  const on = (event: string, handler: (params: unknown) => void): void => {
-    cdp.on(event, handler);
-    handlers.push({ event, handler });
-  };
-  let mainFrameId = '';
-  /**
-   * `probe`: only the reads of `probeAllowedResourceTypes` pass. `reload`: while the page is loaded
-   * again, every GET and HEAD passes (the new document needs its content), and every other method
-   * is still stopped: what the document that goes away sends as it unloads (a beacon, a keepalive
-   * request) does not get out.
-   */
-  let mode: 'probe' | 'reload' = 'probe';
-  let pending = 0;
-  /** What the current probe recorded through the protocol. */
-  let navigations: NrvNavigation[] = [];
-  let dialogs = 0;
-  /** Requests of another method than GET and HEAD that the current probe tried to send. */
-  let writes = 0;
-  let current = { url: '', fields: [] as string[] };
-
-  const fieldValueIn = (url: string): boolean => {
+  const deadline = started + settings.probeBudgetMs;
+  const aborted = (): boolean => options.signal?.aborted === true;
+  /** How long the next step may take: `limit`, cut to what is left of the budget. */
+  const allowance = (limit: number): number => (aborted() ? 0 : Math.max(0, Math.min(limit, deadline - Date.now())));
+  const within = async <T>(promise: Promise<T>, limit = settings.probeStepTimeoutMs): Promise<T> => {
+    const ms = allowance(limit);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new ProbeTimeout(aborted() || Date.now() >= deadline - 5)), ms);
+    });
     try {
-      const query = decodeURIComponent(new URL(url).search.replace(/\+/g, ' ')).toLowerCase();
-      return current.fields.some((value) => query.includes(value.toLowerCase()));
-    } catch {
-      return false;
+      return await Promise.race([promise, late]);
+    } finally {
+      clearTimeout(timer);
     }
   };
-
-  const onPaused = (params: unknown): void => {
-    const event = params as PausedRequest;
-    pending++;
-    const method = event.request.method.toUpperCase();
-    let query: boolean;
-    try {
-      query = new URL(event.request.url).search !== '';
-    } catch {
-      query = true;
-    }
-    const read = method === 'GET' || method === 'HEAD';
-    const safe = read && settings.probeAllowedResourceTypes.includes(event.resourceType) && (settings.probeAllowQueryStrings || !query);
-    const done = (): void => {
-      pending--;
-    };
-    if (safe || (mode === 'reload' && read)) {
-      if (mode === 'probe') log.allowed++;
-      // A self-check: nothing but a read is ever let through.
-      if (!read) log.unsafe++;
-      cdp.send('Fetch.continueRequest', { requestId: event.requestId }).then(done, done);
-      return;
-    }
-    if (!read) writes++;
-    blocked.add(`${method} ${event.resourceType} ${shownUrl(event.request.url)}`);
-    if (event.resourceType === 'Document') {
-      navigations.push({
-        kind: !event.frameId || event.frameId === mainFrameId ? 'document' : 'frame',
-        url: shownUrl(event.request.url),
-        method,
-        otherPath: pathOf(event.request.url) !== pathOf(current.url),
-        carriesFieldValue: fieldValueIn(event.request.url),
-      });
-    }
-    // Aborted, not BlockedByClient: a stopped navigation then leaves the page as it is instead of committing an error page (verified in Chromium).
-    cdp.send('Fetch.failRequest', { requestId: event.requestId, errorReason: event.resourceType === 'Document' ? 'Aborted' : 'BlockedByClient' }).then(done, done);
+  const pause = async (ms: number): Promise<void> => {
+    await sleep(allowance(ms));
+    if (Date.now() >= deadline || aborted()) throw new ProbeTimeout(true);
   };
+  const timed = (cdp: CdpSession, limit = settings.probeStepTimeoutMs): CdpSession => ({
+    on: (event, handler) => cdp.on(event, handler),
+    off: (event, handler) => cdp.off(event, handler),
+    send: (method, params) => within(cdp.send(method, params), limit),
+  });
 
-  let targetId = '';
-  const setUp = async (): Promise<void> => {
-    on('Fetch.requestPaused', onPaused);
-    on('Page.javascriptDialogOpening', () => {
-      dialogs++;
-      cdp.send('Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined);
-    });
-    on('Page.navigatedWithinDocument', (params) => {
-      const { frameId, url, navigationType } = params as { frameId: string; url: string; navigationType?: string };
-      if (frameId !== mainFrameId || navigationType === 'historyApi') return;
-      const hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
-      if (withoutFragment(url) === withoutFragment(current.url)) navigations.push({ kind: 'fragment', url: hash });
-    });
-    on('Page.frameRequestedNavigation', (params) => {
-      const { url, disposition, frameId } = params as { url: string; disposition: string; frameId: string };
-      if (/^javascript:/i.test(url)) return;
-      if (disposition !== 'currentTab') navigations.push({ kind: 'window', url: shownUrl(url) });
-      else if (frameId === mainFrameId && withoutFragment(url) !== withoutFragment(current.url)) {
-        // Recorded in case the request never comes (a beforeunload handler that was dismissed).
-        navigations.push({ kind: 'document', url: shownUrl(url), method: 'GET', otherPath: pathOf(url) !== pathOf(current.url), carriesFieldValue: fieldValueIn(url) });
-      }
-    });
-    on('Target.targetCreated', (params) => {
-      const info = (params as { targetInfo: { targetId: string; openerId?: string; type: string } }).targetInfo;
-      if (info.openerId !== targetId || info.targetId === targetId) return;
-      log.popups++;
-      cdp.send('Target.closeTarget', { targetId: info.targetId }).catch(() => undefined);
-    });
-    await cdp.send('Network.enable').catch(() => undefined);
-    await cdp.send('Network.setBypassServiceWorker', { bypass: true }).catch(() => undefined);
-    await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
-    await cdp.send('Page.enable');
-    await cdp.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
-    await cdp.send('Page.setDownloadBehavior', { behavior: 'deny' }).catch(() => undefined);
-    targetId = ((await cdp.send('Target.getTargetInfo').catch(() => ({ targetInfo: { targetId: '' } }))) as { targetInfo: { targetId: string } }).targetInfo.targetId;
-    await cdp.send('Target.setDiscoverTargets', { discover: true }).catch(() => undefined);
-  };
+  log.ran = true;
+  for (const target of targets) {
+    const element = survey.elements[target.ord]!;
+    log.probes.push({ ord: target.ord, selector: element.selector, frame: element.frame, reason: target.reason, outcome: 'budget' });
+  }
 
-  // The isolated world of the probe agent, for the document the page is on.
-  let contextId = 0;
-  const evaluate = async <T>(expression: string, byValue = true): Promise<{ value?: T; objectId?: string }> => {
-    const response = (await cdp.send('Runtime.evaluate', { expression, contextId, returnByValue: byValue, awaitPromise: true })) as {
+  let probe: ProbeBrowser;
+  const starting = host.start();
+  try {
+    probe = await within(starting, settings.probeLoadTimeoutMs);
+  } catch (error) {
+    starting.then((late) => late.close(), () => undefined).catch(() => undefined);
+    log.stopped = aborted() ? 'aborted' : error instanceof ProbeTimeout && error.budget ? 'budget' : 'cloneFailed';
+    log.stoppedDetail = `the probing browser did not start: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`;
+    return { log };
+  }
+  const network = new ProbeNetwork(probe, settings, log, options.testUnblock);
+  let copy: Copy | null = null;
+
+  const evaluateIn = async <T>(target: Copy, expression: string, byValue = true): Promise<{ value?: T; objectId?: string }> => {
+    const response = (await target.cdp.send('Runtime.evaluate', { expression, contextId: target.contextId, returnByValue: byValue, awaitPromise: true })) as {
       result: { value?: T; objectId?: string };
       exceptionDetails?: { text: string; exception?: { description?: string } };
     };
-    if (response.exceptionDetails) throw new Error(`Page evaluation failed: ${response.exceptionDetails.exception?.description ?? response.exceptionDetails.text}`);
+    if (response.exceptionDetails) throw new Error(`Copy evaluation failed: ${response.exceptionDetails.exception?.description ?? response.exceptionDetails.text}`);
     return response.result;
   };
-  const agent = async <T>(call: string): Promise<T> => (await evaluate<T>(`globalThis.${PROBE_AGENT_GLOBAL}.${call}`)).value as T;
-  const guard = (expression: string): Promise<unknown> => cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }).catch(() => undefined);
-  const takeGuard = async (): Promise<{ kind: string; url: string }[]> => {
-    const response = (await guard('globalThis.__a11yVisionGuard ? globalThis.__a11yVisionGuard.take() : []')) as { result?: { value?: { kind: string; url: string }[] } } | undefined;
-    return response?.result?.value ?? [];
+  const agent = async <T>(target: Copy, call: string): Promise<T> => (await evaluateIn<T>(target, `globalThis.${PROBE_AGENT_GLOBAL}.${call}`)).value as T;
+  /** The guard lives in the main world of the copy. */
+  const guard = async <T>(target: Copy, call: string): Promise<T | undefined> => {
+    const response = (await target.cdp.send('Runtime.evaluate', { expression: `globalThis.${GUARD_GLOBAL} ? globalThis.${GUARD_GLOBAL}.${call} : undefined`, returnByValue: true })) as { result?: { value?: T } };
+    return response.result?.value;
   };
 
-  let emptied = 0;
-  const install = async (): Promise<void> => {
-    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameTree };
-    mainFrameId = frameTree.frame.id;
-    const world = (await cdp.send('Page.createIsolatedWorld', { frameId: mainFrameId, worldName: PROBE_WORLD_NAME })) as { executionContextId: number };
-    contextId = world.executionContextId;
-    await evaluate(`globalThis.${PROBE_AGENT_GLOBAL} = (${probeAgentFactory.toString()})(${JSON.stringify(probeAgentOptions(config))}); 1`);
-    await guard(GUARD_SCRIPT);
-    emptied = await agent<number>('install()');
-    log.framesEmptied = Math.max(log.framesEmptied, emptied);
-    // A page that is still building itself (content added after load) is waited for: what it adds then is not an effect of a probe.
-    await agent(`quiet(${settings.quietMs}, ${settings.quietMaxMs})`);
-    await cdp.send('DOM.getDocument', { depth: 0 }).catch(() => undefined);
+  const screenshot = async (target: Copy, clip: Box): Promise<Capture> => {
+    const { data } = (await target.cdp.send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: 1 }, captureBeyondViewport: false })) as { data: string };
+    const png = decodeBase64(data);
+    return { png, scale: captureScale(png, clip, config.focus.deviceScaleFactor, config.focus.captureSizeTolerancePx) };
+  };
+  const capture = async (target: Copy, id: string, clip: Box): Promise<Capture> => {
+    const taken = await screenshot(target, clip);
+    clips[id] = { box: clip, scale: taken.scale, png: taken.png };
+    return taken;
   };
 
-  const frameUrls = async (): Promise<string[]> => {
-    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameTree };
-    const urls: string[] = [];
-    const visit = (tree: FrameTree): void => {
-      if (/^https?:/.test(tree.frame.url)) urls.push(tree.frame.url);
-      for (const child of tree.childFrames ?? []) visit(child);
-    };
-    visit(frameTree);
-    return [...new Set(urls)];
-  };
-  const getCookies = async (urls: string[]): Promise<Cookie[]> => ((await cdp.send('Network.getCookies', { urls }).catch(() => ({ cookies: [] }))) as { cookies: Cookie[] }).cookies;
-  const cookieKey = (cookie: Cookie): string => `${cookie.name}\u0000${cookie.domain}\u0000${cookie.path}`;
-
-  // What is kept to be put back.
-  let savedStorage: ProbeStorage[] = [];
-  let savedCookies: Cookie[] = [];
-  let cookieUrls: string[] = [];
-  const restoreStorage = async (): Promise<void> => {
-    try {
-      const counts = await agent<{ local: number; session: number }>(`restoreStorage(${JSON.stringify(savedStorage)})`);
-      log.storageRestored.localStorage += counts.local;
-      log.storageRestored.sessionStorage += counts.session;
-    } catch {
-      // The document is gone: what it wrote to storage is put back by the next document's restore.
-    }
-    const now = await getCookies(cookieUrls);
-    const before = new Map(savedCookies.map((cookie) => [cookieKey(cookie), cookie]));
-    for (const cookie of now) {
-      const was = before.get(cookieKey(cookie));
-      if (was && was.value === cookie.value) continue;
-      log.storageRestored.cookies++;
-      if (!was) await cdp.send('Network.deleteCookies', { name: cookie.name, domain: cookie.domain, path: cookie.path }).catch(() => undefined);
-    }
-    const nowKeys = new Set(now.map(cookieKey));
-    for (const cookie of savedCookies) {
-      const changed = now.find((other) => cookieKey(other) === cookieKey(cookie));
-      if (changed && changed.value === cookie.value) continue;
-      if (!changed && nowKeys.has(cookieKey(cookie))) continue;
-      if (!changed) log.storageRestored.cookies++;
-      const { session, expires, partitionKey, ...rest } = cookie;
-      await cdp
-        .send('Network.setCookie', { ...rest, ...(session ? {} : { expires }), ...(partitionKey && typeof partitionKey === 'object' ? { partitionKey } : {}) })
-        .catch(() => undefined);
-    }
-  };
-
-  let loaderId: string | undefined;
-  const waitForLoad = async (previous: string): Promise<boolean> => {
-    const deadline = Date.now() + settings.reloadTimeoutMs;
-    while (Date.now() < deadline) {
-      try {
-        const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameTree };
-        if (frameTree.frame.loaderId !== previous) {
-          const state = (await cdp.send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true })) as { result: { value?: unknown } };
-          if (state.result.value === 'complete') {
-            loaderId = frameTree.frame.loaderId;
-            return true;
-          }
-        }
-      } catch {
-        // Between two documents.
-      }
-      await sleep(50);
-    }
-    return false;
-  };
-
-  /**
-   * Loads the page again at the address it was given. Reads pass while it loads, writes are still
-   * stopped (`mode`); the document that goes away takes with it whatever its scripts still had
-   * pending (a timer that would have sent something later). With `again`, the page is made ready
-   * for the next probe; without, the network is given back once the new document has loaded.
-   */
-  const reload = async (again: boolean): Promise<boolean> => {
-    await restoreStorage();
-    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameTree };
-    mode = 'reload';
-    log.reloads++;
-    activated = false;
-    const original = currentUrlAtStart;
-    const now = frameTree.frame.url + (frameTree.frame.urlFragment ?? '');
-    if (now === original) await cdp.send('Page.reload', { ignoreCache: false });
-    else if (withoutFragment(now) === withoutFragment(original) && original.includes('#')) {
-      // Only the fragment differs: going to it loads nothing, so the page is reloaded once it is there.
-      await cdp.send('Page.navigate', { url: original }).catch(() => undefined);
-      await sleep(50);
-      await cdp.send('Page.reload', { ignoreCache: false });
-    } else {
-      // Another address, or the same one without the fragment it was given: a load of its own.
-      await cdp.send('Page.navigate', { url: original });
-    }
-    if (!(await waitForLoad(frameTree.frame.loaderId))) return false;
-    // What the page loads once it has loaded (content fetched by its scripts) is given a moment.
-    await sleep(settings.probeSettleMs);
-    if (!again) {
-      await cdp.send('Fetch.disable').catch(() => undefined);
-      return true;
-    }
-    mode = 'probe';
-    await install();
-    return true;
-  };
-
-  const axState = async (backendNodeId: number | null): Promise<NrvAxState | null> => {
+  const axState = async (target: Copy, backendNodeId: number | null): Promise<NrvAxState | null> => {
     if (backendNodeId === null) return null;
     try {
-      const { nodes } = (await cdp.send('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false })) as {
+      const { nodes } = (await target.cdp.send('Accessibility.getPartialAXTree', { backendNodeId, fetchRelatives: false })) as {
         nodes: { ignored?: boolean; role?: { value?: unknown }; name?: { value?: unknown }; properties?: { name: string; value?: { value?: unknown } }[]; backendDOMNodeId?: number }[];
       };
       const node = nodes.find((entry) => entry.backendDOMNodeId === backendNodeId) ?? nodes[0];
@@ -395,33 +257,149 @@ export async function probeNameRoleValue(page: StablePage, config: Config, surve
       }
       const name = typeof node.name?.value === 'string' ? node.name.value.replace(/\s+/g, ' ').trim().slice(0, settings.maxNameChars) : '';
       return { role: typeof node.role?.value === 'string' ? node.role.value : '', name, states };
-    } catch {
+    } catch (error) {
+      if (error instanceof ProbeTimeout) throw error;
       return null;
     }
   };
 
-  const backendOf = async (key: number): Promise<number | null> => {
+  const backendOf = async (target: Copy, key: number): Promise<number | null> => {
     try {
-      const { objectId } = await evaluate(`globalThis.${PROBE_AGENT_GLOBAL}.element(${key})`, false);
-      const { node } = (await cdp.send('DOM.describeNode', { objectId })) as { node: { backendNodeId: number } };
+      const { objectId } = await evaluateIn(target, `globalThis.${PROBE_AGENT_GLOBAL}.element(${key})`, false);
+      const { node } = (await target.cdp.send('DOM.describeNode', { objectId })) as { node: { backendNodeId: number } };
       return node.backendNodeId;
-    } catch {
+    } catch (error) {
+      if (error instanceof ProbeTimeout) throw error;
       return null;
     }
   };
 
-  const waitQuiet = async (): Promise<void> => {
-    await sleep(settings.probeSettleMs);
-    await agent('settle()');
-    for (let tries = 0; pending > 0 && tries < 40; tries++) await sleep(25);
+  /** The element in the copy is the element of the page under test: same tag (`locate`), role and name, and text when it has no name. */
+  const sameElement = async (target: Copy, element: NrvElement, key: number, backend: number | null): Promise<boolean> => {
+    const state = await axState(target, backend);
+    if (!state || !element.ax || state.role !== element.ax.role || state.name !== element.ax.name) return false;
+    if (element.ax.name !== '') return true;
+    const { text } = await agent<{ text: string }>(target, `identity(${key})`);
+    return text === element.text;
   };
 
-  /**
-   * Pixels that changed in the box of the element between two captures of one clip, in CSS px².
-   * When content appeared above it and moved it, the element is compared where it is in each
-   * capture; when its size changed, or it left the clip, nothing is concluded (null).
-   */
-  const ownChange = (before: Capture, after: Capture, prepared: ProbePrepared, now: { x: number; y: number; width: number; height: number } | null): number | null => {
+  const closeCopy = async (target: Copy, grace: boolean): Promise<void> => {
+    // From here its requests are no copy's: everything of it is stopped, as it goes and after.
+    network.setCurrent(null);
+    network.closeLoad();
+    const gone = network.destroyedOf(target.page.targetId, settings.probeStepTimeoutMs);
+    await Promise.race([target.page.close(), sleep(settings.probeStepTimeoutMs)]).catch(() => undefined);
+    await gone;
+    if (grace) await sleep(settings.probeUnloadGraceMs);
+  };
+
+  const openCopy = async (): Promise<Copy> => {
+    log.clones++;
+    const opening = probe.newPage(source.settings);
+    let page: ProbePage;
+    try {
+      page = await within(opening);
+    } catch (error) {
+      opening.then((late) => late.close(), () => undefined).catch(() => undefined);
+      throw error;
+    }
+    const target = blankCopy(page);
+    try {
+      return await loadCopy(target);
+    } catch (error) {
+      await closeCopy(target, true).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const blankCopy = (page: ProbePage): Copy => ({ page, cdp: timed(page.cdp), contextId: 0, frames: new Set([page.targetId]), dialog: false, crashed: false, dirty: false, navigations: [], served: 0 });
+
+  const loadCopy = async (target: Copy): Promise<Copy> => {
+    const page = target.page;
+    const raw = page.cdp;
+    raw.on('Page.frameAttached', (params) => void target.frames.add((params as { frameId: string }).frameId));
+    raw.on('Page.frameNavigated', (params) => void target.frames.add((params as { frame: { id: string } }).frame.id));
+    raw.on('Page.javascriptDialogOpening', () => {
+      target.dialog = true;
+      raw.send('Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined);
+    });
+    raw.on('Inspector.targetCrashed', () => {
+      target.crashed = true;
+    });
+    raw.on('Page.navigatedWithinDocument', (params) => {
+      const { frameId, url, navigationType } = params as { frameId: string; url: string; navigationType?: string };
+      if (frameId !== page.targetId || navigationType === 'historyApi') return;
+      const hash = url.includes('#') ? url.slice(url.indexOf('#')) : '';
+      target.navigations.push({ kind: 'fragment', url: hash });
+    });
+    raw.on('Page.frameRequestedNavigation', (params) => {
+      const { url, disposition, frameId } = params as { url: string; disposition: string; frameId: string };
+      if (/^javascript:/i.test(url)) return;
+      if (disposition !== 'currentTab') target.navigations.push({ kind: 'window', url: shownUrl(url) });
+      else if (frameId === page.targetId && !ProbeNetwork.sameDocument(url, source.settings.url)) {
+        // Recorded in case the request never comes (a beforeunload handler that was dismissed).
+        target.navigations.push({ kind: 'document', url: shownUrl(url), method: 'GET', otherPath: pathOf(url) !== pathOf(source.settings.url), carriesFieldValue: false });
+      }
+    });
+    network.setCurrent({
+      browserContextId: page.browserContextId,
+      mainFrameId: page.targetId,
+      frames: target.frames,
+      url: source.settings.url,
+      cookies: (url) => raw.send('Network.getCookies', { urls: [url] }).then((result) => (result as { cookies: [] }).cookies),
+    });
+    const cdp = target.cdp;
+    await cdp.send('Page.enable');
+    await cdp.send('Inspector.enable').catch(() => undefined);
+    await cdp.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
+    if (source.cookies.length > 0) await cdp.send('Network.setCookies', { cookies: source.cookies.map(cookieParam) }).catch(() => undefined);
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: storageSeedScript(source.storage) });
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT });
+    // As the page under test is captured: the scale of the captures, motion reduced, focus kept.
+    await cdp.send('Emulation.setDeviceMetricsOverride', { ...source.settings.viewport, deviceScaleFactor: config.focus.deviceScaleFactor, mobile: false });
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }).catch(() => undefined);
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined);
+    // The load: its reads are fetched for it, a page view.
+    network.openLoad();
+    const loading = timed(raw, settings.probeLoadTimeoutMs);
+    const navigated = (await loading.send('Page.navigate', { url: source.settings.url })) as { errorText?: string };
+    if (navigated.errorText) throw new CopyFailed(`the copy did not load (${navigated.errorText})`);
+    const loadBy = Date.now() + settings.probeLoadTimeoutMs;
+    for (;;) {
+      const state = (await loading.send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true }).catch((error: unknown) => {
+        if (error instanceof ProbeTimeout) throw error;
+        return { result: {} };
+      })) as { result: { value?: unknown } };
+      if (state.result.value === 'complete') break;
+      if (Date.now() > loadBy) throw new ProbeTimeout(Date.now() >= deadline);
+      await pause(50);
+    }
+    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: { frame: { id: string; url: string } } };
+    const world = (await cdp.send('Page.createIsolatedWorld', { frameId: frameTree.frame.id, worldName: PROBE_WORLD_NAME })) as { executionContextId: number };
+    target.contextId = world.executionContextId;
+    await evaluateIn(target, `globalThis.${PROBE_AGENT_GLOBAL} = (${probeAgentFactory.toString()})(${JSON.stringify(probeAgentOptions(config))}); 1`);
+    await agent(target, 'install()');
+    // What the page fetches once it has loaded is part of the load; then the load is over.
+    // The page under test was scrolled through by the collection (the Tab walk, the captures): what it loads as it is
+    // scrolled is in it, so the copy is scrolled through too, while it loads.
+    await within(agent(target, `scrollThrough(${settings.quietMaxMs})`), settings.quietMaxMs + settings.probeStepTimeoutMs);
+    await within(agent(target, `quiet(${settings.quietMs}, ${settings.quietMaxMs})`), settings.quietMaxMs + settings.probeStepTimeoutMs);
+    network.closeLoad();
+    await cdp.send('DOM.getDocument', { depth: 0 }).catch(() => undefined);
+    if (pathOf(frameTree.frame.url) !== pathOf(source.settings.url)) throw new CopyFailed(`the copy ended on another address (${shownUrl(frameTree.frame.url)})`);
+    target.navigations = [];
+    return target;
+  };
+
+  const waitQuiet = async (target: Copy): Promise<void> => {
+    await pause(settings.probeSettleMs);
+    await within(agent(target, `quiet(${settings.activationQuietMs}, ${settings.activationQuietMaxMs})`), settings.activationQuietMaxMs + settings.probeStepTimeoutMs);
+    await agent(target, 'settle()');
+    for (let tries = 0; network.busy() > 0 && tries < 40; tries++) await pause(25);
+  };
+
+  /** Pixels that changed in the box of the element between two captures of one clip, CSS px², or null when they cannot be compared. */
+  const ownChange = (before: Capture, after: Capture, prepared: ProbePrepared, now: Box | null): number | null => {
     if (!prepared.inClip || !prepared.box || !now) return null;
     if (Math.abs(now.width - prepared.box.width) > 1 || Math.abs(now.height - prepared.box.height) > 1) return null;
     const scale = before.scale;
@@ -432,10 +410,28 @@ export async function probeNameRoleValue(page: StablePage, config: Config, surve
     return changed === null ? null : changed / (scale * scale);
   };
 
-  /** What the protocol, the guard and the page say one activation did. */
-  const stepOf = async (observed: ProbeObserved, backend: number | null): Promise<NrvStep> => {
-    for (const entry of await takeGuard()) {
+  /** Kinds the guard records that leave something changed in the copy. */
+  const STATEFUL = ['storage', 'cookie', 'indexeddb', 'cache', 'opfs', 'history', 'replace', 'serviceworker', 'sync', 'close', 'websocket', 'datachannel', 'eventsource', 'webtransport', 'rtcpeerconnection'];
+
+  /** What the network, the page session and the guard say one activation did. */
+  const stepOf = (target: Copy, observed: ProbeObserved, ax: NrvAxState | null, guarded: { entries: { kind: string; url: string }[]; pendingTimers: number } | undefined, net: ActivationNetwork): { step: NrvStep; changed: boolean } => {
+    const navigations: NrvNavigation[] = [...net.navigations, ...target.navigations];
+    target.navigations = [];
+    let dialogs = 0;
+    let fieldRead = false;
+    let traversed = false;
+    let changed = net.requests > 0 || (guarded?.pendingTimers ?? 0) > 0;
+    const fieldValueIn = (url: string): boolean => {
+      try {
+        const query = decodeURIComponent(new URL(url).search.replace(/\+/g, ' ')).toLowerCase();
+        return net.fields.some((value) => query.includes(value.toLowerCase()));
+      } catch {
+        return false;
+      }
+    };
+    for (const entry of guarded?.entries ?? []) {
       log.guarded[entry.kind] = (log.guarded[entry.kind] ?? 0) + 1;
+      if (STATEFUL.includes(entry.kind)) changed = true;
       switch (entry.kind) {
         case 'window':
           navigations.push({ kind: 'window', url: shownUrl(entry.url) });
@@ -448,22 +444,29 @@ export async function probeNameRoleValue(page: StablePage, config: Config, surve
           break;
         case 'history':
         case 'replace':
-          navigations.push({ kind: entry.kind, url: shownUrl(entry.url), otherPath: pathOf(entry.url) !== pathOf(current.url), carriesFieldValue: fieldValueIn(entry.url) });
+          navigations.push({ kind: entry.kind, url: shownUrl(entry.url), otherPath: pathOf(entry.url) !== pathOf(net.url), carriesFieldValue: fieldValueIn(entry.url) });
           break;
         case 'dialog':
         case 'print':
           dialogs++;
+          break;
+        case 'field':
+          fieldRead = true;
+          break;
+        case 'traverse':
+          traversed = true;
           break;
         default:
           break;
       }
     }
     for (const navigation of navigations) if (navigation.kind === 'fragment') navigation.targetFound = observed.fragmentTarget;
+    if (navigations.length > 0) changed = true;
     // One entry per kind and address.
     const unique = new Map<string, NrvNavigation>();
     for (const navigation of navigations) unique.set(`${navigation.kind} ${navigation.url} ${navigation.method ?? ''}`, navigation);
     const step: NrvStep = {
-      ax: observed.removed ? null : await axState(backend),
+      ax: observed.removed ? null : ax,
       removed: observed.removed,
       ...(observed.selfHidden ? { selfHidden: true } : {}),
       navigations: [...unique.values()].sort((a, b) => (a.kind + a.url < b.kind + b.url ? -1 : 1)),
@@ -474,145 +477,209 @@ export async function probeNameRoleValue(page: StablePage, config: Config, surve
       scrolled: observed.scrolled,
       focusMoved: observed.focusMoved,
       dialogs,
-      writes,
+      writes: net.writes,
+      ...(net.blockedReads > 0 ? { blockedReads: net.blockedReads } : {}),
+      ...(fieldRead ? { fieldRead: true } : {}),
+      ...(traversed ? { traversed: true } : {}),
     };
-    navigations = [];
-    dialogs = 0;
-    writes = 0;
-    return step;
+    return { step, changed };
   };
 
-  let currentUrlAtStart = '';
-  let dirty = false;
-  /** An element was activated on the document the page is on now. */
-  let activated = false;
+  /** One probe in a copy. Returns whether the copy is as the probe found it. */
+  const runProbe = async (target: Copy, element: NrvElement, entry: NrvProbe): Promise<boolean> => {
+    const key = await agent<number>(target, `locate(${JSON.stringify(element.frame)}, ${JSON.stringify(element.selector)}, ${JSON.stringify(element.tag)})`);
+    if (key === -1) {
+      entry.outcome = 'not-found';
+      return true;
+    }
+    if (key < 0) {
+      entry.outcome = 'not-matched';
+      return true;
+    }
+    const backend = await backendOf(target, key);
+    if (!(await sameElement(target, element, key, backend))) {
+      entry.outcome = 'not-matched';
+      return true;
+    }
+    const prepared = await agent<ProbePrepared>(target, `prepare(${key})`);
+    if (!prepared.visible || !prepared.clip) {
+      entry.outcome = 'not-visible';
+      await agent(target, 'restoreScroll()');
+      return true;
+    }
+    await within(agent(target, `quiet(${settings.activationQuietMs}, ${settings.activationQuietMaxMs})`), settings.activationQuietMaxMs + settings.probeStepTimeoutMs);
+    for (let tries = 0; network.busy() > 0 && tries < 40; tries++) await pause(25);
+    entry.before = await axState(target, backend);
+    const begun = await agent<{ fields: string[]; url: string; fingerprint: string }>(target, `begin(${key})`);
+    network.startActivation(begun.url, begun.fields);
+    target.navigations = [];
+    const name = fnv1a64(JSON.stringify([element.frame, element.selector]));
+    const ids = { before: `name-role-value/${name}-before.png`, after: `name-role-value/${name}-after.png`, again: `name-role-value/${name}-again.png` };
+    const before = await capture(target, ids.before, prepared.clip);
+    await guard(target, 'begin()');
+    const activatedAt = Date.now();
+    await agent(target, `activate(${key})`);
+    await waitQuiet(target);
+    let observed = await agent<ProbeObserved>(target, `observe(${key})`);
+    const after = await capture(target, ids.after, prepared.clip);
+    const interval = Date.now() - activatedAt;
+    const first = stepOf(target, observed, observed.removed ? null : await axState(target, backend), await guard(target, 'take()'), network.takeActivation());
+    const step = first.step;
+    let changed = first.changed;
+    step.ownChange = observed.scrolled || observed.removed ? null : ownChange(before, after, prepared, await agent<Box | null>(target, `boxOf(${key})`));
+    // Pixels that change over the same interval without an activation (an animation, a ticker)
+    // are not the activation's doing.
+    if (step.ownChange !== null && step.ownChange >= settings.ownChangeMinAreaCssPx2) {
+      const still = await screenshot(target, prepared.clip);
+      await pause(interval);
+      const later = await screenshot(target, prepared.clip);
+      const drift = ownChange(still, later, prepared, await agent<Box | null>(target, `boxOf(${key})`));
+      if (drift === null || drift >= settings.ownChangeMinAreaCssPx2) step.selfAnimating = true;
+    }
+    // Text that changes on its own (a clock, a counter of a carousel) is not an effect of the
+    // activation. What is shown or hidden is confirmed by a second activation instead.
+    if (step.textChanged > 0) {
+      const noise = await agent<{ text: number; visibility: number }>(target, `noise(${Math.max(settings.probeSettleMs, interval)})`);
+      if (noise.text > 0) step.textChanged = 0;
+      if (noise.visibility > 0) {
+        step.revealed = [];
+        step.hidden = [];
+      }
+    }
+    entry.after = step;
+    entry.crops = { before: ids.before, after: ids.after };
+
+    const navigated = step.navigations.some((navigation) => navigation.kind !== 'replace');
+    const dialog = step.revealed.some((region) => region.kind === 'dialog');
+    const own = !step.selfAnimating && step.ownChange !== null && step.ownChange >= settings.ownChangeMinAreaCssPx2;
+    // A second activation shows whether it comes back: a disclosure, a toggle. One whose state
+    // changed is activated again too: if it is back as it was, its copy serves the next probe.
+    const stateChanged = entry.before !== null && entry.before !== undefined && step.ax !== null && JSON.stringify(entry.before.states) !== JSON.stringify(step.ax.states);
+    if (settings.probeConfirmToggle && !navigated && !dialog && !step.removed && (step.revealed.length > 0 || own || stateChanged)) {
+      await guard(target, 'begin()');
+      await agent(target, `activate(${key})`);
+      await waitQuiet(target);
+      observed = await agent<ProbeObserved>(target, `observe(${key})`);
+      const reverted = await agent<boolean>(target, 'revealReverted()');
+      const third = await capture(target, ids.again, prepared.clip);
+      const second = stepOf(target, observed, observed.removed ? null : await axState(target, backend), await guard(target, 'take()'), network.takeActivation());
+      if (second.changed) changed = true;
+      const back = observed.scrolled || observed.removed ? null : ownChange(before, third, prepared, await agent<Box | null>(target, `boxOf(${key})`));
+      entry.again = { ...second.step, ownChange: back, revealReverted: reverted, ownReverted: back !== null && back < settings.ownChangeMinAreaCssPx2 };
+      entry.crops.again = ids.again;
+    }
+    network.endActivation();
+    entry.outcome = 'done';
+    await agent(target, 'restoreScroll()');
+    // The copy serves the next probe only when nothing shows that it changed.
+    return !changed && observed.fingerprint === begun.fingerprint && observed.url === begun.url;
+  };
+
   try {
-    await setUp();
-    await install();
-    const { frameTree } = (await cdp.send('Page.getFrameTree')) as { frameTree: FrameTree };
-    currentUrlAtStart = frameTree.frame.url + (frameTree.frame.urlFragment ?? "");
-    cookieUrls = await frameUrls();
-    savedCookies = await getCookies(cookieUrls);
-    savedStorage = await agent<ProbeStorage[]>('storage()');
-
-    for (const target of targets) {
-      const element = survey.elements[target.ord]!;
-      const probe: NrvProbe = { ord: target.ord, selector: element.selector, frame: element.frame, reason: target.reason, outcome: 'budget' };
-      log.probes.push(probe);
-      if (log.stopped) continue;
-      if (log.probes.filter((entry) => entry.outcome !== 'budget').length >= settings.maxProbes) {
+    try {
+      await within(network.enable());
+    } catch (error) {
+      log.stopped = 'cloneFailed';
+      log.stoppedDetail = `the network of the probing browser could not be held: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`;
+      return { log };
+    }
+    let compared = false;
+    for (const [index, entry] of log.probes.entries()) {
+      if (log.stopped) break;
+      if (aborted()) {
+        log.stopped = 'aborted';
+        break;
+      }
+      if (index >= settings.maxProbes) {
         log.stopped = 'maxProbes';
-        continue;
+        break;
       }
-      if (Date.now() - started > settings.probeBudgetMs) {
+      if (Date.now() >= deadline) {
         log.stopped = 'budget';
-        continue;
+        break;
       }
+      const element = survey.elements[entry.ord]!;
       try {
-        const key = await agent<number>(`locate(${JSON.stringify(element.frame)}, ${JSON.stringify(element.selector)}, ${JSON.stringify(element.tag)})`);
-        if (key < 0) {
-          probe.outcome = 'not-found';
-          continue;
+        if (copy && copy.dirty) {
+          const old = copy;
+          copy = null;
+          await closeCopy(old, true);
         }
-        const prepared = await agent<ProbePrepared>(`prepare(${key})`);
-        if (!prepared.visible || !prepared.clip) {
-          probe.outcome = 'not-visible';
-          await agent('restoreScroll()');
-          continue;
-        }
-        const backend = await backendOf(key);
-        probe.before = await axState(backend);
-        const begun = await agent<{ fields: string[]; url: string; fingerprint: string }>(`begin(${key})`);
-        current = { url: begun.url, fields: begun.fields };
-        navigations = [];
-        dialogs = 0;
-        writes = 0;
-        await takeGuard();
-        const name = fnv1a64(JSON.stringify([element.frame, element.selector]));
-        const ids = { before: `name-role-value/${name}-before.png`, after: `name-role-value/${name}-after.png`, again: `name-role-value/${name}-again.png` };
-        const before = await page.capture(ids.before, prepared.clip);
-
-        activated = true;
-        await agent(`activate(${key})`);
-        await waitQuiet();
-        let observed = await agent<ProbeObserved>(`observe(${key})`);
-        const after = await page.capture(ids.after, prepared.clip);
-        const step = await stepOf(observed, backend);
-        step.ownChange = observed.scrolled || observed.removed ? null : ownChange(before, after, prepared, await agent<ProbePrepared['box']>(`boxOf(${key})`));
-        // Text that changes on its own (a clock, a counter of a carousel) is not an effect of the
-        // activation. What is shown or hidden is confirmed by a second activation instead.
-        if (step.textChanged > 0) {
-          const noise = await agent<{ text: number; visibility: number }>(`noise(${settings.probeSettleMs})`);
-          if (noise.text > 0) step.textChanged = 0;
-          if (noise.visibility > 0) {
-            step.revealed = [];
-            step.hidden = [];
+        if (!copy) {
+          if (log.clones >= settings.maxProbeLoads) {
+            log.stopped = 'loads';
+            break;
+          }
+          copy = await openCopy();
+          if (!compared) {
+            // The copy must be the page under test: the same interactive elements, and the elements to probe found alike.
+            const checked = log.probes.slice(0, settings.maxProbes);
+            let matched = 0;
+            let missing = 0;
+            let added = 0;
+            for (const candidate of checked) {
+              const other = survey.elements[candidate.ord]!;
+              const key = await agent<number>(copy, `locate(${JSON.stringify(other.frame)}, ${JSON.stringify(other.selector)}, ${JSON.stringify(other.tag)})`);
+              if (key > 0 && (await sameElement(copy, other, key, await backendOf(copy, key)))) matched++;
+              else {
+                candidate.outcome = key === -1 ? 'not-found' : 'not-matched';
+                // What the collection made appear in the page (a menu, suggestions) is not in a copy that was only loaded.
+                if (key === -1 && !other.addedDuringScan) missing++;
+                else if (key === -1) added++;
+              }
+            }
+            const cloneInteractive = await agent<number>(copy, 'interactiveCount()');
+            const pageInteractive = survey.interactiveCount ?? cloneInteractive;
+            log.clone = { pageInteractive, cloneInteractive, checked: checked.length, matched, missing: missing + added };
+            const delta = Math.abs(cloneInteractive - pageInteractive) / Math.max(1, pageInteractive);
+            // Found and not alike (another variant, signed out) weighs more than not there at all (a menu the collection opened in the page).
+            const found = checked.length - missing - added;
+            if (matched < settings.probeCloneMinMatchShare * found || missing > settings.probeCloneMaxMissingShare * (checked.length - added) || delta > settings.probeCloneMaxCountDelta) {
+              log.stopped = 'cloneDiffers';
+              log.stoppedDetail = `the copy of the page does not render the page under test: of ${checked.length} elements to probe, ${matched} found alike, ${found - matched} found different, ${missing} not found, ${added} not found that appeared during the scan; ${cloneInteractive} interactive elements in the copy and ${pageInteractive} in the page`;
+              break;
+            }
+            compared = true;
           }
         }
-        probe.after = step;
-        probe.crops = { before: ids.before, after: ids.after };
-
-        const navigated = step.navigations.some((navigation) => navigation.kind !== 'replace');
-        const dialog = step.revealed.some((region) => region.kind === 'dialog');
-        const own = step.ownChange !== null && step.ownChange >= settings.ownChangeMinAreaCssPx2;
-        if (settings.probeConfirmToggle && !navigated && !dialog && !step.removed && (step.revealed.length > 0 || own)) {
-          await agent(`activate(${key})`);
-          await waitQuiet();
-          observed = await agent<ProbeObserved>(`observe(${key})`);
-          const reverted = await agent<boolean>('revealReverted()');
-          const third = await page.capture(ids.again, prepared.clip);
-          const second = await stepOf(observed, backend);
-          const back = observed.scrolled || observed.removed ? null : ownChange(before, third, prepared, await agent<ProbePrepared['box']>(`boxOf(${key})`));
-          probe.again = { ...second, ownChange: back, revealReverted: reverted, ownReverted: back !== null && back < settings.ownChangeMinAreaCssPx2 };
-          probe.crops.again = ids.again;
+        if (copy.served++ > 0) log.reused++;
+        const clean = await runProbe(copy, element, entry);
+        if (copy.dialog || copy.crashed) {
+          entry.outcome = copy.dialog ? 'dialog' : 'crash';
+          log.stopped = entry.outcome;
+          break;
         }
-        probe.outcome = 'done';
-        // What changed the page is not taken into the next probe.
-        const changed = observed.fingerprint !== begun.fingerprint || observed.url !== begun.url;
-        await agent('restoreScroll()').catch(() => undefined);
-        if (changed) {
-          dirty = true;
-          if (log.reloads >= settings.maxProbeReloads) {
-            log.stopped = 'reloads';
-            continue;
-          }
-          if (!(await reload(true))) {
-            log.stopped = 'error';
-            continue;
-          }
-          dirty = false;
+        if (!clean) copy.dirty = true;
+      } catch (error) {
+        const crashed = copy?.crashed === true;
+        if (error instanceof ProbeTimeout) {
+          entry.outcome = error.budget ? 'budget' : crashed ? 'crash' : 'timeout';
+          log.stopped = aborted() ? 'aborted' : error.budget ? 'budget' : crashed ? 'crash' : 'timeout';
+          break;
         }
-      } catch {
-        probe.outcome = 'error';
-        // The page may be gone or changed: it is loaded again before the next probe.
-        dirty = true;
-        if (log.reloads >= settings.maxProbeReloads || !(await reload(true).catch(() => false))) log.stopped = 'error';
-        else dirty = false;
+        if (error instanceof CopyFailed) {
+          entry.outcome = 'error';
+          log.stopped = 'cloneFailed';
+          log.stoppedDetail = error.message;
+          break;
+        }
+        entry.outcome = crashed ? 'crash' : copy?.dialog ? 'dialog' : 'error';
+        if (entry.outcome !== 'error' || !compared) {
+          if (!compared && entry.outcome === 'error') log.stoppedDetail = 'the copy of the page could not be compared with the page under test';
+          log.stopped = entry.outcome;
+          break;
+        }
+        // An element that went away in the middle of its probe, a frame that was replaced: the copy is not used again.
+        if (copy) copy.dirty = true;
       }
     }
   } finally {
-    // Put back: storage first, then either a reload or what was taken out of the page.
-    try {
-      if (dirty || activated) {
-        await reload(false);
-      } else {
-        // A fresh document that nothing was activated on: what probing set up in it is taken away, and the frames it emptied are filled again once the network is given back.
-        await restoreStorage();
-        await guard('globalThis.__a11yVisionGuard ? globalThis.__a11yVisionGuard.restore() : true');
-        await agent('restoreScroll()').catch(() => undefined);
-        await agent('cleanup()').catch(() => undefined);
-        await cdp.send('Fetch.disable').catch(() => undefined);
-        await agent<number>('unblank()').catch(() => undefined);
-      }
-    } catch {
-      // Whatever could not be put back is said by the page itself; nothing more can be done here.
-    }
-    for (const { event, handler } of handlers) cdp.off(event, handler);
-    await cdp.send('Fetch.disable').catch(() => undefined);
-    await cdp.send('Network.setBypassServiceWorker', { bypass: false }).catch(() => undefined);
-    await cdp.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
-    await cdp.send('Target.setDiscoverTargets', { discover: false }).catch(() => undefined);
-    log.blocked = [...blocked].sort();
+    network.endActivation();
+    if (copy) await closeCopy(copy, false).catch(() => undefined);
+    network.disable();
+    log.escapes = probe.refusedConnections();
+    // Every request still held goes with the browser.
+    await Promise.race([probe.close(), sleep(settings.probeStepTimeoutMs)]).catch(() => undefined);
   }
-  return { log, ...(loaderId ? { loaderId } : {}) };
+  return { log };
 }

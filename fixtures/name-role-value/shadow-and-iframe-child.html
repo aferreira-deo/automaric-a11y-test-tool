@@ -14,7 +14,7 @@
   <button type="button" id="keep">Keep for later</button>
   <div class="fake" tabindex="0" id="checkout">Checkout</div>
   <script>
-    document.getElementById('checkout').addEventListener('click', () => { document.title = 'Checkout'; });
+    document.getElementById('checkout').addEventListener('click', () => { const note = document.createElement('p'); note.textContent = 'Checking out your basket.'; document.body.append(note); });
   </script>
 </body>
 </html>

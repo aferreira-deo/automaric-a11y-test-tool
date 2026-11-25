@@ -1,5 +1,5 @@
 {
-  "description": "Operable elements and their roles. A focusable div with a click listener and a focusable element a framework holds a handler for are controls without a role (fail); a span that listens and shows the pointer, and an element with a React handler and the pointer, are likely; a span with a listener and nothing else is advisory. An a element without href that listens is exposed by Chrome as a link that points nowhere. Role conflicts read from the tree: a tab and a menu item outside their containers, an option Chrome drops (likely), a radio outside a radiogroup (advisory), a button inside a link (likely). Not reported: a card with a link in it, a label, a pointer without a listener, a container that listens for its buttons, roles inside their containers, a focusable scrolling region, a real button.",
+  "description": "Operable elements and their roles. A focusable div with a click listener and a focusable element a framework holds a handler for, that change the page when activated, are controls without a role (fail); one whose activation changes nothing that can be seen is likely (listeners and focus alone are no fail); a span that listens and shows the pointer, and an element with a React handler and the pointer, are likely; a span with a listener and nothing else is advisory. An a element without href that listens is exposed by Chrome as a link that points nowhere. Role conflicts read from the tree: a tab and a menu item outside their containers, an option Chrome drops (likely), a radio outside a radiogroup (advisory), a button inside a link (likely). Not reported: a card with a link in it, a label, a pointer without a listener, a container that listens for its buttons, roles inside their containers, a focusable scrolling region, a real button.",
   "checks": [
     "name-role-value"
   ],
@@ -10,6 +10,17 @@
       "status": "fail",
       "wcag": "4.1.2",
       "rule": "name-role-value/no-role"
+    },
+    {
+      "selector": "#div-focusable-silent",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/no-role",
+      "flags": [
+        "focusable",
+        "noEffect"
+      ]
     },
     {
       "selector": "#react-focusable",

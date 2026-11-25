@@ -48,11 +48,16 @@ export interface AgentNrvElement {
   excluded: boolean;
   container: number;
   frameContent?: { readable: boolean; focusables: number };
+  scrollable?: boolean;
+  generatedText?: boolean;
+  addedDuringScan?: boolean;
 }
 
 export interface AgentNrvSurvey {
   elements: AgentNrvElement[];
   total: number;
+  /** Elements interactive by their markup (`INTERACTIVE`), in the documents and open shadow trees the agent can look into. */
+  interactive: number;
 }
 
 export interface NrvAgent {
@@ -72,6 +77,36 @@ export interface NrvAgent {
 }
 
 export const NRV_AGENT_GLOBAL = '__a11yVisionNrv';
+
+/** Where `NRV_BEFORE_SCRIPT` keeps the elements the page had before the collection began. */
+const BEFORE_GLOBAL = '__a11yVisionNrvBefore';
+
+/**
+ * Evaluated in the isolated world of the collector before any collector runs: the elements of the
+ * page (its documents and open shadow trees the agent can look into) as they are then, and how many
+ * are interactive by markup. What the collection itself makes appear (a menu the Tab walk opens,
+ * suggestions of a focused search field, content loaded as captures scroll) is then known as such,
+ * and is no evidence that a copy of the page renders another page. Reads only.
+ */
+export const NRV_BEFORE_SCRIPT = `(() => {
+  const CONTROL_ROLE_ATTRS = ['button', 'link', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'treeitem', 'slider', 'spinbutton', 'combobox', 'textbox', 'searchbox'];
+  const INTERACTIVE = 'a[href],area[href],button,input:not([type="hidden"]),select,textarea,summary,[tabindex]:not([tabindex^="-"]),' + CONTROL_ROLE_ATTRS.map((role) => '[role="' + role + '"]').join(',');
+  const seen = new WeakSet();
+  let interactive = 0;
+  const visit = (root) => {
+    for (const element of root.querySelectorAll('*')) {
+      seen.add(element);
+      try { if (element.matches(INTERACTIVE)) interactive++; } catch {}
+      if (element.shadowRoot) visit(element.shadowRoot);
+      if (element.localName === 'iframe' || element.localName === 'frame') {
+        try { const doc = element.contentDocument; if (doc) visit(doc); } catch {}
+      }
+    }
+  };
+  visit(document);
+  globalThis.${BEFORE_GLOBAL} = { seen, interactive };
+  return interactive;
+})()`;
 
 export function nrvAgentFactory(options: AgentNrvOptions): NrvAgent {
   const MAIN = '__a11yVisionAgent';
@@ -358,11 +393,51 @@ export function nrvAgentFactory(options: AgentNrvOptions): NrvAgent {
       container: containerOf(element),
     };
     if (tag === 'a' || tag === 'area') out.href = hrefOf(element);
+    const before = (globalThis as unknown as Record<string, { seen: WeakSet<Element> } | undefined>)['__a11yVisionNrvBefore'];
+    if (before && !before.seen.has(element)) out.addedDuringScan = true;
+    if (hasBox && scrollableOf(element)) out.scrollable = true;
+    if (hasBox && text === '' && generatedTextIn(element)) out.generatedText = true;
     if (isFrame(element)) {
       const doc = frameDocument(element);
       out.frameContent = { readable: doc !== null, focusables: doc ? doc.querySelectorAll(FOCUSABLE).length : 0 };
     }
     return out;
+  }
+
+  /** It scrolls its own content: overflow that scrolls, and content larger than its box. */
+  function scrollableOf(element: Element): boolean {
+    const tag = element.localName;
+    if (tag === 'html' || tag === 'body') return false;
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(element);
+    const scrolls = (value: string): boolean => value === 'auto' || value === 'scroll' || value === 'overlay';
+    const vertical = scrolls(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+    const horizontal = scrolls(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+    return vertical || horizontal;
+  }
+
+  /** Text that CSS generates (`content` of ::before or ::after) on the element or inside it, at most 40 elements looked at. */
+  function generatedTextIn(element: Element): boolean {
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const generates = (node: Element): boolean => {
+      for (const pseudo of ['::before', '::after']) {
+        const content = view.getComputedStyle(node, pseudo).content;
+        if (!content || content === 'none' || content === 'normal') continue;
+        // Strings and counters are text; a picture (url(), gradients) and empty strings are not.
+        const text = content.replace(/url\([^)]*\)|[a-z-]*gradient\([^)]*\)/gi, '').replace(/["']/g, '').trim();
+        if (/counters?\(/.test(content) || text !== '') return true;
+      }
+      return false;
+    };
+    if (generates(element)) return true;
+    let looked = 0;
+    for (const inner of element.querySelectorAll('*')) {
+      if (++looked > 40) break;
+      if (generates(inner)) return true;
+    }
+    return false;
   }
 
   function ensureVisible(element: Element): void {
@@ -399,7 +474,13 @@ export function nrvAgentFactory(options: AgentNrvOptions): NrvAgent {
       const elements: AgentNrvElement[] = [];
       const chosen: Element[] = [];
       let total = 0;
+      let interactive = 0;
       walk(document, (element) => {
+        try {
+          if (element.matches(INTERACTIVE)) interactive++;
+        } catch {
+          // Not an element a selector applies to.
+        }
         const frameworkAttr = element.getAttribute(HANDLER_ATTRIBUTE);
         if (frameworkAttr !== null) element.removeAttribute(HANDLER_ATTRIBUTE);
         const tag = element.localName;
@@ -436,7 +517,7 @@ export function nrvAgentFactory(options: AgentNrvOptions): NrvAgent {
         chosen.push(element);
       });
       surveyedElements = chosen;
-      return { elements, total };
+      return { elements, total, interactive };
     },
 
     surveyed() {

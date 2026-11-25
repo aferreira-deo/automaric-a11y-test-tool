@@ -1,0 +1,79 @@
+<!doctype html>
+<!-- From a review of the name-role-value check: patterns that are right, and must not be reported. -->
+<html lang="en"><head><meta charset="utf-8"><title>Legitimate patterns</title>
+<style>
+body{font:16px/1.4 Arial;margin:16px;color:#111;background:#fff}
+button{margin:3px;padding:3px 8px;font:inherit}
+.close::before{content:"Close"}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.box{display:inline-block;width:14px;height:14px;border:1px solid #333}
+.scroll{overflow:auto;height:60px;width:320px;border:1px solid #333}
+.icon{display:inline-block;width:16px;height:16px;background:#333}
+section{margin-bottom:10px}
+</style></head>
+<body>
+<a href="#main" class="sr-only" id="skip">Skip to content</a>
+<main id="main" tabindex="-1">
+<h1>Legitimate patterns</h1>
+<section id="names">
+<button class="close" id="n-css"></button>
+<button id="n-svgtitle"><svg role="img" width="16" height="16"><title>Search</title><rect width="16" height="16"/></svg></button>
+<button id="n-svgtitle2"><svg width="16" height="16"><title>Find</title><rect width="16" height="16"/></svg></button>
+<button id="n-childlabel"><span class="icon" aria-label="Dismiss"></span></button>
+<button id="n-childimg"><span class="icon" role="img" aria-label="Remove"></span></button>
+<button id="n-img"><img src="../icon-contrast/assets/none.png" alt="Print" width="16" height="16"></button>
+<input type="submit" id="n-submit"> <input type="reset" id="n-reset"> <input type="image" src="../icon-contrast/assets/none.png" alt="Go" id="n-image" width="16" height="16">
+<label>Name <input id="n-wrap"></label> <label for="n-for">Email</label><input id="n-for">
+<span id="lbl">Phone</span><input aria-labelledby="lbl" id="n-lby"> <input aria-label="Zip" id="n-al">
+<label><input type="radio" name="r" id="n-r1"> Yes</label><label><input type="radio" name="r" id="n-r2"> No</label>
+<details><summary id="n-summary">More</summary>Content</details>
+<label for="n-sel">Country</label><select id="n-sel"><option>France</option></select>
+<label>Volume <input type="range" id="n-range"></label> <label>Colour <input type="color" id="n-color"></label>
+<label>Date <input type="date" id="n-date"></label> <label>File <input type="file" id="n-file"></label><input type="hidden" value="x">
+<a href="/home" id="n-imglink"><img src="../icon-contrast/assets/none.png" alt="Home" width="16" height="16"></a>
+<img src="../icon-contrast/assets/none.png" usemap="#m" width="100" height="40" alt="Regions"><map name="m"><area shape="rect" coords="0,0,50,40" href="/north" alt="North" id="n-area"></map>
+<video controls width="200" height="60" id="n-video"></video> <audio controls id="n-audio"></audio>
+<iframe title="Greeting" srcdoc="<p>Hello <a href='/x'>there</a></p>" width="150" height="40"></iframe>
+<iframe srcdoc="<p>No controls</p>" width="150" height="40"></iframe>
+<x-fav id="n-internals"></x-fav>
+<x-closed id="n-closed"></x-closed>
+<x-open id="n-open"></x-open>
+<button style="display:contents" id="n-contents">Contents button</button>
+<label class="cb"><input type="checkbox" class="vh" id="n-cb"><span class="box" aria-hidden="true"></span> Accept the terms</label>
+<button disabled id="n-disabled"></button>
+<div inert><button id="n-inert"></button></div>
+<dialog><button id="n-dialog"></button></dialog>
+<div hidden="until-found"><a href="/x" id="n-until"></a></div>
+</section>
+<section id="focus">
+<h2 tabindex="0" id="r-h2">A heading that is a focus target</h2>
+<div class="scroll" tabindex="0" id="r-scroll"><p>Scrollable text. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.</p><p>More text.</p></div>
+<div class="scroll" tabindex="0" id="r-drag"><table><tr><td>Wide data table cell one two three four five six seven eight nine ten eleven twelve thirteen</td><td>2024</td></tr></table></div>
+<div class="scroll" tabindex="0" id="r-ticker"><canvas id="ticker" width="300" height="20"></canvas><p>Live prices</p></div>
+<div id="target" tabindex="-1">Skip target</div>
+</section>
+</main>
+<script>
+// Analytics: one listener on the document, as most sites have.
+document.addEventListener('click', () => { window.__clicks = (window.__clicks || 0) + 1; });
+// Drag to scroll, on the scroll region itself.
+const drag = document.getElementById('r-drag');
+drag.addEventListener('mousedown', (e) => { drag.dataset.x = e.clientX; });
+// A ticker drawn by a timer.
+const ctx = document.getElementById('ticker').getContext('2d');
+let tick = 0; setInterval(() => { tick++; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 300, 20); ctx.fillStyle = '#c00'; ctx.fillRect((tick * 7) % 280, 0, 20, 20); }, 50);
+customElements.define('x-fav', class extends HTMLElement {
+  constructor() { super(); const i = this.attachInternals(); i.role = 'button'; i.ariaLabel = 'Favourite'; i.ariaPressed = 'false'; this.tabIndex = 0; this.textContent = '☆';
+    this.addEventListener('click', () => { i.ariaPressed = i.ariaPressed === 'true' ? 'false' : 'true'; this.textContent = i.ariaPressed === 'true' ? '★' : '☆'; }); }
+});
+customElements.define('x-closed', class extends HTMLElement {
+  constructor() { super(); const r = this.attachShadow({ mode: 'closed', delegatesFocus: true }); r.innerHTML = '<button>Buy the shirt</button>';
+    this.addEventListener('click', () => { this.dataset.n = String(Number(this.dataset.n || 0) + 1); }); }
+});
+customElements.define('x-open', class extends HTMLElement {
+  constructor() { super(); const r = this.attachShadow({ mode: 'open', delegatesFocus: true }); r.innerHTML = '<button>Open shadow button</button>';
+    this.addEventListener('click', () => {}); }
+});
+</script>
+</body></html>
