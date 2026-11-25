@@ -13,6 +13,7 @@ import { NRV_BEFORE_SCRIPT } from './nrv-agent.js';
 import type { CloneSource } from './nrv-probe.js';
 import type { ProbeHost } from './probe-host.js';
 import { markAccessibility } from './accessibility.js';
+import { collectReflow } from './reflow.js';
 import { withStablePage } from './page.js';
 import { gateSession, stopReason } from './session.js';
 import type { CdpSession, StopSignal } from './session.js';
@@ -229,8 +230,9 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
   const lists = config.checks.includes('lists');
   const grouping = config.checks.includes('grouping');
   const nrv = config.checks.includes('name-role-value');
+  const reflow = config.checks.includes('reflow');
   let source: CloneSource | undefined;
-  if (focus || icons || headings || lists || grouping || nrv) {
+  if (focus || icons || headings || lists || grouping || nrv || reflow) {
     const original = { ...environment, reducedMotion, mediaType };
     await withStablePage(cdp, world, original, config, snapshot.screenshots.clips, async (page) => {
       // The focus walk goes first: it needs focus where the page left it, and ends with nothing focused.
@@ -254,6 +256,8 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
         if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
       if (nrv) snapshot.nameRoleValue = await collectNameRoleValue(page, config, walk, walkStoppedBy, interactiveBefore);
+      // Last: it changes the viewport, and puts it back before anything else reads the page.
+      if (reflow) snapshot.reflow = await collectReflow(page, config, environment.viewport);
       // What each element that was named is, hashed here: the text it is made from stays in this function.
       const signatures: Record<string, string> = {};
       for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);

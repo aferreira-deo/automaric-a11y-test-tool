@@ -1,0 +1,9 @@
+{
+  "description": "A data table that widens the page at 320 by 800 while the running text around it wraps: the document scrolls horizontally only for content that may need two dimensions. Info, named on the table.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#data", "check": "reflow", "status": "info", "rule": "reflow/two-dimensional-scroll", "flags": ["exceptedOnly", "excepted"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

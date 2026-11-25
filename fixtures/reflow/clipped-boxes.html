@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: clipped-boxes</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      section { max-width: 600px; margin: 0 0 24px; }
+      /* A fixed height, set for the wide layout: three lines fit; at 320 px the paragraph needs eight. */
+      #card { height: 96px; overflow: hidden; border: 1px solid #767676; padding: 0 8px; }
+      #teaser { height: 140px; overflow: hidden; border: 1px solid #767676; padding: 0 8px; }
+      #teaser button { font: inherit; }
+      /* One line, cut with an ellipsis. */
+      #title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h1>Boxes that clip</h1>
+    <section>
+      <div id="card"><p>The ferry to the islands leaves twice a day in winter and five times a day in summer, from the quay at the end of harbour street. Tickets are sold on board.</p></div>
+    </section>
+    <section>
+      <div id="teaser"><p>The museum is closed for works until the spring, while the roof of the old chapel is repaired and the galleries are painted again.</p><button type="button" aria-expanded="false">Read more</button></div>
+    </section>
+    <section>
+      <p id="title">Timetable of the ferry to the islands for the winter season</p>
+    </section>
+  </body>
+</html>

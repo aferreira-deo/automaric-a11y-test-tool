@@ -1,0 +1,6 @@
+{
+  "description": "A sticky header (40 px) and a fixed footer (37 px): at 800 by 256 they leave 70% of the viewport to read. Nothing to report.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

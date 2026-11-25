@@ -1,0 +1,9 @@
+{
+  "description": "A fixed header (60 px) and a fixed cookie banner (100 px) with two buttons. At 800 by 256 they leave 38% of the viewport to read; without the banner, which the user can close, 77%. Reported one level lower than likely: advisory, on the banner, which takes the most room.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#cookie", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["dismissible", "loweredDismissible"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

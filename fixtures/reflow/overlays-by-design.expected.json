@@ -1,0 +1,6 @@
+{
+  "description": "Text drawn over a picture, a floating label inside its field, a badge over a button, a drop cap, a superscript, visually hidden text and a heading with tight lines and letters. They overlap at every width, by design: nothing is reported, not even as info.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

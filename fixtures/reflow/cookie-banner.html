@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: cookie-banner</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      #header { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #0b3d6e; color: #fff; }
+      #header p { margin: 0; padding: 16px; }
+      /* A banner the user can close: without it 77% of 800 by 256 is readable, with it 38%. */
+      #cookie { position: fixed; bottom: 0; left: 0; right: 0; height: 100px; box-sizing: border-box; padding: 8px 16px; background: #fffbe6; border-top: 2px solid #8a6d00; }
+      #cookie p { margin: 0 0 8px; }
+      #cookie button { font: inherit; padding: 4px 12px; }
+      main { padding: 68px 16px 108px; max-width: 960px; }
+    </style>
+  </head>
+  <body>
+    <header id="header"><p>City council</p></header>
+    <main>
+      <h1>Parking permits</h1>
+      <p>Residents of the controlled zones can apply for a permit for each car registered at their address, up to two per household. The permit is valid for a year from the date it is issued.</p>
+      <p>Visitors can be given day vouchers, sold in books of ten at the town hall or online. A voucher is valid on the day written on it, in the zone of the resident who gave it.</p>
+      <p>Businesses in the zones can apply for a permit for vehicles needed for their work. Proof of the activity and of the registration of the vehicle is asked for.</p>
+      <p>Blue badge holders park free of charge in every zone and in the car parks of the council, for as long as they need.</p>
+      <p>Permits are renewed online a month before they end. A reminder is sent by email to those who gave an address when they applied.</p>
+      <p>A lost or stolen permit can be replaced once a year for a small fee. Report it first, so that the old permit cannot be used.</p>
+      <p>Changes of vehicle are free: give the registration of the new one and the permit is updated the same day.</p>
+    </main>
+    <div id="cookie" role="region" aria-label="Cookies">
+      <p>We use cookies to measure how the site is used.</p>
+      <button type="button">Accept</button> <button type="button">Close</button>
+    </div>
+  </body>
+</html>

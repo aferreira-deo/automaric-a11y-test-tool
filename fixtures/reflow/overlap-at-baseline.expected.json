@@ -1,0 +1,6 @@
+{
+  "description": "Two texts that overlap at 1280 px already, and so at every width: not a reflow problem, and not reported by this check.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

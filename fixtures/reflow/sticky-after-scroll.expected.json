@@ -1,0 +1,9 @@
+{
+  "description": "A sticky navigation bar 140 px tall that is in the flow at the top of the page and sticks only once the page is scrolled past it. At 800 by 256, scrolled, it leaves 45% of the viewport to read: likely, seen after scrolling. At the top of the page nothing is stuck.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#subnav", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["afterScroll"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "A page made to scroll horizontally: panels of 600 px side by side, as tall as the viewport, which at the baseline scrolls horizontally only. At 800 by 256 the text of the second panel runs below the viewport and the page has to be scrolled vertically too: two dimensions, a failure of the 256 pass, named on the paragraph that reaches below. At 320 by 800 horizontal scrolling is the design and is not reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#long-text", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/two-dimensional-scroll" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

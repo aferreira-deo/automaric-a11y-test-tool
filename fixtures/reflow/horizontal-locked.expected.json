@@ -1,0 +1,9 @@
+{
+  "description": "The horizontal page of horizontal-by-design, with vertical scrolling switched off on the root (overflow-y: hidden). At 800 by 256 the text of the second panel runs below a viewport that does not scroll vertically: out of reach, a failure of the 256 pass.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/scroll-locked" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

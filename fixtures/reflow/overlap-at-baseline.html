@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: overlap-at-baseline</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      h1 { margin: 16px; font-size: 24px; }
+      /* The same collision at every width: a fault of the page, not of reflow. */
+      .columns { position: relative; height: 1200px; }
+      .col-a { position: absolute; top: 0; left: 0; width: 70%; }
+      .col-b { position: absolute; top: 0; left: 30%; width: 70%; }
+      .col-a p, .col-b p { margin: 0 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Two columns that always meet</h1>
+    <div class="columns">
+      <div class="col-a"><p id="text-a">The first column holds the description of the walk: it starts at the old mill, follows the river for two miles, crosses the footbridge and climbs through the beech wood to the ridge.</p></div>
+      <div class="col-b"><p id="text-b">The second column gives the practical details: four hours on foot, a climb of three hundred metres, boots needed after rain, and no shop on the way.</p></div>
+    </div>
+  </body>
+</html>

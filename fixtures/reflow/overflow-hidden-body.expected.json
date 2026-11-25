@@ -1,0 +1,9 @@
+{
+  "description": "overflow-x: hidden on html and body, and a block 640 px wide with text and a button at its far end. At 320 by 800 the end of the lines and the button lie beyond a viewport that does not scroll horizontally: content lost, a failure, named on the block. No horizontal scrolling is offered, so nothing is reported as needing it.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#wide", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["rootOverflowHidden", "control"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

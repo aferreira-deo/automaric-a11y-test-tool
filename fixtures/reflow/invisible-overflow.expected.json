@@ -1,0 +1,6 @@
+{
+  "description": "The document is wider than 320 CSS px only because of what shows nothing: an empty spacer, text in a transparent colour, text under opacity 0, visually hidden text and a skip link off screen. None of it counts: nothing is reported but the survey.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

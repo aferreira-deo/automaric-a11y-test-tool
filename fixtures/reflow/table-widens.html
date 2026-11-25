@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: table-widens</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      table { border-collapse: collapse; }
+      th, td { padding: 4px 12px; border: 1px solid #ccc; white-space: nowrap; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <h1>Results by region</h1>
+    <p>The table is wider than a small viewport and widens the page; the text around it still wraps within the viewport.</p>
+    <table id="data">
+      <caption>Votes counted, by region</caption>
+      <thead><tr><th>Region</th><th>Registered</th><th>Votes cast</th><th>Turnout</th><th>Blank</th><th>Counted at</th><th>Last update</th></tr></thead>
+      <tbody>
+        <tr><td>North and coast</td><td>1,204,330</td><td>802,114</td><td>66.6%</td><td>12,004</td><td>Town hall</td><td>21:40</td></tr>
+        <tr><td>Central valley</td><td>2,940,002</td><td>1,950,770</td><td>66.4%</td><td>31,220</td><td>Prefecture</td><td>22:05</td></tr>
+      </tbody>
+    </table>
+    <p>Figures are provisional until the commission publishes them.</p>
+  </body>
+</html>

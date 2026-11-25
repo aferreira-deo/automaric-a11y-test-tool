@@ -1,0 +1,6 @@
+{
+  "description": "A textarea, a block of code, a chat log and a table wrapper, each 70% of the viewport high and scrolling inside a page that scrolls: scrollers by design, none of them a second scroll bar for the main content. No double-scrollbar finding at any status.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

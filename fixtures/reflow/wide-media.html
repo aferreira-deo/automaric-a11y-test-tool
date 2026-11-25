@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: wide-media</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      pre { background: #f4f4f4; padding: 8px; }
+      .code-scroll { overflow-x: auto; }
+      canvas { display: block; background: #dfe8d4; }
+    </style>
+  </head>
+  <body>
+    <h1>Content that may need two dimensions</h1>
+    <p>A panorama in its natural width, code with long lines, and a map drawn on a canvas. Each widens the page at a small width, and none of them is text that has to reflow.</p>
+    <img id="panorama" width="900" height="200" alt="The bay at dawn, from the lighthouse" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='200'%3E%3Crect width='900' height='200' fill='%23446688'/%3E%3C/svg%3E" />
+    <pre id="code">const route = await planner.find({ from: 'Central station', to: 'Northport harbour', departAfter: '08:00', changes: 1 });</pre>
+    <pre class="code-scroll" id="scrolling-code">npm install --save-dev @example/very-long-package-name-for-the-build-tool @example/another-long-package-name</pre>
+    <canvas id="map" width="900" height="240" aria-label="Map of the bus routes"></canvas>
+    <p>The text of the page wraps within the viewport at every width.</p>
+  </body>
+</html>

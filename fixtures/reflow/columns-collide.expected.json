@@ -1,0 +1,9 @@
+{
+  "description": "Two columns placed by hand that stand apart at 1280 and at 800 px and are drawn one over the other at 320: the glyphs of the two texts coincide, which the pixels confirm. A failure, on the text under the other (the second column is painted on top).",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#text-a", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/text-overlap", "flags": ["pixelConfirmed", "glyphsOverlap", "textOnText"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

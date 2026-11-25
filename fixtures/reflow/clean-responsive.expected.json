@@ -1,0 +1,6 @@
+{
+  "description": "A responsive page done right: fluid image, a grid of cards that wraps, a long address that breaks, and a navigation that becomes a menu button under 700 px (display: none behind a button with aria-expanded). Nothing at all is reported, at any status, but the survey.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

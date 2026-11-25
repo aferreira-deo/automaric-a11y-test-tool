@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: horizontal-by-design</title>
+    <style>
+      /* A page laid out to scroll horizontally: panels side by side, as tall as the viewport. */
+      body { margin: 0; height: 100vh; display: flex; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .panel { flex: none; width: 500px; height: 100vh; box-sizing: border-box; padding: 16px; border-right: 1px solid #ccc; }
+      .panel h2 { margin: 0 0 8px; font-size: 20px; }
+      .panel p { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <section class="panel" id="panel-1"><h2>Chapter one</h2><p id="short-text">The story begins at the harbour.</p></section>
+    <section class="panel" id="panel-2">
+      <h2>Chapter two</h2>
+      <p id="long-text">The second chapter follows the boat out of the harbour and along the coast, past the lighthouse and the island, to the village where the crew stops for the night. They tie up at the old quay, carry the nets to the shed, and walk up the lane to the inn, where the landlord has kept a table by the fire. Over supper the skipper tells the story of the storm of the year before, when the boat lost its mast off the island and drifted for a day before the lifeboat found it. The text of the chapter is long enough that, in a window only 256 CSS px tall, it runs below the bottom of its panel, and the page has to be scrolled vertically as well as horizontally to read it.</p>
+    </section>
+    <section class="panel" id="panel-3"><h2>Chapter three</h2><p>The return.</p></section>
+  </body>
+</html>
