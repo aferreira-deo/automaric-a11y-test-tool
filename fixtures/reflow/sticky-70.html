@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: sticky-70</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      /* 40 + 37 px: 70% of 800 by 256 stays readable. */
+      #header { position: sticky; top: 0; height: 40px; background: #0b3d6e; color: #fff; }
+      #footer { position: fixed; bottom: 0; left: 0; right: 0; height: 37px; background: #eee; }
+      #header p, #footer p { margin: 0; padding: 8px 16px; }
+      main { padding: 8px 16px 45px; max-width: 960px; }
+    </style>
+  </head>
+  <body>
+    <header id="header"><p>City council</p></header>
+    <main>
+      <h1>Waste collection</h1>
+      <p>Household waste is collected once a week, on the day shown for your street. Put the bin out the evening before, with the lid closed, and bring it in once it has been emptied.</p>
+      <p>Recycling is collected every other week. Paper, cardboard, cans and plastic bottles go in the blue bin; glass goes to the bottle banks found in every car park of the town.</p>
+      <p>Garden waste is collected from March to November for those who have subscribed to the service. Branches longer than a metre and soil are not taken.</p>
+      <p>Bulky items such as furniture and appliances can be collected on request, for a fee that depends on the number of items. Some of them can be given to the reuse centre instead.</p>
+      <p>Collections on public holidays move to the next working day. The calendar for the year is sent to every household in December and can be downloaded from this page.</p>
+      <p>Missed collections can be reported up to two days after the collection day. A crew comes back within three working days if the bin was out in time.</p>
+      <p>Bins that are damaged or stolen are replaced free of charge once a year. Larger bins are available for households of five people or more.</p>
+      <p>The recycling centre on the ring road is open every day but Christmas. Bring proof of address: it is for residents only, and vans need a permit.</p>
+    </main>
+    <footer id="footer"><p>Contact the council</p></footer>
+  </body>
+</html>

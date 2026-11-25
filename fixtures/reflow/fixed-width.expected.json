@@ -1,0 +1,9 @@
+{
+  "description": "A block of running text 600 px wide. At 320 by 800 the document needs horizontal scrolling to reach the end of its lines: a failure, named on the block that pushes out. Nothing at 800 by 256, where it fits.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#wide", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/two-dimensional-scroll" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

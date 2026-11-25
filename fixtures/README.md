@@ -78,6 +78,14 @@ controls.
 fixtures. It is written by `icon-contrast/assets/make-font.mjs`, not downloaded,
 so it carries no third-party licence.
 
+The `reflow/*` fixtures each hold one pattern of 1.4.10 and are measured at the baseline, at 320 by 800 and at
+800 by 256. True positives (`fixed-width`, `overflow-hidden-body`, `clipped-boxes`, `columns-collide`,
+`sticky-40`, `sticky-after-scroll`, `cookie-banner`, `nested-scroller`, `scroll-locked`, `horizontal-by-design`,
+`horizontal-locked`) stand beside the patterns that must raise nothing above `info` (`table-scroller`,
+`table-widens`, `wide-media`, `overlap-at-baseline`, `overlays-by-design`, `sticky-70`, `scrollers-by-design`,
+`invisible-overflow`, `offcanvas-menu`, `clean-responsive`); most are `exact`. `restore-state` has no manifest:
+`e2e/reflow.spec.ts` uses it to check that the page is given back as it was, also after a stopped scan.
+
 The `name-role-value/*` fixtures are probed (their controls are activated) unless nothing on them listens.
 `names` is static and is also scanned from the extension, which never probes. `well-built` is a page made as a
 React application renders it, with the patterns of the ARIA practices done right, and must give no `fail` and

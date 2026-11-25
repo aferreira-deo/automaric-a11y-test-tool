@@ -1,0 +1,6 @@
+{
+  "description": "A wide data table in a container of its own that scrolls horizontally. Tables may need two dimensions, and the page itself does not scroll horizontally: nothing to report, not even the inner scroller, which holds a table.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

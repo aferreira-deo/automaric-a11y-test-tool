@@ -3,7 +3,7 @@
 Automated checks for WCAG 2.2 A/AA criteria that rule engines such as axe-core do not cover.
 Deterministic code finds and measures; a model, when one is configured, only judges.
 
-Status: M8. Six checks are implemented, and all run by default. A run can cover several pages, be compared with
+Status: M8. Seven checks are implemented, and all run by default. A run can cover several pages, be compared with
 a baseline, and be written as SARIF (see [CI](#ci)); the same checks run from a Chrome extension on the tab in
 front of you (see [Chrome extension](#chrome-extension)). None of them needs a model. When a model is
 configured it judges the heading candidates, the series of lines with bullets or numbers and the sets of radios
@@ -25,9 +25,14 @@ or checkboxes under a visible text, and nothing else (see "Having a model judge 
   page loaded in a browser of its own that has no network, never in the page under test (`--no-probe` turns that
   off). See [What `name-role-value`
   reports](#what-name-role-value-reports).
+- `reflow`: 1.4.10. The page is laid out again at 320 by 800 and at 800 by 256 CSS px and compared with itself at
+  its own viewport: content that needs scrolling in two dimensions, content cut off or out of reach, text made
+  unreadable by other content (a `fail` only when pixels confirm it), fixed and sticky content that leaves too
+  little to read, a nested scroller that doubles the scroll bar of the page. The viewport and the scroll positions
+  are put back. Not offered in the extension. See [What `reflow` reports](#what-reflow-reports).
 
-`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings`, `--checks lists`, `--checks grouping`
-or `--checks name-role-value` runs one of them.
+`--checks focus-indicator`, `--checks icon-contrast`, `--checks headings`, `--checks lists`, `--checks grouping`,
+`--checks name-role-value` or `--checks reflow` runs one of them.
 
 ## Use
 
@@ -75,7 +80,7 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-text-only` | | Send no captures, for a model without vision. |
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
-| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `nameRoleValue`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
+| `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `nameRoleValue`, `reflow`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -1563,6 +1568,207 @@ The Playwright API takes `new A11yVision({ page, probeContext: { httpCredentials
   whose proxy settings cannot be read counts as a proxy. Each can cost reads, so a copy that renders differently, and
   then probes or findings; none sends what the page's own request would not.
 
+### What `reflow` reports
+
+1.4.10, measured: the page is laid out again at the viewports of the criterion and compared with itself at the
+viewport the caller gave it. Six rules, each reported per pass. No model is involved, and nothing is activated.
+
+#### The viewports, and how they are set
+
+Three layouts are measured, in this order:
+
+| Layout | Size (CSS px) | Setting | What it stands for |
+|---|---|---|---|
+| `baseline` | the page's own (`innerWidth` by `innerHeight`; 1280 by 720 in the CLI) | none | What the page is meant to look like. Every rule compares with it. |
+| `narrow` | 320 by 800 | `narrowPass`, `narrowWidthCssPx`, `narrowHeightCssPx` | Content that scrolls vertically, at 400% zoom of a 1280 px window. The height is a tall phone, so that the width is the only constraint. |
+| `short` | 800 by 256 | `shortPass`, `shortWidthCssPx`, `shortHeightCssPx` | Content that scrolls horizontally, at 400% of a 1024 px high window; and, for every page, what a short window does to fixed and sticky content and to boxes of fixed height. |
+
+Each pass is set with `Emulation.setDeviceMetricsOverride`, `mobile: false`, at the capture scale of the tool
+(`focus.deviceScaleFactor`, 2). Why so:
+
+- **`mobile: false`** is what a desktop browser zoomed to 400% does: the layout viewport is the window's width
+  divided by the zoom, the `meta viewport` is not read, there is no text autosizing and no overlay scroll bars.
+  `mobile: true` would make a page without `meta viewport` lay out at 980 px and zoom out, which is the mobile
+  behaviour 1.4.10 is not about.
+- **The device pixel ratio does not change the layout**; only `resolution` media queries and the choice of a
+  `srcset` image follow it. Zoom does change it (400% on a 1x screen is a ratio of 4), so neither 1 nor 2 is
+  exactly what zoom gives. The brief asked for 1; the capture scale is kept instead, because the evidence and the
+  tests by pixels are taken at that scale, as for every other check, and a ratio of 1 would halve the pixels the
+  ink of two overlapping texts is counted in. The fixtures of the check are also run in contexts at 1.5 and 2
+  (`e2e/fixtures-scale.spec.ts`) and give the same findings.
+- **Layout is waited for** after each change: at least `settleMinMs` (300), then until nothing in the document
+  (elements, attributes, text, the size of the root or of `body`) has changed for `settleQuietMs` (300), at most
+  `settleMaxMs` (3000); fonts are waited for within that time. A layout whose size was still changing at the end is
+  measured all the same, and nothing of that pass is above `likely` (`notSettled`). A page that keeps changing
+  its content without moving its layout (a ticker) counts as settled. The style sheet of the collector that stops
+  transitions and animations is in effect (see "What a scan does to the page").
+- **A pass whose viewport is not the one asked for** (`innerWidth`, `innerHeight` measured again) reports nothing
+  above `info` (`viewportNotApplied`).
+
+At the end the viewport goes back to the baseline size (at the capture scale, as the rest of the collection has
+it), the layout is waited for again, and every scroll position the passes changed is put back: the window, every
+scroll container (a narrow layout clamps their ranges), same-origin frames. This happens before the other
+collectors' clean-up, also when the collection fails, and after a stop: the step is registered with the page
+(`StablePage.onRestore`) and runs once the session lets commands through again. Through the Playwright API and
+the CLI, `page.viewportSize()` is the same after a scan and the context's emulation is sent again, as for every
+check. A caller that set a device metrics override through a CDP session of its own has to set it again (Chrome
+holds one per page and cannot report it), as the README says for every check.
+
+#### Rules and statuses
+
+| Rule | What is measured | `fail` | lower |
+|---|---|---|---|
+| `two-dimensional-scroll` | At `narrow`: the document scrolls horizontally and lines of text or controls lie beyond the right edge, by at least `beyondMinEm` (0.5 em) for a line, `controlBeyondMinShare` (25%) of a control's width. At `short`, for a page laid out to scroll horizontally only: the same below the bottom edge. Named on the outermost element beyond the edge that holds them: what pushes them out. | text or a control (not excepted) beyond the edge, reached by scrolling the document, that was not beyond the edge at the baseline | `info`: only excepted content beyond (`exceptedOnly`, with `exceptedKinds`), or the same text beyond at the baseline (`atBaseline`). `likely` (`innerScroller`): a scroll container, not excepted, whose lines of text are wider than it shows |
+| `content-lost` | Lines of text and controls shown in full at the baseline that the pass cuts off: outside what a clipping ancestor shows (`overflow: hidden` or `clip`, `contain: paint`, `clip`), beyond the right edge of a viewport that does not scroll horizontally (`overflow-x: hidden` or `clip` on the root, or a `body` that clips), before the start edge, or outside the viewport in a fixed element | measured cut: a line loses at least `lostMinEm` (1 em) of its width or `lostMinLineShare` (half) of its height; a control `controlLostMinShare` (half) of its area | `advisory`: truncated with an ellipsis or a line clamp (`ellipsis`, `lineClamp`); a control inside or beside the clipping element that may reveal (`revealControl`). `info`: the element already cut content at the baseline (`clipsAtBaseline`: a carousel, a ticker), scroll snapping or `aria-roledescription` (`carousel`); text no longer displayed (below) |
+| `text-overlap` | Lines of two elements, neither holding the other, whose middle bands (`overlapCoreInset`, 20% cut at top and bottom) meet by `overlapMinShare` (15%) of the smaller band, or a line under a box that paints (a background, a picture), where they did not meet at the baseline | confirmed by pixels (below) | `likely`: two texts meet and the region could not be captured. `info`: beyond `maxPixelChecks`, or a text under a box that was not tested. Nothing when the pixels show both readable |
+| `sticky-obscures` | At the scroll positions `stickyScrollPositions` (top, middle, bottom), the union of what fixed elements, and sticky elements that are stuck, paint inside the viewport; readable share = 1 − that area / viewport area, at the worst position | never by default | `stickyObscuresStatus` (`likely`) under `minReadableViewportShare` (0.5); one level lower when what can be dismissed makes the difference (`dismissible`, `loweredDismissible`); `info` when the baseline has the same problem |
+| `scroll-locked` | The root (or a `body` that clips) does not scroll vertically, and text, controls or other content lie below the viewport where the innermost scroll container around them cannot bring them | text or a control no scrolling reaches, reached at the baseline | `likely`: only pictures or other content out of reach. `info`: the document locks content out at the baseline as well (`atBaseline`: an open dialog, a consent wall) |
+| `double-scrollbar` | A scroll container on the axis the page scrolls on (vertical; horizontal for a page laid out horizontally) that scrolls by more than `scrollToleranceCssPx` (4), is at least `nestedScrollerMinShare` (half) of the viewport on that axis, and holds `nestedScrollerMinTextChars` (200) characters of text | never | `likely`; `info` at the baseline too. Not: `textarea`, `select`, `pre`, `code`, frames, the roles `log`, `listbox`, `grid`, `treegrid`, `table`, `menu`, `tree`, `application`, `combobox`, a scroller that holds a table, a carousel, a scroller inside a fixed or sticky element |
+| `survey` | Per layout: viewport, size of the document, texts, boxes and elements read, readable share; overlap candidates and how many the pixels cleared; what was left out at the limits | | `info` |
+
+Where the brief and this table differ, and why:
+
+- **The document scrolling in both axes** is not a rule of its own: `two-dimensional-scroll` carries the flag
+  `documentScrollsBothAxes`, and `double-scrollbar` is only the nested case.
+- **`scroll-locked` and a full-screen layer.** A fixed layer over the whole viewport does not stop the wheel
+  from scrolling the document under it (scrolling goes to the nearest scrollable ancestor, and a fixed element
+  has none but the document); what locks a page is the `overflow: hidden` that the script of a dialog puts on
+  `html` or `body`. So the lock is what is measured, and a full-screen layer is a flag (`fullScreenLayer`).
+- **A control that may reveal** lowers clipped content to `advisory`, not `likely`: on real pages (a news site's
+  header) it was the menu button that shows the same links.
+- **Content moved wholly off screen** (before the start edge, or a fixed panel outside the viewport, as a closed
+  off-canvas menu is) is counted as not displayed, not as lost.
+
+#### How each thing is measured
+
+The collector walks the composed tree (open shadow roots, same-origin frames; `maxElements`, 40000) and reads,
+for each layout, with the window scrolled to the start:
+
+- **Text**: the line boxes of each element's own text nodes (`Range.getClientRects`, one rectangle per line;
+  `maxTextItems`, `maxLinesPerText`), its font size, and the start of its text. Text that paints nothing is left
+  out: under `opacity: 0`, a `clip-path`, `content-visibility: hidden` (which still answers with the boxes of its
+  last layout: collapsed navigation boxes of an encyclopedia gave 381 false candidates before this), `visibility`
+  other than `visible`, a transparent colour or fill.
+- **The clipping chain** of each element along its containing blocks, not its ancestors: an absolutely
+  positioned element escapes the clipping of ancestors that are not its containing block, a fixed one of all but
+  a transformed or contained ancestor. Each clipping element gives its padding box (or the rectangle of `clip`),
+  its overflow on each axis and its scroll range. From this, in core: what of a line is shown (`all` clipping
+  ancestors) and what is cut off (`hidden` and `clip` only; `auto` and `scroll` can be scrolled).
+- **Boxes**: controls (links, buttons, fields, control roles, `tabindex` ≥ 0), the outermost element of excepted
+  content, and elements that paint (a background colour that is not transparent, a background image, replaced
+  content); `display: inline` boxes are kept for controls but never cover text (their rectangle spans the lines
+  they wrap over). `maxBoxes`.
+- **Elements beyond the edge** on the axis of the pass (`maxBeyond`), to name the cause.
+- **Fixed and sticky elements** at each scroll position: their box when they paint, otherwise the boxes and the
+  text inside them that do (`layerMaxDescendants`); whether they are a dialog, a landmark, and how many buttons and
+  controls they hold. A sticky element counts once it is stuck: its page position differs from the one at the top,
+  or it became sticky after scrolling.
+- **Disclosure controls** (`aria-expanded`, `aria-haspopup`, `aria-controls` on a button, `summary`).
+
+What is **excepted** (two dimensions allowed): `table` and the roles `table`, `grid`, `treegrid`; `img`,
+`picture`, the role `img`; `video`; `canvas`; `svg`; `iframe`, `frame`, `object`, `embed`; `pre` and `code` not
+set inline; the role `toolbar`; `math`; the role `application` (maps, editors). Text inside them carries the kind.
+A table cut off by a clipping element is still lost content: the exception is about scrolling, not about loss.
+
+**What "lost" means here.** Text or a control that the baseline shows in full and that the pass lays out (it has
+boxes) where the reader cannot get it on screen: outside what an element that does not scroll shows, beyond an
+edge the viewport does not scroll to, or below a viewport that does not scroll vertically (that one is
+`scroll-locked`). Not lost: what scrolls into view in a scroll container or with the document (that is
+`two-dimensional-scroll` when it takes the second direction), what a pass does not lay out at all
+(`display: none`), and what is moved wholly off screen. Those two are reported together as **text not displayed**
+(`content-lost`, flag `notDisplayed`, `info`), from `hiddenTextMinChars` (200) characters, and not at all when a
+disclosure control appeared in the pass that the baseline did not show: a menu button is how a responsive page is
+expected to hide its navigation.
+
+**The test by pixels** (`text-overlap`). For each candidate, up to `maxPixelChecks` (20) per pass, the region where
+the two meet is scrolled into view and the browser's hit test, with pointer events forced on everywhere for one
+task, says which of the two is painted on top; the one below is the one that may be covered (a text under a box is
+always the one). A text over a box is not tested further. Then the region is captured six times: as it is; with
+the covered text made transparent (`color`, `-webkit-text-fill-color`, `text-shadow`, decorations, markers,
+`::before` and `::after`, through a style sheet adopted for that capture and removed after it); with the other
+text transparent; with both; with the other hidden (`visibility: hidden`); with the other hidden and the covered
+text transparent. Ink is what making a text transparent changes, by more than `inkDeltaE` (5, CIEDE2000):
+
+- the ink of each text **alone** is measured while the other is transparent, so that pixels both would paint are
+  counted whatever their colours and whichever is painted last (two texts in the same colour on top of each other
+  look like one text where they meet);
+- **glyphs on glyphs**: at least `inkOverlapMinPx` (12) device pixels are ink of both alone, and at least
+  `inkOverlapMinShare` (5%) of the smaller ink;
+- **covered**: with the other hidden the covered text shows at least `inkMinPx` (20) pixels of ink, and at least
+  `coveredMinShare` (half) of that is missing as the page is.
+
+Either is a `fail` (`pixelConfirmed`, with `glyphsOverlap` or `inkCovered`). Neither: the candidate is dropped
+and counted in the survey (`OverlapClearedByPixels`). Left out before any of this: an element and what it holds
+(a superscript, a drop cap, a badge in its button), texts of one `ruby`, a pair of which one is in a fixed or
+sticky element and the other is not (that is `sticky-obscures`), dialogs, menus, list boxes and tooltips, text
+under a rotation or a skew, and every pair that already met at the baseline (text over a hero image, a floating
+label in its field, a heading set with tight lines).
+
+**Readable share.** Every fixed or stuck element counts, opaque or not: text under a translucent header is not
+readable either, and an element that paints nothing (a transparent container of toasts) is replaced by what it
+holds that paints. **Dismissible**: a dialog, or an element that is no landmark and holds a button and at most
+`maxDismissControls` (4) controls (a cookie banner). The status is lowered one level when the share without the
+dismissible ones reaches the threshold.
+
+**Evidence.** Every finding says the pass, the viewport asked for and the one measured (`innerWidth`,
+`clientWidth`, `scrollWidth`…), what was measured, and names related elements (`firstBeyondSelector`,
+`otherSelector`, `layerSelector`…). Its box is in page coordinates of the layout of the pass. Captures are taken
+while the pass is in effect: the viewport at the scroll position concerned (the first line beyond the edge, the
+worst position for fixed elements), the clipping element, or the region of an overlap with a second capture with
+the other element hidden. At most `maxCaptures` (40) per pass. A finding of one rule on one element is reported
+once per pass, with an id of its own.
+
+#### Settings
+
+`reflow` in the config file: the passes and their sizes (above), `settleMinMs`, `settleQuietMs`, `settleMaxMs`,
+`scrollSettleMs` (100), `scrollSettleMaxMs` (1000), `toleranceCssPx` (1), `beyondMinEm`, `controlBeyondMinShare`,
+`lostMinEm`, `lostMinLineShare`, `controlLostMinShare`, `hiddenTextMinChars`, `overlapMinShare`,
+`overlapCoreInset`, `overlapMinCssPx` (2), `inkDeltaE`, `inkMinPx`, `inkOverlapMinPx`, `inkOverlapMinShare`,
+`coveredMinShare`, `minReadableViewportShare`, `stickyObscuresStatus` (`advisory`, `likely` or `fail`),
+`stickyScrollPositions`, `layerMaxDescendants`, `maxDismissControls`, `fullScreenLayerMinShare` (0.9),
+`scrollToleranceCssPx`, `nestedScrollerMinShare`, `nestedScrollerMinTextChars`, and the limits `maxElements`,
+`maxTextItems` (10000), `maxBoxes` (4000), `maxLinesPerText` (200), `maxBeyond` (2000), `maxFindingsPerRule` (20
+per rule and pass; the survey counts the others), `maxCaptures`, `maxPixelChecks`, `clipMarginCssPx` (24),
+`sampleChars` (80). `packages/core/src/reflow-types.ts` documents each; values that are not usable are put back to
+the default.
+
+The check adds about 3 to 5 seconds to a page (two passes with their waits, three scroll positions in each
+layout, and the tests by pixels); see "Known limits of the reflow check".
+
+#### In the extension
+
+Not offered. The passes change the layout of the tab someone is looking at, for seconds, and set off the page's
+own handlers of `resize` and of media queries on a live page: menus close, players and editors resize, a form
+may be rendered again. The scan puts back the viewport, scroll positions, focus and its style sheets, not the
+state a page's scripts change in answer to a new size. Chrome also moves what lies under a resting pointer when
+the layout changes under it, and the extension stops a scan on pointer movement in the page; and closing the
+panel in the middle of a scan runs the agent's clean-up only (`pageRestore`), which does not put back the scroll
+positions a narrow layout clamps. Making it reliable there is open work; until then `CHECKS` of the extension
+does not list it, and nothing else in the extension changed.
+
+### Known limits of the reflow check
+
+- Three layouts and one state: the page as it is. A menu opened at 320 px, text shown on hover, a dialog opened by
+  a button are not visited. Content a page loads only when it is scrolled to, after the layout settled, is not
+  seen.
+- Zoom is emulated by the viewport, not applied: a page that reads `devicePixelRatio`, `visualViewport.scale` or
+  the size of the screen, or sets sizes in physical units, may lay out differently under real zoom.
+- Generated text (`::before`, `::after` content) is not measured as text, nor covers it as a box; text in
+  canvas or in pictures is not text. A pseudo-element painted over text is therefore not seen.
+- Text under a rotation, a skew or a 3D transform is left out of every rule: its rectangles are bounding boxes.
+- Scroll reachability follows the innermost scroll container of a line and the root, not a chain of nested
+  scrollers; a line that only a second, outer scroller would bring into view is counted as out of reach.
+- Cross-origin frames are measured as a box (excepted content) and not looked into; closed shadow roots are not
+  looked into. Same-origin frames are; their text is clipped by the frame, which counts as a scroller.
+- Layers are looked for in the top document only: a fixed element inside a frame is not one.
+- A page that changes its DOM on resize (a framework that renders another component for small screens) gives new
+  elements, which are compared with nothing: they can make `text-overlap` and `two-dimensional-scroll` findings
+  (both are about what the pass shows) but never `content-lost`, which needs the element at the baseline.
+- The limits above (`maxElements`, `maxTextItems`, `maxBoxes`, `maxPixelChecks`, `maxFindingsPerRule`) cut large
+  pages; the survey says how much was left out (`…Truncated`, `…TextsNotRead`, `…Omitted:…`).
+- Classic scroll bars (a headed Chrome on Windows) take room from `clientWidth`, which is what is compared; the
+  headless browser of the CLI has none.
+
 ### What `icon-contrast` reports
 
 Everything is measured on a capture of the control at rest, at device scale factor 2. The scale of each capture is
@@ -1654,6 +1860,15 @@ be taller while the scan runs, and the browser may remember the real size of wha
 (`contain-intrinsic-size: auto`), as it does after a reader has scrolled there. What the author hides with
 `content-visibility: hidden` or with `hidden="until-found"` is left as it is: not rendered, not read, and
 taking no room in a capture. They change nothing else.
+
+The reflow check, which runs last, changes the viewport to each of its passes (`Emulation.setDeviceMetricsOverride`,
+the capture scale kept), scrolls the window to look at fixed and sticky elements and to bring what it captures into
+view, and for the captures of a test by pixels adopts a style sheet that makes one or two texts transparent or
+hides an element, dropped right after the capture. Page scripts see `resize`, media query changes and `scroll`
+events, as they would when a window is resized and scrolled. Before anything else is put back it sets the viewport
+of the baseline again, waits for the layout, and puts back the scroll position of the window, of every scroll
+container (a narrow layout clamps their ranges) and of same-origin frames, also after a stop. What scripts did in
+answer to the new sizes (a menu closed, a component rendered for small screens) is not undone.
 
 A page that goes to another document while it is being read (a redirect by script or by `meta refresh` that
 fires after `load`, as on a site that has moved to another domain) is read again from the start on the document
@@ -2519,6 +2734,7 @@ framework can replace `render.ts` and `panel.ts` without touching the rest.
 - `name-role-value` activates nothing (`probe` is off whatever is configured, and the extension has no browser of
   its own to make copies in): link and button behaviour and state changes are not measured, only what the page says
   as it is. See "Decisions left to the owner" of that check.
+- `reflow` is not offered: see "In the extension" under "What `reflow` reports".
 - No option for anything but the checks and the endpoint of the model: thresholds are the defaults of `core`. Of
   the model options of the CLI only `--ai-text-only` has a counterpart ("Send captures", switched off); votes,
   timeouts, the size of the cache and what a verdict that disagrees does (`--ai-lower-on-disagree`) are the defaults.

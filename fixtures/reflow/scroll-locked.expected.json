@@ -1,0 +1,9 @@
+{
+  "description": "overflow: hidden and a height of 100% on html and body: the page fits at 1280 by 720, and at 320 by 800 and at 800 by 256 its text and its link run below the viewport where nothing scrolls. A failure in both passes: text and a control that no scrolling brings into view.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/scroll-locked" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

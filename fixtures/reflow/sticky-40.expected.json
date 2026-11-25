@@ -1,0 +1,9 @@
+{
+  "description": "A fixed header (80 px) and a fixed footer (74 px). At 800 by 256 they leave 40% of the viewport to read, under the working threshold of 50%: likely (the default of stickyObscuresStatus), named on the larger of the two. Both are landmarks, which nobody dismisses. At 320 by 800 and at the baseline they leave far more.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

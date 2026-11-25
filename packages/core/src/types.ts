@@ -1,3 +1,5 @@
+import type { ReflowConfig, ReflowSurvey } from './reflow-types.js';
+
 export type JsonValue =
   | string
   | number
@@ -18,7 +20,8 @@ export type CheckId =
   | 'headings'
   | 'lists'
   | 'grouping'
-  | 'name-role-value';
+  | 'name-role-value'
+  | 'reflow';
 
 /** CSS pixels, relative to the top-left of the document of the frame the node lives in. */
 export interface Box {
@@ -1101,6 +1104,8 @@ export interface NameRoleValueSurvey {
 
 export interface Snapshot {
   environment: Environment;
+  /** Present when the reflow check was collected. */
+  reflow?: ReflowSurvey;
   /** Present when the name-role-value check was collected. */
   nameRoleValue?: NameRoleValueSurvey;
   /** Present when the grouping check was collected. */
@@ -2429,6 +2434,7 @@ export interface Config {
   lists: ListsConfig;
   /** The grouping check reads text blocks as the headings check does, with the settings of `headings` for that part. */
   grouping: GroupingConfig;
+  reflow: ReflowConfig;
   adjudication: AdjudicationConfig;
   baseline: BaselineConfig;
   run: RunConfig;

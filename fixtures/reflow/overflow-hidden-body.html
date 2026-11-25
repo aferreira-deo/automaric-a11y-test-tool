@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: overflow-hidden-body</title>
+    <style>
+      /* The classic way to hide a reflow failure: horizontal scrolling switched off on the root and on body. */
+      html, body { overflow-x: hidden; }
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      #wide { width: 640px; }
+      .actions { width: 640px; display: flex; justify-content: space-between; }
+      button { font: inherit; padding: 6px 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Delivery and returns</h1>
+    <p>Parcels leave the warehouse within two working days.</p>
+    <div id="wide">
+      <p>Items can be returned within thirty days of delivery, in their original packaging, with the slip that came with them. The refund is made to the card used for the order within five working days of the return reaching us.</p>
+      <div class="actions"><button type="button">Print the slip</button><button type="button" id="far">Start a return</button></div>
+    </div>
+  </body>
+</html>

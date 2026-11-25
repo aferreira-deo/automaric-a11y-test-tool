@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: columns-collide</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      h1 { margin: 16px; font-size: 24px; }
+      /* Two columns placed by hand. At 1280 and at 800 px they stand apart; at 320 the second is pulled over the first. */
+      .columns { position: relative; height: 900px; }
+      .col-a { position: absolute; top: 0; left: 0; width: 45%; min-width: 240px; }
+      .col-b { position: absolute; top: 0; left: calc(100% - 300px); width: 280px; }
+      .col-a p, .col-b p { margin: 0 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Two columns</h1>
+    <div class="columns">
+      <div class="col-a"><p id="text-a">The first column holds the description of the walk: it starts at the old mill, follows the river for two miles, crosses the footbridge and climbs through the beech wood to the ridge, from where the town and the bay can be seen on a clear day.</p></div>
+      <div class="col-b"><p id="text-b">The second column gives the practical details: four hours on foot, a climb of three hundred metres, boots needed after rain, no shop on the way, and the last bus back from the ridge leaves at six.</p></div>
+    </div>
+  </body>
+</html>

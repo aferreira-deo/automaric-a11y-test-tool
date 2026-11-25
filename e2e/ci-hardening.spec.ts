@@ -277,10 +277,11 @@ test('--storage-state: values of the session are replaced in texts, never in the
   expect(report.a11yVision.findings.length).toBeGreaterThan(4);
   for (const finding of report.a11yVision.findings) {
     expect(['fail', 'likely', 'advisory', 'info']).toContain(finding.status);
-    expect(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value']).toContain(finding.check);
+    expect(['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value', 'reflow']).toContain(finding.check);
     expect(finding.rule.startsWith(`${finding.check}/`)).toBe(true);
   }
-  expect(report.violations.map((rule) => rule.id)).toEqual(['focus-indicator/no-visible-change']);
+  // The tokens are set in large bold type and do not wrap: at 320 CSS px they run past the edge (reflow).
+  expect(report.violations.map((rule) => rule.id)).toEqual(['focus-indicator/no-visible-change', 'reflow/two-dimensional-scroll']);
   // The texts read from the page are there, with the values replaced.
   const messages = report.a11yVision.findings.map((finding) => finding.message).join('\n');
   expect(messages).toContain('Token [redacted]');
@@ -293,7 +294,9 @@ test('--storage-state: values of the session are replaced in texts, never in the
   expect(texts.baseline).toContain('#btn-[redacted]');
   const again = await cli(testInfo, ...args, '-o', out('again.json'));
   expect(again.code).toBe(0);
-  expect((await json<PageReport>(out('again.json'))).a11yVision.baseline).toMatchObject({ new: 0, baselined: 2, stale: 0 });
+  // Two of focus-indicator, and those of reflow (the tokens past the edge, one per pass).
+  expect((await json<PageReport>(out('again.json'))).a11yVision.baseline).toMatchObject({ new: 0, baselined: failsOf(report).length, stale: 0 });
+  expect(failsOf(report).filter((finding) => finding.check === 'focus-indicator')).toHaveLength(2);
 });
 
 test('credentials and tokens in an address reach the browser and nothing that is written', async ({ baseURL }, testInfo) => {

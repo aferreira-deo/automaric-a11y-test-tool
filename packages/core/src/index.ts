@@ -18,3 +18,5 @@ export * from './measure/headings.js';
 export * from './measure/lists.js';
 export * from './measure/grouping.js';
 export * from './measure/name-role-value.js';
+export * from './reflow-types.js';
+export * from './measure/reflow.js';

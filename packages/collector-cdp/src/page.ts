@@ -40,6 +40,13 @@ export interface StablePage {
   /** CDP node id of an element the agent holds under `key`. */
   nodeIdOf: (key: number) => Promise<number>;
   matchedStyles: (nodeId: number) => Promise<MatchedStyles>;
+  /**
+   * Registers a step that puts back something a collector changed, run when `body` is over and
+   * before the agent's own clean-up, last registered first: also after a stop, once the gate is
+   * open again, when the collector could not run it itself. A step should do nothing when its
+   * collector already put the page back.
+   */
+  onRestore: (step: () => Promise<unknown>) => void;
 }
 
 /** Remote objects of hit-tested nodes are held under this group and released after each element. */
@@ -218,6 +225,7 @@ export async function withStablePage<T>(
 
   let agentReady = false;
   const agent = async <R>(call: string): Promise<R> => (await world.evaluate(`${AGENT_GLOBAL}.${call}`)).result.value as R;
+  const restorers: (() => Promise<unknown>)[] = [];
 
   const screenshot = async (clip: Box): Promise<Capture> => {
     const { data } = (await cdp.send('Page.captureScreenshot', {
@@ -291,6 +299,7 @@ export async function withStablePage<T>(
       return nodeId;
     },
     matchedStyles: async (nodeId) => (await cdp.send('CSS.getMatchedStylesForNode', { nodeId })) as MatchedStyles,
+    onRestore: (step) => void restorers.push(step),
   };
 
   try {
@@ -341,6 +350,7 @@ export async function withStablePage<T>(
         restore.onIncomplete?.();
       }
     };
+    for (const restorer of [...restorers].reverse()) await step(restorer);
     if (agentReady) await step(() => agent('cleanup()'));
     await step(() => cdp.send('CSS.disable'));
     await step(() => cdp.send('DOM.disable'));

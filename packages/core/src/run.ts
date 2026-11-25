@@ -5,6 +5,7 @@ import { iconContrastCheck } from './checks/icon-contrast.js';
 import { listsCheck } from './checks/lists.js';
 import { nameRoleValueCheck } from './checks/name-role-value.js';
 import { noopCheck } from './checks/noop.js';
+import { reflowCheck } from './checks/reflow.js';
 import { fingerprint, signatureKey } from './fingerprint.js';
 import { TOOL_NAME, TOOL_VERSION } from './meta.js';
 import type { Check, CheckId, Config, Finding, ScanResult, Snapshot } from './types.js';
@@ -17,6 +18,7 @@ const registry = new Map<CheckId, Check>([
   [listsCheck.id, listsCheck],
   [groupingCheck.id, groupingCheck],
   [nameRoleValueCheck.id, nameRoleValueCheck],
+  [reflowCheck.id, reflowCheck],
 ]);
 
 export function registeredChecks(): CheckId[] {

@@ -1,0 +1,5 @@
+{
+  "description": "A wide image, a pre with a long line, a pre that scrolls on its own, a canvas used as a map. They widen the page at 320 by 800, and may: info at most, and nothing for the pre that scrolls inside itself.",
+  "checks": ["reflow"],
+  "expected": [{ "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }]
+}

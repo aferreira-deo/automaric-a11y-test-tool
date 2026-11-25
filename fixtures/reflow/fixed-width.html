@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: fixed-width</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { max-width: 960px; }
+      /* A block of running text with a width in pixels: at 320 CSS px it reaches 296 px beyond the viewport. */
+      #wide { width: 600px; background: #f4f4f4; padding: 0 8px; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Opening hours of the library</h1>
+      <p>The reading rooms are open every day of the week. Holidays are announced on this page a month ahead.</p>
+      <div id="wide">
+        <p>Members can borrow up to twelve items at a time, for three weeks, and renew them twice online or at the desk, unless another member has reserved them in the meantime. Late returns are not fined, but borrowing is suspended until the item is back.</p>
+      </div>
+      <p>Questions can be sent through the form on the contact page, or asked at the desk on the ground floor.</p>
+    </main>
+  </body>
+</html>

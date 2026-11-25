@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: invisible-overflow</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .skip { position: absolute; left: -9999px; top: 0; }
+      .skip:focus { left: 16px; }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+      /* Wider than a small viewport and painting nothing: an empty spacer, a tracking pixel row. */
+      .spacer { width: 900px; height: 1px; }
+      .ghost { width: 900px; color: transparent; }
+      .faded { width: 900px; opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to the content</a>
+    <main id="main">
+      <h1>Nothing to see beyond the edge</h1>
+      <p>This page is wider than a small viewport only because of things that show nothing.<span class="sr-only"> A note for screen readers that is long enough to reach well beyond the edge of a small viewport if it were shown.</span></p>
+      <div class="spacer"></div>
+      <div class="ghost">Text in a transparent colour that runs wider than a small viewport and that nobody can see on the page.</div>
+      <div class="faded">Text under opacity zero that runs wider than a small viewport and that nobody can see on the page either.</div>
+      <p>The end of the page.</p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: restore-state</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      /* Items of half the viewport: at 1280 px the strip scrolls to 4000, at 320 px no further than 1280. */
+      #strip { display: flex; overflow-x: auto; }
+      #strip > div { flex: none; width: 50vw; height: 60px; border-right: 1px solid #999; }
+      /* A box as tall as a quarter of the viewport, scrolled: its range grows and shrinks with the viewport. */
+      #box { height: 25vh; overflow-y: auto; border: 1px solid #767676; }
+      #box p { margin: 0 0 300px; }
+      #wide { width: 600px; }
+      #header { position: sticky; top: 0; background: #0b3d6e; color: #fff; padding: 8px; }
+      .spacer { height: 2400px; }
+      iframe { display: block; border: 1px solid #595959; margin: 16px 0; }
+    </style>
+  </head>
+  <body>
+    <header id="header">Sticky header</header>
+    <div id="strip"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div></div>
+    <div id="box"><p>Start of the box.</p><p>Middle of the box.</p><p>End of the box.</p></div>
+    <p><label for="field">Name</label> <input id="field" type="text" value="Ada" /></p>
+    <div id="wide"><p>A block wider than a small viewport, so that the narrow layout scrolls horizontally and its scroll positions differ from those of the wide one.</p></div>
+    <div class="columns" style="position: relative; height: 300px">
+      <p id="a" style="position: absolute; left: 0; width: 45%; min-width: 240px; margin: 0">Two columns that collide at a small width, so that the scan adopts style sheets to test them by pixels.</p>
+      <p id="b" style="position: absolute; left: calc(100% - 300px); width: 280px; margin: 0">The second column, drawn over the first at 320 px and apart at 1280 px.</p>
+    </div>
+    <iframe id="frame" src="../focus-indicator/restore-state-child.html" title="Same-origin document" width="300" height="100"></iframe>
+    <div class="spacer"></div>
+  </body>
+</html>

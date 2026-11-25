@@ -1,0 +1,9 @@
+{
+  "description": "Under 600 px wide the article is given a height of 90vh and scrolls inside a page that scrolls too: two vertical scroll bars for the main content at 320 by 800. Likely, on the article. At the baseline and at 800 by 256 the article is in the flow.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#content", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/double-scrollbar" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

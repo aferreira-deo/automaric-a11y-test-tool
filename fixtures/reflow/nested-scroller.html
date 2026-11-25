@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: nested-scroller</title>
+    <style>
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      header, footer { padding: 16px; background: #f0f0f0; }
+      #content { padding: 0 16px; max-width: 960px; }
+      /* On a small screen the article gets a height and scrolls inside a page that scrolls too. */
+      @media (max-width: 600px) {
+        #content { height: 90vh; overflow-y: auto; border: 1px solid #767676; }
+      }
+      footer p { margin: 0 0 12px; }
+    </style>
+  </head>
+  <body>
+    <header><h1>The town museum</h1><p>Open from Tuesday to Sunday.</p></header>
+    <main id="content">
+      <h2>The collections</h2>
+      <p>The museum holds about forty thousand objects, from the tools of the first farmers of the valley to the posters of the last century. A tenth of them are shown at any time; the rest can be seen on request in the study room.</p>
+      <p>The archaeology gallery on the ground floor shows the finds of the excavations under the market square: coins, pottery, the foundations of a Roman bath and the skeleton of a horse buried with its harness.</p>
+      <p>The first floor is given to the history of the town, its trades and its port, with models of the ships built in the yards until they closed, and the paintings the shipowners ordered of their fleets.</p>
+      <p>The second floor holds the fine arts collection, mostly landscapes of the coast painted by the artists who spent their summers here, and a room of drawings that changes every three months.</p>
+      <p>Temporary exhibitions take place in the old chapel across the courtyard. The next one, on the lighthouses of the region, opens in April.</p>
+      <p>Guided tours start at eleven and at three, from the entrance hall. They last an hour and are free with the ticket; groups book ahead.</p>
+      <p>The study room is open on Wednesdays and Fridays, by appointment. Researchers can ask for objects, photographs and archives to be brought out.</p>
+      <p>The shop sells the catalogues of the collections, prints of the paintings and books on the history of the region.</p>
+    </main>
+    <footer>
+      <p>Museum of the town, harbour street. Free on the first Sunday of the month.</p>
+      <p>Lifts to every floor; wheelchairs can be borrowed at the desk. Large print guides are available in the entrance hall.</p>
+      <p>The café in the courtyard is open during the opening hours of the museum.</p>
+    </footer>
+  </body>
+</html>

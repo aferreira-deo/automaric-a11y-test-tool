@@ -1,4 +1,5 @@
 import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, GroupingConfig, HeadingsConfig, IconConfig, ListsConfig, NameRoleValueConfig, RunConfig, SelectorConfig } from './types.js';
+import type { ReflowConfig } from './reflow-types.js';
 
 /**
  * Every threshold and default of the tool lives in this object.
@@ -6,7 +7,7 @@ import type { AdjudicationConfig, BaselineConfig, CheckId, Config, FocusConfig, 
  * Each field is documented on its type in types.ts.
  */
 export const defaultConfig: Config = {
-  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value'],
+  checks: ['focus-indicator', 'icon-contrast', 'headings', 'lists', 'grouping', 'name-role-value', 'reflow'],
   nameRoleValue: {
     probe: 'safe',
     includeAxeCovered: true,
@@ -321,6 +322,53 @@ export const defaultConfig: Config = {
     itemTextMaxChars: 60,
     contextMaxItems: 12,
   },
+  reflow: {
+    narrowPass: true,
+    narrowWidthCssPx: 320,
+    narrowHeightCssPx: 800,
+    shortPass: true,
+    shortWidthCssPx: 800,
+    shortHeightCssPx: 256,
+    settleMinMs: 300,
+    settleQuietMs: 300,
+    settleMaxMs: 3000,
+    scrollSettleMs: 100,
+    scrollSettleMaxMs: 1000,
+    maxElements: 40000,
+    maxTextItems: 10000,
+    maxBoxes: 4000,
+    maxLinesPerText: 200,
+    maxBeyond: 2000,
+    maxFindingsPerRule: 20,
+    maxCaptures: 40,
+    maxPixelChecks: 20,
+    clipMarginCssPx: 24,
+    sampleChars: 80,
+    toleranceCssPx: 1,
+    beyondMinEm: 0.5,
+    controlBeyondMinShare: 0.25,
+    lostMinEm: 1,
+    lostMinLineShare: 0.5,
+    controlLostMinShare: 0.5,
+    hiddenTextMinChars: 200,
+    overlapMinShare: 0.15,
+    overlapCoreInset: 0.2,
+    overlapMinCssPx: 2,
+    inkDeltaE: 5,
+    inkMinPx: 20,
+    inkOverlapMinPx: 12,
+    inkOverlapMinShare: 0.05,
+    coveredMinShare: 0.5,
+    minReadableViewportShare: 0.5,
+    stickyObscuresStatus: 'likely',
+    stickyScrollPositions: [0, 0.5, 1],
+    layerMaxDescendants: 300,
+    maxDismissControls: 4,
+    fullScreenLayerMinShare: 0.9,
+    scrollToleranceCssPx: 4,
+    nestedScrollerMinShare: 0.5,
+    nestedScrollerMinTextChars: 200,
+  },
   adjudication: {
     provider: 'none',
     baseUrl: '',
@@ -415,6 +463,7 @@ export type ConfigInput = {
   headings?: Partial<HeadingsConfig>;
   lists?: Partial<ListsConfig>;
   grouping?: Partial<GroupingConfig>;
+  reflow?: Partial<ReflowConfig>;
   adjudication?: AdjudicationInput;
   baseline?: Partial<BaselineConfig>;
   run?: Partial<RunConfig>;
@@ -545,6 +594,7 @@ export function resolveConfig(input: ConfigInput = {}): Config {
     headings,
     lists,
     grouping,
+    reflow: resolveReflow(input.reflow),
     adjudication: resolveAdjudication(input.adjudication),
     baseline: resolveBaselineConfig(input.baseline),
     run: resolveRun(input.run),
@@ -681,6 +731,70 @@ export function resolveBaselineConfig(input: Partial<BaselineConfig> = {}): Base
     sortQuery: flag(input.sortQuery, base.sortQuery),
     stripTrailingSlash: flag(input.stripTrailingSlash, base.stripTrailingSlash),
     dropQueryParams: [...new Set(names)].sort(),
+  };
+}
+
+/**
+ * Settings of the reflow check, whatever was given: a configuration can come from a JSON file.
+ * Sizes are whole CSS pixels of at least 1 (and at most 10000), shares lie in (0, 1], durations fit
+ * a timer, `stickyObscuresStatus` is `advisory`, `likely` or `fail`.
+ */
+export function resolveReflow(input: Partial<ReflowConfig> = {}): ReflowConfig {
+  const base = defaultConfig.reflow;
+  const merged = { ...base, ...input };
+  const flag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
+  const size = (value: unknown, fallback: number): number => Math.min(10000, atLeast(value, 1, fallback));
+  const share = (value: unknown, fallback: number): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback);
+  const positive = (value: unknown, fallback: number): number => atLeast(value, 0, fallback, false);
+  const positions = Array.isArray(merged.stickyScrollPositions)
+    ? [...new Set(merged.stickyScrollPositions.filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1))].sort((a, b) => a - b)
+    : base.stickyScrollPositions;
+  return {
+    narrowPass: flag(merged.narrowPass, base.narrowPass),
+    narrowWidthCssPx: size(merged.narrowWidthCssPx, base.narrowWidthCssPx),
+    narrowHeightCssPx: size(merged.narrowHeightCssPx, base.narrowHeightCssPx),
+    shortPass: flag(merged.shortPass, base.shortPass),
+    shortWidthCssPx: size(merged.shortWidthCssPx, base.shortWidthCssPx),
+    shortHeightCssPx: size(merged.shortHeightCssPx, base.shortHeightCssPx),
+    settleMinMs: duration(merged.settleMinMs, 0, base.settleMinMs),
+    settleQuietMs: duration(merged.settleQuietMs, 0, base.settleQuietMs),
+    settleMaxMs: duration(merged.settleMaxMs, 0, base.settleMaxMs),
+    scrollSettleMs: duration(merged.scrollSettleMs, 0, base.scrollSettleMs),
+    scrollSettleMaxMs: duration(merged.scrollSettleMaxMs, 0, base.scrollSettleMaxMs),
+    maxElements: atLeast(merged.maxElements, 1, base.maxElements),
+    maxTextItems: atLeast(merged.maxTextItems, 0, base.maxTextItems),
+    maxBoxes: atLeast(merged.maxBoxes, 0, base.maxBoxes),
+    maxLinesPerText: atLeast(merged.maxLinesPerText, 1, base.maxLinesPerText),
+    maxBeyond: atLeast(merged.maxBeyond, 0, base.maxBeyond),
+    maxFindingsPerRule: atLeast(merged.maxFindingsPerRule, 1, base.maxFindingsPerRule),
+    maxCaptures: atLeast(merged.maxCaptures, 0, base.maxCaptures),
+    maxPixelChecks: atLeast(merged.maxPixelChecks, 0, base.maxPixelChecks),
+    clipMarginCssPx: positive(merged.clipMarginCssPx, base.clipMarginCssPx),
+    sampleChars: atLeast(merged.sampleChars, 8, base.sampleChars),
+    toleranceCssPx: positive(merged.toleranceCssPx, base.toleranceCssPx),
+    beyondMinEm: positive(merged.beyondMinEm, base.beyondMinEm),
+    controlBeyondMinShare: share(merged.controlBeyondMinShare, base.controlBeyondMinShare),
+    lostMinEm: positive(merged.lostMinEm, base.lostMinEm),
+    lostMinLineShare: share(merged.lostMinLineShare, base.lostMinLineShare),
+    controlLostMinShare: share(merged.controlLostMinShare, base.controlLostMinShare),
+    hiddenTextMinChars: atLeast(merged.hiddenTextMinChars, 1, base.hiddenTextMinChars),
+    overlapMinShare: share(merged.overlapMinShare, base.overlapMinShare),
+    overlapCoreInset: typeof merged.overlapCoreInset === 'number' && merged.overlapCoreInset >= 0 && merged.overlapCoreInset < 0.5 ? merged.overlapCoreInset : base.overlapCoreInset,
+    overlapMinCssPx: positive(merged.overlapMinCssPx, base.overlapMinCssPx),
+    inkDeltaE: positive(merged.inkDeltaE, base.inkDeltaE),
+    inkMinPx: atLeast(merged.inkMinPx, 1, base.inkMinPx),
+    inkOverlapMinPx: atLeast(merged.inkOverlapMinPx, 1, base.inkOverlapMinPx),
+    inkOverlapMinShare: share(merged.inkOverlapMinShare, base.inkOverlapMinShare),
+    coveredMinShare: share(merged.coveredMinShare, base.coveredMinShare),
+    minReadableViewportShare: share(merged.minReadableViewportShare, base.minReadableViewportShare),
+    stickyObscuresStatus: oneOf(merged.stickyObscuresStatus, ['advisory', 'likely', 'fail'], base.stickyObscuresStatus),
+    stickyScrollPositions: positions.length > 0 ? positions : base.stickyScrollPositions,
+    layerMaxDescendants: atLeast(merged.layerMaxDescendants, 0, base.layerMaxDescendants),
+    maxDismissControls: atLeast(merged.maxDismissControls, 0, base.maxDismissControls),
+    fullScreenLayerMinShare: share(merged.fullScreenLayerMinShare, base.fullScreenLayerMinShare),
+    scrollToleranceCssPx: positive(merged.scrollToleranceCssPx, base.scrollToleranceCssPx),
+    nestedScrollerMinShare: share(merged.nestedScrollerMinShare, base.nestedScrollerMinShare),
+    nestedScrollerMinTextChars: atLeast(merged.nestedScrollerMinTextChars, 0, base.nestedScrollerMinTextChars),
   };
 }
 

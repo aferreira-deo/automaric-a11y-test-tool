@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: table-scroller</title>
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .table-wrap { overflow-x: auto; border: 1px solid #767676; }
+      table { border-collapse: collapse; }
+      th, td { padding: 4px 12px; border: 1px solid #ccc; white-space: nowrap; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <h1>Train times</h1>
+    <p>The table scrolls on its own; the page does not.</p>
+    <div class="table-wrap" id="wrap" tabindex="0" role="region" aria-label="Departures">
+      <table id="data">
+        <caption>Departures from the central station</caption>
+        <thead><tr><th>Train</th><th>Destination</th><th>Departure</th><th>Arrival</th><th>Platform</th><th>Duration</th><th>Changes</th><th>Operator</th></tr></thead>
+        <tbody>
+          <tr><td>IC 2041</td><td>Northport harbour</td><td>08:12</td><td>10:47</td><td>4</td><td>2 h 35 min</td><td>none</td><td>National Rail</td></tr>
+          <tr><td>RE 118</td><td>Easton market square</td><td>08:30</td><td>09:52</td><td>7</td><td>1 h 22 min</td><td>one, at Midvale</td><td>Regional Lines</td></tr>
+          <tr><td>IC 2043</td><td>Northport harbour</td><td>09:12</td><td>11:47</td><td>4</td><td>2 h 35 min</td><td>none</td><td>National Rail</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Times are those of the timetable and may change on the day.</p>
+  </body>
+</html>
