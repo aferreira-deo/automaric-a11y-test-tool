@@ -1,0 +1,11 @@
+{
+  "description": "A short page under an open modal cookie dialog that locks body. At 800 by 256 the form of the page is out of reach while the dialog is open: info (modalOpen), not a failure. The dialog scrolls itself (max-height, overflow: auto).",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": ["modalOpen"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

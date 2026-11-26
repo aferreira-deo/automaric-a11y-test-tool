@@ -1,0 +1,9 @@
+{
+  "description": "A news ticker moved by a CSS animation through a box with overflow: hidden. At 320 px the line is cut by the box, which it moves through: info (moving).",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["moving", "clippedByAncestor"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

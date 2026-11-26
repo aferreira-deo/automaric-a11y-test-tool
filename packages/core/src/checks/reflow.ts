@@ -56,7 +56,9 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     ? ' Recorded as info because the viewport measured is not the one asked for.'
     : flags.has('notSettled')
       ? ' The layout was still changing when it was measured, so nothing is reported above likely.'
-      : '';
+      : flags.has('unsettled')
+        ? ' Something on the page kept moving by script while it was measured, so this is likely rather than a failure.'
+        : '';
   switch (candidate.rule) {
     case REFLOW_RULES.twoDimensional: {
       if (flags.has('innerScroller')) {
@@ -83,23 +85,26 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.lost: {
       if (flags.has('notDisplayed')) {
         return {
-          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed${flags.has('offScreen') ? ` or moved wholly off screen (${String(v['textsMovedOffScreen'])})` : ''}, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
+          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed${flags.has('offScreen') ? ` or parked wholly off screen (${String(v['textsMovedOffScreen'])}), where no scrolling reaches and no control names them in aria-controls` : ''}, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
           help: HELP.notDisplayed,
         };
       }
       const what = `${String(v['linesCut'])} line(s) of text${Number(v['controlsCut']) > 0 ? ` and ${String(v['controlsCut'])} control(s)` : ''}`;
+      // The physical side that was measured, whatever the direction of the page.
+      const side = typeof v['side'] === 'string' ? String(v['side']) : '';
       const why = flags.has('rootOverflowHidden')
-        ? 'lie beyond the right edge of a viewport that does not scroll horizontally (overflow-x: hidden on the root or on body), inside this element'
+        ? `lie beyond the ${side || 'right'} edge of a viewport that does not scroll horizontally (overflow-x: hidden on the root or on body), inside this element`
         : flags.has('fixedBeyondViewport')
-          ? 'of this fixed element lie beyond the viewport, where scrolling never brings them'
+          ? `of this fixed element lie beyond the ${side ? `${side} edge of the ` : ''}viewport, where neither scrolling the page nor a scroll container of its own brings them`
           : flags.has('beforeStartEdge')
-            ? 'lie before the start edge of the document, where no scrolling reaches'
+            ? `lie before the start edge of the document${side ? ` (beyond its ${side} edge)` : ''}, where no scrolling reaches`
             : 'are cut off by this element, which clips what overflows it';
       const first = related('firstCut');
       const base = `${where}, ${what} shown in full at the baseline viewport ${why}.${first ? ` The first is ${first}.` : ''}${quote(candidate.sample)}`;
       if (flags.has('ellipsis') || flags.has('lineClamp')) return { message: `${base} The text is truncated with ${flags.has('ellipsis') ? 'an ellipsis' : 'a line clamp'}.${tail}`, help: HELP.truncated };
       if (flags.has('clipsAtBaseline')) return { message: `${base} Recorded as info because this element already hides part of what it holds at the baseline viewport, as the viewport of a carousel does.${tail}`, help: HELP.lost };
-      if (flags.has('carousel')) return { message: `${base} Recorded as info because this element is the viewport of a carousel (scroll snapping or aria-roledescription).${tail}`, help: HELP.lost };
+      if (flags.has('moving')) return { message: `${base} Recorded as info because what is cut moves through this element by itself (an animation, a ticker, a script), so it is shown in turn.${tail}`, help: HELP.lost };
+      if (flags.has('carousel')) return { message: `${base} Recorded as info because this element is the viewport of a carousel (scroll snapping, aria-roledescription, controls that name it or previous and next controls beside it, a track that slides).${tail}`, help: HELP.lost };
       if (flags.has('revealControl')) return { message: `${base} Advisory rather than a failure because a control inside it or beside it (a button, a summary, an element with aria-expanded) may show what is hidden.${tail}`, help: HELP.lost };
       return { message: `${base}${tail}`, help: HELP.lost };
     }
@@ -111,7 +116,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
           ...(flags.has('glyphsOverlap') ? [`${String(v['inkBothPx'])} device pixels are ink of both texts`] : []),
           ...(flags.has('inkCovered') ? [`${Math.round(Number(v['coveredShare']) * 100)}% of the ink of this text is missing until the other is hidden`] : []),
         ].join(', and ');
-        return { message: `${met} Confirmed by pixels: ${how}.${tail}`, help: HELP.overlap };
+        return { message: `${met}${flags.has('decorativeCover') ? ' The other is decorative (aria-hidden or inert), so only ink of this text that it hides counts.' : ''} Confirmed by pixels: ${how}.${tail}`, help: HELP.overlap };
       }
       return {
         message: `${met} Measured from boxes only (${flags.has('notTested') ? 'beyond the limit of tests by pixels' : 'the region could not be captured'}), so ${candidate.status === 'likely' ? 'likely' : 'info, since which of the two is painted on top is not known'}.${tail}`,
@@ -120,11 +125,12 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     }
     case REFLOW_RULES.sticky: {
       const share = Math.round(Number(v['readableShare']) * 100);
-      const base = `${where}, fixed and stuck elements leave ${share}% of the viewport to read${flags.has('afterScroll') ? ` once the page is scrolled (${String(v['scrollY'])} px)` : ''}, under the ${Math.round(Number(v['threshold']) * 100)}% this tool asks for. ${String(v['layers'])} element(s) take part; this one takes the most room.`;
+      const scrolled = flags.has('mainScroller') ? 'the scroll container that holds the page' : 'the page';
+      const base = `${where}, fixed and stuck elements leave ${share}% of the viewport to read${flags.has('afterScroll') ? ` once ${scrolled} is scrolled (${String(v['scrollY'])} px)` : flags.has('mainScroller') ? ' (the document does not scroll; the scroll container that holds the page was scrolled to look)' : ''}, under the ${Math.round(Number(v['threshold']) * 100)}% this tool asks for. ${String(v['layers'])} element(s) take part; this one takes the most room.`;
       if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the baseline viewport has the same problem (${Math.round(Number(v['readableShareAtBaseline']) * 100)}%).${tail}`, help: HELP.sticky };
       if (flags.has('loweredDismissible')) {
         return {
-          message: `${base} ${String(v['dismissibleLayers'])} of them can be dismissed (a dialog, or a banner with a button); without them ${Math.round(Number(v['readableShareWithoutDismissible']) * 100)}% is readable, so the status is one level lower.${tail}`,
+          message: `${base} ${String(v['dismissibleLayers'])} of them can be dismissed (an open dialog, or a banner with a control to close, accept or refuse); without them ${Math.round(Number(v['readableShareWithoutDismissible']) * 100)}% is readable, so the status is one level lower.${tail}`,
           help: HELP.sticky,
         };
       }
@@ -133,6 +139,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.locked: {
       const first = related('firstUnreachable');
       const base = `${where}, the document does not scroll vertically (overflow-y: ${String(v['overflowY'])}) and ${String(v['unreachableTexts'])} element(s) with text, ${String(v['unreachableControls'])} control(s) and ${String(v['unreachableOther'])} other piece(s) of content lie below the viewport where no scroll container brings them.${first ? ` The first is ${first}.` : ''}${quote(candidate.sample)}${flags.has('fullScreenLayer') ? ' A fixed layer covers the whole viewport.' : ''}`;
+      if (flags.has('modalOpen')) return { message: `${base} Recorded as info because an open modal layer (a dialog, or a layer over the whole viewport) stops the page from scrolling while it is open: what lies behind it is not lost. Its own content is measured on its own (content-lost).${tail}`, help: HELP.locked };
       if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the document locks content out of reach at the baseline viewport as well (a dialog or a consent wall that stops scrolling while it is open does that at every size).${tail}`, help: HELP.locked };
       if (candidate.status === 'likely') return { message: `${base} Likely: what is out of reach is no text and no control.${tail}`, help: HELP.locked };
       return { message: `${base}${tail}`, help: HELP.locked };
@@ -141,7 +148,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     default: {
       const vertical = v['axis'] !== 'x';
       return {
-        message: `${where}, the page scrolls ${vertical ? 'vertically' : 'horizontally'} and so does this element, which takes ${Math.round(Number(v['scrollerShareOfViewport']) * 100)}% of the viewport ${vertical ? 'height' : 'width'} and holds ${String(v['textChars'])} characters of text: two scroll bars for the same direction.${flags.has('atBaseline') ? ' Recorded as info because it is the same at the baseline viewport.' : ''}${tail}`,
+        message: `${where}, the page scrolls ${vertical ? 'vertically' : 'horizontally'} and so does this element, which takes ${Math.round(Number(v['scrollerShareOfViewport']) * 100)}% of the viewport ${vertical ? 'height' : 'width'} and holds ${String(v['textChars'])} characters of text: two scroll bars for the same direction.${flags.has('atBaseline') ? (candidate.status === 'info' ? ' Recorded as info because the baseline viewport has it too and it takes less of the viewport than a scroller that holds the page (nestedScrollerAtBaselineMinShare).' : ' The baseline viewport has it too; reported all the same, as it is what the reader of the reflowed page gets.') : ''}${tail}`,
         help: HELP.double,
       };
     }
@@ -176,7 +183,7 @@ export const reflowCheck: Check = {
     const named = (key: number): { selector: string; frame: string } | null => (key === 0 ? null : (survey.names[String(key)] ?? null));
     const drafts: FindingDraft[] = [];
     const flags = new Set<string>();
-    const values: Record<string, string | number | boolean> = { ...layoutValues('baseline', survey.baseline, settings) };
+    const values: Record<string, string | number | boolean> = survey.baseline ? { ...layoutValues('baseline', survey.baseline, settings) } : {};
     let listed = 0;
     for (const { layout, report: pass } of report.passes) {
       Object.assign(values, layoutValues(layout.pass, layout, settings), {
@@ -230,6 +237,21 @@ export const reflowCheck: Check = {
     }
     const { width, height } = snapshot.environment.viewport;
     const ran = survey.passes.map((layout) => `${layout.pass} ${layout.requested.width} by ${layout.requested.height}`);
+    const reference = survey.reference;
+    const baselineText =
+      reference && reference.source === 'configured'
+        ? `at a reference viewport of ${reference.width} by ${reference.height} CSS px (the caller's, ${survey.original.width} by ${survey.original.height}, is smaller than referenceMinWidthCssPx by referenceMinHeightCssPx)`
+        : `at the baseline viewport of ${survey.original.width} by ${survey.original.height} CSS px`;
+    for (const layout of [survey.baseline, ...survey.passes]) {
+      if (!layout) continue;
+      if (layout.motion) values[`${layout.pass}Unsettled`] = layout.motion;
+      if (layout.budgetSpent) values[`${layout.pass}SettleBudgetSpent`] = true;
+    }
+    if (survey.stopped) {
+      values['stopped'] = survey.stopped.reason;
+      values['stoppedDetail'] = survey.stopped.detail;
+      flags.add('stopped');
+    }
     drafts.push({
       check: 'reflow',
       rule: REFLOW_RULES.survey,
@@ -240,7 +262,10 @@ export const reflowCheck: Check = {
       box: { x: 0, y: 0, width, height },
       evidence: { crops: [], colors: {}, ratios: {}, flags: [...flags].sort(), values: { ...values, findings: listed, passes: survey.passes.map((layout) => layout.pass).join(' '), ...(survey.skipped.length > 0 ? { passesSkipped: survey.skipped.join(' ') } : {}) } },
       message:
-        `Measured the page at the baseline viewport of ${survey.original.width} by ${survey.original.height} CSS px and in ${ran.length} pass(es)${ran.length > 0 ? `: ${ran.join(', ')}` : ''}; the viewport was put back afterwards.` +
+        (survey.stopped
+          ? `The survey stopped before its end: ${survey.stopped.reason === 'navigated' ? 'the page went to another document while a pass was in effect (it reloads or navigates when the viewport changes), so nothing more could be measured' : `a step failed (${survey.stopped.detail})`}. `
+          : '') +
+        `Measured the page ${survey.baseline ? baselineText : '(no baseline)'} and in ${ran.length} pass(es)${ran.length > 0 ? `: ${ran.join(', ')}` : ''}; the viewport was put back afterwards.` +
         ` Reported ${listed} finding(s).` +
         (survey.skipped.length > 0 ? ` Switched off: ${survey.skipped.join(', ')}.` : '') +
         (flags.has('truncated') ? ' Some of the page was not examined, or some findings are not listed, at the limits of the configuration (see the values).' : ''),

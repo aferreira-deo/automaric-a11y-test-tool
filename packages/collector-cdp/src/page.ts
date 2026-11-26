@@ -47,7 +47,42 @@ export interface StablePage {
    * collector already put the page back.
    */
   onRestore: (step: () => Promise<unknown>) => void;
+  /**
+   * Sets the device metrics the page is to have once the collection is over, for a collector that changed the
+   * viewport and puts back scroll positions after it: the metrics read before anything was overridden when the
+   * caller asked for them back (`RestoreOptions.emulation: 'reapply'`), otherwise the stable override of the
+   * collection (cleared at the very end).
+   */
+  restoreMetrics: () => Promise<unknown>;
 }
+
+/** The device metrics a page had before the collection overrode them, as read from the page. */
+export interface OriginalMetrics {
+  /** The size of the visual viewport in CSS px at a page scale of 1: the device size of a mobile emulation, the viewport otherwise. */
+  width: number;
+  height: number;
+  deviceScaleFactor: number;
+  /** Mobile emulation: the page has `window.orientation`, which Chrome gives only to mobile pages. */
+  mobile: boolean;
+  screenWidth: number;
+  screenHeight: number;
+  /** Page scale (pinch zoom, or the initial scale of a mobile page). */
+  pageScale: number;
+}
+
+const ORIGINAL_METRICS_SCRIPT = `(() => {
+  const vv = window.visualViewport;
+  const scale = vv ? vv.scale : 1;
+  return {
+    width: Math.round((vv ? vv.width : innerWidth) * scale),
+    height: Math.round((vv ? vv.height : innerHeight) * scale),
+    deviceScaleFactor: devicePixelRatio,
+    mobile: typeof window.orientation === 'number',
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+    pageScale: scale,
+  };
+})()`;
 
 /** Remote objects of hit-tested nodes are held under this group and released after each element. */
 const HIT_OBJECT_GROUP = 'a11y-vision-hit';
@@ -189,6 +224,14 @@ export interface RestoreOptions {
   stepTimeoutMs?: () => number | null;
   /** Called once when a step was given up on: the page may not be as it was. */
   onIncomplete?: () => void;
+  /**
+   * What becomes of the device metrics at the end. `clear` (the default): the override is cleared, which gives
+   * the page back the size of its window and a scale of 1, right for a tab with no emulation of its own.
+   * `reapply`: the metrics read from the page before anything was overridden (size, device scale factor, mobile,
+   * screen, page scale) are set again, before the scroll positions are put back, and left in place: right for a
+   * caller that emulates through a session of its own and keeps this session attached (the Playwright wrapper).
+   */
+  emulation?: 'clear' | 'reapply';
 }
 
 /**
@@ -200,11 +243,13 @@ export interface RestoreOptions {
  * sheet and the `tabindex` values are removed, focus goes back to the element that had it, and
  * the scroll positions of the window, of same-origin frames and of scroll containers are put back.
  *
- * Emulation is the part that cannot be restored from here. Chrome keeps one device-metrics
- * override and one emulated media type per page, not per session, and offers no way to read
- * them: this function replaces them while it runs and clears them at the end, which is the
- * original state only if nobody else had set them. A caller that emulates through another
- * session (Playwright does) has to apply its own emulation again; the Playwright wrapper does so.
+ * Emulation is the delicate part. Chrome keeps one device-metrics override and one emulated media
+ * type per page, not per session, offers no way to read them, and drops the override of a session
+ * that detaches. By default this function clears the override at the end, which is the original
+ * state only if nobody else had set one. With `restore.emulation: 'reapply'` it reads the metrics
+ * from the page before overriding them (size of the visual viewport at scale 1, device pixel
+ * ratio, mobile, screen, page scale), sets them again before the scroll positions are put back,
+ * and leaves them: right for a caller that keeps this session attached (the Playwright wrapper).
  * Media features are different: only `prefers-reduced-motion` is touched, the others keep
  * whatever value another session gave them. `cdp` itself should carry no media emulation.
  */
@@ -300,9 +345,37 @@ export async function withStablePage<T>(
     },
     matchedStyles: async (nodeId) => (await cdp.send('CSS.getMatchedStylesForNode', { nodeId })) as MatchedStyles,
     onRestore: (step) => void restorers.push(step),
+    restoreMetrics: () => Promise.resolve(),
   };
 
+  // Read before anything is overridden.
+  let originalMetrics: OriginalMetrics | null = null;
+  const reapply = restore.emulation === 'reapply';
+  const stableMetrics = (): Promise<unknown> => cdp.send('Emulation.setDeviceMetricsOverride', { ...original.viewport, deviceScaleFactor: scale, mobile: false });
+  const restoreMetrics = async (): Promise<void> => {
+    if (!reapply || !originalMetrics) {
+      await stableMetrics();
+      return;
+    }
+    const metrics = originalMetrics;
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: metrics.width,
+      height: metrics.height,
+      deviceScaleFactor: metrics.deviceScaleFactor,
+      mobile: metrics.mobile,
+      screenWidth: metrics.screenWidth,
+      screenHeight: metrics.screenHeight,
+    });
+    // A mobile page is laid out again at its initial scale, which another layout in between can change.
+    if (metrics.mobile || Math.abs(metrics.pageScale - 1) > 0.001) await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: metrics.pageScale }).catch(() => undefined);
+  };
+  page.restoreMetrics = restoreMetrics;
+
   try {
+    if (reapply) {
+      const read = (await world.evaluate(ORIGINAL_METRICS_SCRIPT).catch(() => null))?.result.value as OriginalMetrics | undefined;
+      if (read && read.width > 0 && read.height > 0 && read.deviceScaleFactor > 0) originalMetrics = read;
+    }
     // The agent goes in first: it records focus and scroll positions before anything moves them.
     const options = agentOptions(config);
     await world.evaluate(`globalThis.${AGENT_GLOBAL} = (${agentFactory.toString()})(${JSON.stringify(options)}); 1`);
@@ -311,11 +384,7 @@ export async function withStablePage<T>(
     // Always sent, also when the page already has this device pixel ratio: a ratio that comes from
     // emulation set through another session (a Playwright context with deviceScaleFactor) is not
     // applied to screenshots taken through this one, which then come back at 1x (verified).
-    await cdp.send('Emulation.setDeviceMetricsOverride', {
-      ...original.viewport,
-      deviceScaleFactor: scale,
-      mobile: false,
-    });
+    await stableMetrics();
     if (overrideMotion) await setMedia([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
     await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await cdp.send('DOM.enable');
@@ -351,11 +420,16 @@ export async function withStablePage<T>(
       }
     };
     for (const restorer of [...restorers].reverse()) await step(restorer);
+    // The scroll positions are put back in the layout the page will have: with the caller's own metrics.
+    if (reapply && originalMetrics) await step(restoreMetrics);
     if (agentReady) await step(() => agent('cleanup()'));
+    // Reading the accessibility tree enables the domain in this session: a session kept for the next scan
+    // (the Playwright wrapper keeps it) starts from a clean one, as a new session would.
+    await step(() => cdp.send('Accessibility.disable'));
     await step(() => cdp.send('CSS.disable'));
     await step(() => cdp.send('DOM.disable'));
     await step(() => cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }));
     if (overrideMotion) await step(() => setMedia([]));
-    await step(() => cdp.send('Emulation.clearDeviceMetricsOverride'));
+    if (!(reapply && originalMetrics)) await step(() => cdp.send('Emulation.clearDeviceMetricsOverride'));
   }
 }

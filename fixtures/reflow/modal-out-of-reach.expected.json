@@ -1,0 +1,11 @@
+{
+  "description": "An open modal dialog, fixed at 40 px from the top, with no scroll bar of its own. At 800 by 256 its email field and its two buttons lie wholly below the viewport, where neither the page (locked) nor the dialog scrolls: its own content is lost, a measured failure, named on the dialog. Such a dialog cannot be dismissed. Fixed layers cover the viewport at the baseline already: info.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div:nth-of-type(2)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["fixedBeyondViewport", "control"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "An application shell: html and body do not scroll and one scroll container holds the page, with a sticky header and a sticky footer in it. The container is scrolled through the positions to look: at 800 by 256 the two stuck ones leave 41% of the viewport, likely, named on the header.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div > header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["mainScroller"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "description": "A large decorative word (aria-hidden) that reaches beyond the right edge at 320 px: decoration is never the cause of a failure. Nothing is reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "description": "An open modal dialog whose script locks body. What lies behind it below the viewport is out of reach while it is open, which is not a loss: scroll-locked is info (modalOpen), in both passes. The dialog fits both passes. Fixed layers leave nothing to read at the baseline already: info.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": ["modalOpen", "fullScreenLayer"] },
+    { "selector": "html", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": ["modalOpen"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

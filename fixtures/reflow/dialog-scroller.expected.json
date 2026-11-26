@@ -1,0 +1,10 @@
+{
+  "description": "A fixed dialog with max-height: 90vh and overflow: auto. At 800 by 256 its paragraphs lie below the viewport, where its own scroll bar brings them: not lost. It covers more than half of the viewport, and it can be dismissed (an open dialog with an OK button): sticky-obscures one level lower than likely, advisory, in both passes.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["dismissible", "loweredDismissible"] },
+    { "selector": "html > body > div", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["dismissible"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

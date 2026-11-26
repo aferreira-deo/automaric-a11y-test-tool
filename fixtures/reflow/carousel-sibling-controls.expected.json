@@ -1,0 +1,9 @@
+{
+  "description": "A carousel whose Previous and Next buttons are in a sibling container of its viewport (overflow: hidden). At 320 px the second and third cards are cut by the viewport: a carousel shows its slides in turn, info.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > main > div > div:nth-of-type(1)", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["carousel", "clippedByAncestor"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "A fixed header that holds a hidden search dialog, and a fixed footer. A hidden dialog does not make its header dismissible: likely, not lowered.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

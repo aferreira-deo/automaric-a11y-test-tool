@@ -5,7 +5,7 @@ import { collectSnapshot } from '@a11y-vision/collector-cdp';
 import type { CdpSession } from '@a11y-vision/collector-cdp';
 import { buildResult, resolveConfig } from '@a11y-vision/core';
 import type { AdjudicationInput, CheckId, ConfigInput, Png, ScanResult, Snapshot } from '@a11y-vision/core';
-import type { Page } from 'playwright-core';
+import type { CDPSession, Page } from 'playwright-core';
 import { loadVerdictCache, saveVerdictCache } from './cache-file.js';
 import { playwrightProbeHost } from './probe-host.js';
 import type { ProbeContextOptions } from './probe-host.js';
@@ -20,6 +20,23 @@ export interface AdjudicationRuntime {
   cache?: VerdictCache;
   /** An adapter of your own, in place of the one the settings describe. */
   adjudicator?: Adjudicator;
+}
+
+/**
+ * The CDP session each page is scanned through, kept for as long as the page lives. Chrome holds one device
+ * metrics override per page, and drops the one a session set when that session detaches, which leaves the page
+ * at the size of its window and a scale of 1 instead of the context's emulation. Kept attached, the session puts
+ * back the metrics the page had (`emulation: 'reapply'`) and they stay.
+ */
+const sessions = new WeakMap<Page, CDPSession>();
+
+async function sessionFor(page: Page): Promise<CDPSession> {
+  const known = sessions.get(page);
+  if (known) return known;
+  const session = await page.context().newCDPSession(page);
+  sessions.set(page, session);
+  page.once('close', () => sessions.delete(page));
+  return session;
 }
 
 /**
@@ -92,7 +109,7 @@ export class A11yVision {
     // A name for this machine (`localhost`, `*.localhost`) has to resolve to this machine. The
     // requests check that again when they connect; this is the refusal that can be read.
     if (adjudicator && !this.#runtime.adjudicator) await verifyEndpoint(config.adjudication);
-    const session = await this.#page.context().newCDPSession(this.#page);
+    const session = await sessionFor(this.#page);
     // Playwright types `send`/`on` against its own protocol map; the collector speaks plain CDP.
     const cdp: CdpSession = {
       send: (method, params) => session.send(method as never, params as never),
@@ -103,9 +120,8 @@ export class A11yVision {
     try {
       // Probing happens in a browser of its own, in copies of the page; never in this page.
       const probing = config.checks.includes('name-role-value') && config.nameRoleValue.probe === 'safe';
-      snapshot = await collectSnapshot(cdp, config, probing ? { probeHost: playwrightProbeHost(this.#page, this.#probeContext) } : {});
+      snapshot = await collectSnapshot(cdp, config, { emulation: 'reapply', ...(probing ? { probeHost: playwrightProbeHost(this.#page, this.#probeContext) } : {}) });
     } finally {
-      await session.detach();
       await this.#restoreEmulation();
     }
     const result = buildResult(snapshot, config, new Date());
@@ -131,20 +147,16 @@ export class A11yVision {
   }
 
   /**
-   * Chrome keeps one device-metrics override and one emulated media type per page. The collector
-   * replaces them through its own session and can only clear them, which also wipes what
-   * Playwright had applied for the context (viewport, deviceScaleFactor, isMobile) and for the
-   * page (emulateMedia). Both calls below make Playwright send its current state again; neither
-   * changes that state.
-   *
-   * Not restored, because Playwright has no call that sends it again: the context's `screen`
-   * option. After a scan `screen.width` and `screen.height` equal the viewport size.
+   * Chrome keeps one device-metrics override and one emulated media type per page. The device metrics are put
+   * back by the collector itself, through the session kept for the page: the size, device scale factor, mobile
+   * emulation, `screen` and page scale the page had before the scan (`emulation: 'reapply'`). Calling
+   * `page.setViewportSize` here would not do it: Playwright skips a size it believes it has already set, and
+   * when it does send one it makes `screen` the size of the viewport. The emulated media is sent again by
+   * Playwright: the collector cleared what it set for `prefers-reduced-motion`.
    */
   async #restoreEmulation(): Promise<void> {
     if (this.#page.isClosed()) return;
     await this.#page.emulateMedia({});
-    const viewport = this.#page.viewportSize();
-    if (viewport) await this.#page.setViewportSize(viewport);
   }
 }
 

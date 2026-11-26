@@ -28,6 +28,11 @@ export interface AgentReflowOptions {
   scrollSettleMaxMs: number;
   fontsTimeoutMs: number;
   layerMaxDescendants: number;
+  settleMotionMs: number;
+  settleBudgetMs: number;
+  dismissWords: string[];
+  carouselControlLevels: number;
+  carouselControlWords: string[];
 }
 
 /** What `measure()` reads: a `ReflowLayout` without what the collector adds. */
@@ -53,6 +58,12 @@ export interface ReflowAgent {
   begin(): void;
   /** Waits for the layout after the viewport changed: `settleMinMs`, then `settleQuietMs` without change, `settleMaxMs` at most. True when the size of the document kept still. */
   settle(min: boolean): Promise<boolean>;
+  /** What the waits of the layout being measured met so far: elements still moving by script, and whether the budget ran out. */
+  waits(): { motion: number; budgetSpent: boolean };
+  /** The scroll container that holds the page when the document does not scroll: the largest one that scrolls vertically and covers `minShare` of the viewport. Its key, or null. */
+  mainScroller(minShare: number): { key: number; max: number } | null;
+  /** Scrolls the element of `key` vertically and waits as `scrollTo` does. Returns where it went. */
+  scrollElement(key: number, y: number): Promise<{ x: number; y: number }>;
   /** Scrolls the window to the start and reads the layout. */
   measure(beyondAxis: 'x' | 'y' | null): AgentReflowMeasure;
   /** Fixed and sticky elements at the current scroll position. */
@@ -78,8 +89,8 @@ export const REFLOW_AGENT_GLOBAL = '__a11yVisionReflow';
 
 export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
   const MAIN = '__a11yVisionAgent';
-  const main = (): { named(element: Element): { selector: string; frame: string }; keyFor(element: Element): number } =>
-    (globalThis as unknown as Record<string, { named(element: Element): { selector: string; frame: string }; keyFor(element: Element): number }>)[MAIN]!;
+  type Main = { named(element: Element): { selector: string; frame: string }; keyFor(element: Element): number; wasAnimated?(element: Element): boolean };
+  const main = (): Main => (globalThis as unknown as Record<string, Main>)[MAIN]!;
   const JOIN = ' >>> ';
   const SKIP_TAGS = ['script', 'style', 'template', 'noscript', 'head', 'title', 'meta', 'link', 'option', 'optgroup', 'datalist', 'textarea', 'select', 'br', 'wbr', 'source', 'track', 'param', 'area', 'map'];
   const REPLACED = ['img', 'video', 'canvas', 'iframe', 'frame', 'object', 'embed', 'svg', 'input', 'textarea', 'select', 'button', 'picture'];
@@ -93,6 +104,16 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
   let nextKey = 1;
   const paintSheets: { owner: Document | ShadowRoot; sheet: CSSStyleSheet }[] = [];
   let recorded: { x: number; y: number; scrolls: Map<Element | Window, { x: number; y: number }> } | null = null;
+  /** The waits of the layout being measured: its budget, and what a script keeps moving. Reset by `settle(true)`. */
+  const freshPass = () => ({
+    start: performance.now(),
+    deadline: performance.now() + options.settleBudgetMs,
+    budgetSpent: false,
+    counts: new Map<Element, number>(),
+    repeaters: new Set<Element>(),
+    moving: new Set<Element>(),
+  });
+  let pass = freshPass();
 
   function keyOf(element: Element): number {
     let key = keys.get(element);
@@ -179,12 +200,34 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
    * `quietMs` at the end: a page that keeps changing its content (a ticker) without moving its
    * layout counts as settled.
    */
-  async function waitQuiet(minMs: number, quietMs: number, maxMs: number): Promise<boolean> {
+  async function waitQuiet(minMs: number, quietMs: number, maxWanted: number): Promise<boolean> {
     const start = performance.now();
+    // Every wait of a layout comes out of one budget; once it is spent, a wait is one frame.
+    const left = Math.max(0, pass.deadline - start);
+    const maxMs = Math.min(maxWanted, left);
+    minMs = Math.min(minMs, maxMs);
     let lastChange = start;
     let lastResize = start;
-    const observer = new MutationObserver(() => {
-      lastChange = performance.now();
+    const observer = new MutationObserver((records) => {
+      const now = performance.now();
+      let other = false;
+      for (const record of records) {
+        // A script that moves an element changes its style, or its class, again and again (a marquee by
+        // setInterval). Once it has done so three times it is known to move; after the motion bound its changes
+        // are no longer waited for, and it is recorded as moving.
+        if (record.type === 'attributes' && (record.attributeName === 'style' || record.attributeName === 'class') && record.target.nodeType === 1) {
+          const element = record.target as Element;
+          const count = (pass.counts.get(element) ?? 0) + 1;
+          pass.counts.set(element, count);
+          if (count >= 3) pass.repeaters.add(element);
+          if (pass.repeaters.has(element) && now - pass.start >= options.settleMotionMs) {
+            pass.moving.add(element);
+            continue;
+          }
+        }
+        other = true;
+      }
+      if (other) lastChange = now;
     });
     observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
     const resize = new ResizeObserver(() => {
@@ -209,6 +252,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     }
     observer.disconnect();
     resize.disconnect();
+    // Cut short by the budget, not by the wait of its own.
+    if (!quiet && maxMs < maxWanted) pass.budgetSpent = true;
     return quiet || performance.now() - lastResize >= quietMs;
   }
 
@@ -245,6 +290,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       overflowX,
       overflowY,
       rtl: rootStyle.direction === 'rtl',
+      ...(/^vertical|^sideways/.test(rootStyle.writingMode) ? { vertical: true } : {}),
     };
   }
 
@@ -275,6 +321,79 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     if (CONTROL_ROLES.includes(roleOf(element))) return true;
     const tabindex = element.getAttribute('tabindex');
     return tabindex !== null && /^\s*\d+\s*$/.test(tabindex);
+  }
+
+  /** A short accessible name, as the names of close buttons and slider arrows need it: aria-label, aria-labelledby, the text, the title, the value. */
+  function nameOf(element: Element): string {
+    const label = element.getAttribute('aria-label');
+    if (label && label.trim()) return label;
+    const ids = (element.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
+    const by = ids.map((id) => element.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
+    if (by.trim()) return by;
+    const text = (element as HTMLElement).innerText ?? element.textContent ?? '';
+    if (text.trim()) return text;
+    const alt = element.querySelector('img[alt]')?.getAttribute('alt');
+    if (alt && alt.trim()) return alt;
+    return element.getAttribute('title') ?? (element as HTMLInputElement).value ?? '';
+  }
+
+  function wordsMatcher(words: string[]): (name: string) => boolean {
+    const escaped = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, (char) => `\\${char}`).replace(/\s+/g, '\\s+'));
+    if (escaped.length === 0) return () => false;
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])(${escaped.join('|')})(?=$|[^\\p{L}\\p{N}])`, 'iu');
+    return (name) => pattern.test(name.replace(/\s+/g, ' ').trim().toLowerCase());
+  }
+  const dismissName = wordsMatcher(options.dismissWords);
+  const carouselName = wordsMatcher(options.carouselControlWords);
+  const CONTROL_SELECTOR = 'button,[role="button"],a[href],input[type="button"],input[type="submit"],[role="tab"],[role="link"]';
+
+  function isShown(element: Element): boolean {
+    return element.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  }
+
+  /** Moves by itself: a declared CSS animation, an animation or transition running when the scan began, or a script that keeps changing its style. */
+  function movingOf(element: Element, style: CSSStyleDeclaration): boolean {
+    if (style.animationName && style.animationName !== 'none') return true;
+    if (pass.moving.has(element)) return true;
+    try {
+      return main().wasAnimated?.(element) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The viewport of a carousel: scroll snapping, `aria-roledescription` on it or around it, it or its track named
+   * in `aria-controls` of a control, previous / next / pagination controls in the region it shares with them, or
+   * a track wider than it that a translation or a declared transition of its position moves.
+   */
+  function carouselOf(element: Element, style: CSSStyleDeclaration, controlled: Set<Element>): boolean {
+    if (style.scrollSnapType !== 'none' && style.scrollSnapType !== '') return true;
+    if (element.closest('[aria-roledescription]') !== null) return true;
+    if (controlled.has(element)) return true;
+    const view = element.ownerDocument.defaultView;
+    const width = element.clientWidth;
+    for (const child of element.children) {
+      if (controlled.has(child)) return true;
+      if (!view) continue;
+      const childStyle = view.getComputedStyle(child);
+      const wider = child.scrollWidth > width + options.toleranceCssPx || child.getBoundingClientRect().width > width + options.toleranceCssPx;
+      if (!wider) continue;
+      const translated = /^matrix\([^,]+, [^,]+, [^,]+, [^,]+, (-?[\d.e+-]+), (-?[\d.e+-]+)\)$/.exec(childStyle.transform);
+      if (translated && Math.abs(parseFloat(translated[1]!)) > 0.5) return true;
+      if (childStyle.translate && childStyle.translate !== 'none' && childStyle.translate !== '0px') return true;
+      if (/(^|,\s*)(transform|translate|left|right|margin-left|margin-right|margin-inline-start|inset-inline-start)(\s*,|$)/.test(childStyle.transitionProperty)) return true;
+    }
+    let region: Element | null = element.parentElement;
+    for (let level = 0; region && level < options.carouselControlLevels; level++, region = region.parentElement) {
+      if (region.localName === 'body' || region.localName === 'html') break;
+      for (const control of region.querySelectorAll(CONTROL_SELECTOR + ',[role="tablist"]')) {
+        if (element.contains(control) || !isShown(control)) continue;
+        if (control.getAttribute('role') === 'tablist' || control.getAttribute('role') === 'tab') return true;
+        if (carouselName(nameOf(control))) return true;
+      }
+    }
+    return false;
   }
 
   function isPopup(element: Element): boolean {
@@ -325,6 +444,14 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     ruby: number | undefined;
     popup: boolean;
     invisible: boolean;
+    /** Under aria-hidden="true" or inert. */
+    decorative: boolean;
+    /** Moves by itself, or is inside what does. */
+    moving: boolean;
+    /** Inside an element that a visible control names in aria-controls. */
+    controlled: boolean;
+    /** An ancestor is a containing block for fixed descendants (a transform, a filter, contain): fixed is then not fixed to the viewport. */
+    contained: boolean;
     clipPath: boolean;
     offset: { x: number; y: number };
     top: boolean;
@@ -342,7 +469,44 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     },
 
     async settle(min) {
+      // A new layout: a budget of its own. What is known to move stays known.
+      const known = pass.repeaters;
+      pass = freshPass();
+      for (const element of known) pass.repeaters.add(element);
       return waitQuiet(min ? options.settleMinMs : 0, options.settleQuietMs, options.settleMaxMs);
+    },
+
+    waits() {
+      return { motion: pass.moving.size, budgetSpent: pass.budgetSpent };
+    },
+
+    mainScroller(minShare) {
+      const root = document.documentElement;
+      const viewArea = Math.max(1, root.clientWidth * root.clientHeight);
+      let best: { element: Element; area: number; max: number } | null = null;
+      let walked = 0;
+      eachElement(document, (element) => {
+        if (++walked > options.maxElements || element.ownerDocument !== document) return;
+        if (element.scrollHeight - element.clientHeight <= options.toleranceCssPx * 4) return;
+        const style = getComputedStyle(element);
+        if (style.overflowY !== 'auto' && style.overflowY !== 'scroll' && style.overflowY !== 'overlay') return;
+        const box = element.getBoundingClientRect();
+        const w = Math.max(0, Math.min(box.right, root.clientWidth) - Math.max(box.left, 0));
+        const h = Math.max(0, Math.min(box.bottom, root.clientHeight) - Math.max(box.top, 0));
+        const covered = (w * h) / viewArea;
+        if (covered < minShare) return;
+        if (!best || covered > best.area) best = { element, area: covered, max: element.scrollHeight - element.clientHeight };
+      });
+      const found = best as { element: Element; area: number; max: number } | null;
+      return found ? { key: keyOf(found.element), max: found.max } : null;
+    },
+
+    async scrollElement(key, y) {
+      const element = elements.get(key);
+      if (!element || !element.isConnected) return { x: 0, y: 0 };
+      element.scrollTo({ left: element.scrollLeft, top: y, behavior: 'instant' });
+      await waitQuiet(options.scrollSettleMs, options.scrollSettleMs, options.scrollSettleMaxMs);
+      return { x: element.scrollLeft, y: element.scrollTop };
     },
 
     measure(beyondAxis) {
@@ -367,6 +531,15 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const style = getComputedStyle(document.documentElement);
         return overflowOf(style.overflowX) === 'visible' && overflowOf(style.overflowY) === 'visible';
       })();
+      // What visible controls name in aria-controls: what they may show (a drawer, the track of a carousel).
+      const controlled = new Set<Element>();
+      for (const control of document.querySelectorAll('[aria-controls]')) {
+        if (!isShown(control)) continue;
+        for (const id of (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)) {
+          const target = document.getElementById(id);
+          if (target) controlled.add(target);
+        }
+      }
 
       const chainWith = (parent: number, key: number): number => {
         const list = [key, ...(chains[parent] ?? [])];
@@ -407,7 +580,11 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const ownChain = position === 'fixed' ? context.fixedChain : position === 'absolute' ? context.absChain : context.chain;
         const client = element.getBoundingClientRect();
         const page = rect(client.left + context.offset.x, client.top + context.offset.y, client.width, client.height);
-        const layer = context.layer ?? (context.top && (position === 'fixed' || position === 'sticky') ? key : undefined);
+        // A fixed element under a transformed or contained ancestor scrolls with that ancestor: no layer.
+        const layer = context.layer ?? (context.top && ((position === 'fixed' && !context.contained) || position === 'sticky') ? key : undefined);
+        const decorative = context.decorative || element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert');
+        const moving = context.moving || movingOf(element, style);
+        const isControlled = context.controlled || controlled.has(element);
         const transformed = context.transformed || transformedBy(style);
         const ownExcept = context.except ? undefined : exceptKindOf(element, style);
         const except = context.except ?? ownExcept;
@@ -440,7 +617,12 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           if (x !== 'visible' || y !== 'visible') {
             const truncates = style.textOverflow === 'ellipsis' && /nowrap|pre/.test(style.whiteSpace) ? 'ellipsis' : style.webkitLineClamp && style.webkitLineClamp !== 'none' ? 'line-clamp' : undefined;
             const reveal = element.querySelector('button,summary,[aria-expanded],[role="button"]') !== null || (element.parentElement?.querySelector(':scope > button, :scope > [aria-expanded], :scope > [role="button"]') ?? null) !== null;
-            const carousel = (style.scrollSnapType !== 'none' && style.scrollSnapType !== '') || element.closest('[aria-roledescription]') !== null;
+            const carousel = carouselOf(element, style, controlled);
+            // What it holds is moved through it by itself (a ticker): its track, one or two levels down, moves.
+            const trackMoves = [...element.children].some((child) => {
+              const childStyle = view.getComputedStyle(child);
+              return movingOf(child, childStyle) || [...child.children].some((grand) => movingOf(grand, view.getComputedStyle(grand)));
+            });
             const clip: ReflowClipBox = {
               key,
               rect: shown,
@@ -452,6 +634,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
               ...(truncates ? { truncates } : {}),
               ...(reveal ? { revealControl: true } : {}),
               ...(carousel ? { carousel: true } : {}),
+              ...(trackMoves || moving ? { moving: true } : {}),
+              ...(style.direction === 'rtl' ? { rtl: true } : {}),
               ...(element.querySelector('table,[role="table"],[role="grid"],[role="treegrid"]') ? { holdsTable: true } : {}),
               ...(except ? { except } : {}),
               ...(layer !== undefined ? { layer } : {}),
@@ -472,6 +656,10 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           popup,
           invisible: contentInvisible,
           clipPath,
+          decorative,
+          moving,
+          controlled: isControlled,
+          contained: context.contained || containsFixed(style),
         };
 
         // Its own text.
@@ -549,6 +737,9 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
               ...(transformed ? { transformed: true } : {}),
               ...(ruby !== undefined ? { ruby } : {}),
               ...(popup ? { popup: true } : {}),
+              ...(decorative ? { decorative: true } : {}),
+              ...(moving ? { moving: true } : {}),
+              ...(isControlled ? { controlled: true } : {}),
               sample,
             });
           } else textsBeyond++;
@@ -569,6 +760,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
                 ...(popup ? { popup: true } : {}),
                 paints: paintsOwn(element, style) && style.visibility === 'visible',
                 ...(style.display === 'inline' ? { inline: true } : {}),
+                ...(decorative ? { decorative: true } : {}),
                 tag,
               });
             } else boxesBeyond++;
@@ -599,6 +791,10 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         popup: false,
         invisible: false,
         clipPath: false,
+        decorative: false,
+        moving: false,
+        controlled: false,
+        contained: false,
         offset: { x: window.scrollX, y: window.scrollY },
         top: true,
       });
@@ -628,21 +824,23 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     layers() {
       const found: Element[] = [];
       let walked = 0;
-      const walk = (root: Document | ShadowRoot | Element): void => {
+      // `contained`: under a transformed or contained ancestor, a fixed element scrolls with it and is no layer.
+      const walk = (root: Document | ShadowRoot | Element, contained: boolean): void => {
         const children = root.nodeType === 1 ? (root as Element).children : (root as Document | ShadowRoot).children;
         for (const element of children) {
           if (++walked > options.maxElements) return;
           const style = getComputedStyle(element);
           if (style.display === 'none') continue;
-          if (style.position === 'fixed' || style.position === 'sticky') {
+          if ((style.position === 'fixed' && !contained) || style.position === 'sticky') {
             found.push(element);
             continue;
           }
-          walk(element);
-          if (element.shadowRoot) walk(element.shadowRoot);
+          const inner = contained || containsFixed(style);
+          walk(element, inner);
+          if (element.shadowRoot) walk(element.shadowRoot, inner);
         }
       };
-      walk(document);
+      walk(document, false);
       const range = document.createRange();
       const out: ReflowLayer[] = [];
       for (const element of found) {
@@ -687,16 +885,23 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         }
         if (painted.length === 0) continue;
         const role = roleOf(element);
-        const buttons = element.querySelectorAll('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]').length + (element.localName === 'button' ? 1 : 0);
-        const controls = [...element.querySelectorAll('*')].filter(isControl).length;
+        // Only what is shown counts: a hidden dialog in a header, a hidden close button, make nothing dismissible.
+        const visibleControls = [...element.querySelectorAll('*')].filter((item) => isControl(item) && isShown(item));
+        const buttons = visibleControls.filter((item) => item.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]')).length + (element.localName === 'button' ? 1 : 0);
+        const controls = visibleControls.length;
         const landmark = LANDMARK_TAGS.includes(element.localName) || LANDMARK_ROLES.includes(role) || element.querySelector(':scope > header, :scope > footer, :scope > nav') !== null;
-        const dialog = ['dialog', 'alertdialog'].includes(role) || element.getAttribute('aria-modal') === 'true' || (element.localName === 'dialog' && element.hasAttribute('open')) || element.querySelector('[role="dialog"],[role="alertdialog"],[aria-modal="true"],dialog[open]') !== null;
+        const dialog = ['dialog', 'alertdialog'].includes(role) || element.getAttribute('aria-modal') === 'true' || (element.localName === 'dialog' && element.hasAttribute('open'));
+        const modalSelf = element.getAttribute('aria-modal') === 'true' || element.matches(':modal');
+        const modal = modalSelf || [...element.querySelectorAll('[aria-modal="true"],dialog')].some((item) => (item.getAttribute('aria-modal') === 'true' || item.matches(':modal')) && isShown(item));
+        const dismissControl = [...visibleControls, ...(isControl(element) ? [element] : [])].some((item) => dismissName(nameOf(item)));
         out.push({
           key: keyOf(element),
           position: style.position === 'fixed' ? 'fixed' : 'sticky',
           rect: rect(own.left, own.top, own.width, own.height),
           painted,
           ...(dialog ? { dialog: true } : {}),
+          ...(modal ? { modal: true } : {}),
+          ...(dismissControl ? { dismissControl: true } : {}),
           ...(landmark ? { landmark: true } : {}),
           buttons,
           controls,
@@ -855,6 +1060,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     async restore() {
       for (const { owner, sheet } of paintSheets) owner.adoptedStyleSheets = owner.adoptedStyleSheets.filter((adopted) => adopted !== sheet);
       paintSheets.length = 0;
+      // Putting back is not cut short by the budget of the last pass.
+      pass = freshPass();
       await waitQuiet(0, options.scrollSettleMs, options.settleMaxMs);
       if (!recorded) return;
       const { scrolls } = recorded;

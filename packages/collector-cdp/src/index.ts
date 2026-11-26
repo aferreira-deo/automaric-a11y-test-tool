@@ -51,6 +51,12 @@ export interface CollectOptions {
   /** Called when, after a stop, the page did not answer in time while it was put back: it may not be as it was. */
   onRestoreIncomplete?: () => void;
   /**
+   * What becomes of the device metrics afterwards (see `RestoreOptions.emulation`): `clear` by default;
+   * `reapply` puts back the size, device scale factor, mobile emulation, screen and page scale read from the page
+   * before the collection, for a caller that keeps `cdp` attached to the page (the Playwright wrapper does).
+   */
+  emulation?: 'clear' | 'reapply';
+  /**
    * Where the name-role-value check may activate controls: a browser of its own, in which copies of
    * the page are loaded (see `ProbeHost`). Without it nothing is activated, whatever
    * `nameRoleValue.probe` says, and the survey says so. The page under test is never probed.
@@ -150,10 +156,12 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     let snapshot: Snapshot | undefined;
     let source: CloneSource | undefined;
     let error: unknown;
+    let reflowNavigated = false;
     try {
       const once = await collectOnce(cdp, config, signal, options);
       snapshot = once.snapshot;
       source = once.source;
+      reflowNavigated = once.reflowNavigated === true;
     } catch (caught) {
       error = caught ?? new Error('Collection failed.');
     }
@@ -162,7 +170,8 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
     const now = await mainDocument(cdp).catch(() => null);
     return {
       from,
-      to: now && now.loaderId !== from.loaderId ? now : null,
+      // The reflow passes set it off (the page reloads on resize): what was read before them stands.
+      to: now && now.loaderId !== from.loaderId && !reflowNavigated ? now : null,
       ...(snapshot ? { snapshot } : {}),
       ...(source ? { source } : {}),
       ...(error !== undefined ? { error } : {}),
@@ -206,7 +215,7 @@ export async function collectSnapshot(cdp: CdpSession, config: Config, options: 
   return probed(second.snapshot, second.source);
 }
 
-async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<{ snapshot: Snapshot; source?: CloneSource }> {
+async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal | undefined, options: CollectOptions): Promise<{ snapshot: Snapshot; source?: CloneSource; reflowNavigated?: boolean }> {
   // Everything below goes through the gate, the restoring of the page included: it is opened for that.
   const gate = gateSession(raw, signal);
   const cdp = gate.session;
@@ -232,6 +241,7 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
   const nrv = config.checks.includes('name-role-value');
   const reflow = config.checks.includes('reflow');
   let source: CloneSource | undefined;
+  let reflowNavigated = false;
   if (focus || icons || headings || lists || grouping || nrv || reflow) {
     const original = { ...environment, reducedMotion, mediaType };
     await withStablePage(cdp, world, original, config, snapshot.screenshots.clips, async (page) => {
@@ -256,23 +266,33 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
         if (grouping) snapshot.grouping = await collectGrouping(page, config, exposed.headings && exposed.grouping, exposed.groupingUnmarked);
       }
       if (nrv) snapshot.nameRoleValue = await collectNameRoleValue(page, config, walk, walkStoppedBy, interactiveBefore);
-      // Last: it changes the viewport, and puts it back before anything else reads the page.
-      if (reflow) snapshot.reflow = await collectReflow(page, config, environment.viewport);
-      // What each element that was named is, hashed here: the text it is made from stays in this function.
       const signatures: Record<string, string> = {};
-      for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
+      const sign = async (): Promise<void> => {
+        for (const [key, tag, role, material] of await page.agent<AgentSignature[]>('signatures()')) signatures[key] = elementSignature(tag, role, material);
+      };
+      // Last: it changes the viewport, and puts it back before anything else reads the page. A page that goes to
+      // another document while a pass is in effect (it reloads on resize) stops the survey only: what the other
+      // collectors read before stands, with the signatures taken before the passes.
+      if (reflow) {
+        await sign();
+        snapshot.reflow = await collectReflow(page, config, environment.viewport, { stopped: () => signal?.aborted === true });
+        reflowNavigated = snapshot.reflow.stopped?.reason === 'navigated';
+      }
+      // What each element that was named is, hashed here: the text it is made from stays in this function.
+      if (!reflowNavigated) await sign();
       snapshot.signatures = signatures;
       // What copies of the page need to render like it, for probing. Read only.
-      if (nrv && config.nameRoleValue.probe === 'safe' && options.probeHost) {
+      if (nrv && config.nameRoleValue.probe === 'safe' && options.probeHost && !reflowNavigated) {
         source = await readCloneSource(page, { url: environment.url, viewport: environment.viewport, colorScheme: environment.colorScheme }, config);
       }
     }, {
       before: () => gate.release(options.inFlightTimeoutMs ?? IN_FLIGHT_TIMEOUT_MS),
       stepTimeoutMs: () => (signal?.aborted ? (options.restoreStepTimeoutMs ?? RESTORE_STEP_TIMEOUT_MS) : null),
       ...(options.onRestoreIncomplete ? { onIncomplete: options.onRestoreIncomplete } : {}),
+      ...(options.emulation ? { emulation: options.emulation } : {}),
     });
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };
   }
-  return { snapshot, ...(source ? { source } : {}) };
+  return { snapshot, ...(source ? { source } : {}), ...(reflowNavigated ? { reflowNavigated } : {}) };
 }

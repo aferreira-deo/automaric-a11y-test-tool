@@ -1,0 +1,8 @@
+{
+  "description": "An ordinary vertical page with a ribbon that sticks out 40 px to the right: a little horizontal overflow and a page that fits the baseline viewport. That is no page laid out horizontally (no text lies beyond the inline end, and at 320 px it grows downwards), so the short pass does not take its paragraphs below 256 px for a second direction of scrolling. Nothing is reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

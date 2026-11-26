@@ -20,6 +20,8 @@ function pageState(page: Page) {
     width: window.innerWidth,
     height: window.innerHeight,
     devicePixelRatio: window.devicePixelRatio,
+    screen: [screen.width, screen.height],
+    visual: [Math.round(window.visualViewport!.width), Math.round(window.visualViewport!.height), window.visualViewport!.scale],
     windowScroll: [window.scrollX, window.scrollY],
     strip: document.getElementById('strip')!.scrollLeft,
     box: document.getElementById('box')!.scrollTop,
@@ -49,6 +51,7 @@ const contexts = {
   'the default context': {},
   'an emulated desktop context': { viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1.5 },
   'an emulated mobile context': devices['Pixel 5'],
+  'a context with a screen of its own': { viewport: { width: 1100, height: 700 }, screen: { width: 1600, height: 900 } },
 } as const;
 
 async function inContext<T>(browser: Browser, baseURL: string | undefined, options: object, body: (page: Page) => Promise<T>): Promise<T> {
@@ -80,6 +83,72 @@ for (const [name, options] of Object.entries(contexts)) {
     });
   });
 }
+
+/**
+ * A default scan (every check of the default configuration) gives back exactly the emulation it found: the
+ * size, device pixel ratio, screen and visual viewport, and every scroll position, also in a mobile context and
+ * after `page.setViewportSize`, which Playwright would not send again by itself.
+ */
+const emulations: [string, object, ((page: Page) => Promise<void>) | null][] = [
+  ['the default context', {}, null],
+  ['a viewport set with page.setViewportSize', {}, (page) => page.setViewportSize({ width: 900, height: 600 })],
+  ['a device scale factor of 1.5', { viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1.5 }, null],
+  ['a mobile context', devices['Pixel 5'], null],
+];
+for (const [name, options, setup] of emulations) {
+  test(`a default scan puts back the emulation and the scroll positions: ${name}`, async ({ browser, baseURL }) => {
+    test.slow();
+    await inContext(browser, baseURL, options, async (page) => {
+      if (setup) await setup(page);
+      await prepare(page);
+      const viewport = page.viewportSize();
+      const before = await pageState(page);
+      await new A11yVision({ page }).options({ nameRoleValue: { probe: 'off' } }).analyze();
+      expect(page.viewportSize()).toEqual(viewport);
+      // The focus walk ends where it started; everything else is as it was.
+      expect(await pageState(page)).toEqual(before);
+      // A second scan finds the same page again.
+      await new A11yVision({ page }).options({ checks: ['reflow'] }).analyze();
+      expect(await pageState(page)).toEqual(before);
+    });
+  });
+}
+
+test('a caller whose viewport is already narrow is compared with a wide reference layout: the narrow pass still fails a fixed width', async ({ browser, baseURL }) => {
+  await inContext(browser, baseURL, { viewport: { width: 375, height: 667 } }, async (page) => {
+    await page.goto('/reflow/fixed-width.html');
+    const { findings } = await reflow(page).analyze();
+    expect(findings.filter((finding) => finding.status === 'fail').map((finding) => [finding.rule, finding.evidence.values?.['pass']])).toEqual([['reflow/two-dimensional-scroll', 'narrow']]);
+    const survey = findings.find((finding) => finding.rule === 'reflow/survey')!;
+    expect(survey.evidence.values).toMatchObject({ baselineViewport: '1280x720' });
+    expect(survey.message).toContain('reference viewport of 1280 by 720');
+    expect(page.viewportSize()).toEqual({ width: 375, height: 667 });
+    expect(await page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([375, 667]);
+  });
+});
+
+test('a page that reloads when the viewport changes stops the reflow survey only: the other checks report, and nothing fails', async ({ page }) => {
+  await page.goto('/reflow/reload-on-resize.html');
+  const { findings } = await new A11yVision({ page }).options({ checks: ['headings', 'reflow'] }).analyze();
+  const survey = findings.find((finding) => finding.rule === 'reflow/survey')!;
+  expect(survey.evidence.values).toMatchObject({ stopped: 'navigated' });
+  expect(survey.message).toContain('stopped before its end');
+  expect(findings.filter((finding) => finding.check === 'headings').length).toBeGreaterThan(0);
+  expect(findings.filter((finding) => finding.status === 'fail')).toEqual([]);
+  expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
+  // Putting the viewport back is one more resize: the page may be reloading once more.
+  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight]).catch(() => null)).toEqual([1280, 720]);
+});
+
+test('a page whose script moves text every frame is measured in bounded time, and the survey says so', async ({ page }) => {
+  await page.goto('/reflow/js-motion.html');
+  const started = Date.now();
+  const { findings } = await reflow(page).analyze();
+  // Without the motion bound every wait ran to its maximum: 23 s.
+  expect(Date.now() - started).toBeLessThan(12000);
+  const survey = findings.find((finding) => finding.rule === 'reflow/survey')!;
+  expect(Number(survey.evidence.values?.['narrowUnsettled'])).toBeGreaterThan(0);
+});
 
 /** A scan through a bare CDP session, as the extension runs it, stopped when `when` holds in the page. */
 async function stoppedScan(page: Page, when: string): Promise<void> {
@@ -126,7 +195,10 @@ for (const [moment, when] of [
     const before = await pageState(page);
     await stoppedScan(page, when);
     expect(page.viewportSize()).toEqual(viewport);
-    expect(await pageState(page)).toEqual(before);
+    // The bare session clears its emulation and the test sends Playwright's viewport again, which makes `screen`
+    // the size of the viewport: Playwright's doing, not the scan's.
+    const without = ({ screen: _screen, ...rest }: Awaited<ReturnType<typeof pageState>>) => rest;
+    expect(without(await pageState(page))).toEqual(without(before));
   });
 }
 

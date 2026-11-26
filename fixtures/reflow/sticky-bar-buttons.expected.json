@@ -1,0 +1,9 @@
+{
+  "description": "A sticky bar (no landmark) with a Menu and a Search button, and a fixed footer. At 800 by 256, once scrolled, they leave 38%. Buttons alone do not make a bar dismissible (no close, accept or refuse among them): likely, not lowered.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div:nth-of-type(1)", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures" },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -27,7 +27,7 @@ describe('captureScale', () => {
 
 describe('withStablePage, putting the page back', () => {
   const original: PageEnvironment = { url: 'https://example.test/', devicePixelRatio: 1, viewport: { width: 800, height: 600 }, colorScheme: 'light', reducedMotion: false, mediaType: 'screen' };
-  const RESTORE = ['agent.cleanup', 'CSS.disable', 'DOM.disable', 'Emulation.setFocusEmulationEnabled', 'Emulation.setEmulatedMedia', 'Emulation.clearDeviceMetricsOverride'];
+  const RESTORE = ['agent.cleanup', 'Accessibility.disable', 'CSS.disable', 'DOM.disable', 'Emulation.setFocusEmulationEnabled', 'Emulation.setEmulatedMedia', 'Emulation.clearDeviceMetricsOverride'];
 
   /** A page that answers until `stuck` says it no longer does; `answer()` then answers everything that waits. */
   function stage(stuck: () => boolean) {
@@ -73,7 +73,7 @@ describe('withStablePage, putting the page back', () => {
       { stepTimeoutMs: () => 40, onIncomplete: () => incomplete++ },
     );
     await expect(running).rejects.toThrow('stopped');
-    // One limit, not one for each of the six steps.
+    // One limit, not one for each of the seven steps.
     expect(Date.now() - started).toBeLessThan(200);
     expect(sent.slice(-RESTORE.length)).toEqual(RESTORE);
     expect(incomplete).toBe(1);
@@ -106,5 +106,34 @@ describe('withStablePage, putting the page back', () => {
       answer();
     }
     await expect(running).resolves.toBe('read');
+  });
+
+  it('with emulation reapply, sets the metrics read before the collection again before the scroll positions are put back, and does not clear them', async () => {
+    const sent: { method: string; params?: unknown }[] = [];
+    const metrics = { width: 393, height: 727, deviceScaleFactor: 2.75, mobile: true, screenWidth: 393, screenHeight: 851, pageScale: 1 };
+    const cdp: CdpSession = {
+      send(method, params) {
+        sent.push({ method, params });
+        return Promise.resolve({});
+      },
+      on: () => undefined,
+      off: () => undefined,
+    };
+    const world: World = {
+      contextId: 1,
+      evaluate(expression) {
+        sent.push({ method: expression.endsWith('.cleanup()') ? 'agent.cleanup' : expression.includes('visualViewport') ? 'read.metrics' : 'agent' });
+        return Promise.resolve({ result: { value: expression.includes('visualViewport') ? metrics : 1 } });
+      },
+    };
+    await withStablePage(cdp, world, { ...original, viewport: { width: 1116, height: 2065 } }, resolveConfig({}), {}, () => Promise.resolve(), { emulation: 'reapply' });
+    const methods = sent.map((entry) => entry.method);
+    // Read first, before the stable override of the collection.
+    expect(methods.indexOf('read.metrics')).toBeLessThan(methods.indexOf('Emulation.setDeviceMetricsOverride'));
+    const last = sent.filter((entry) => entry.method === 'Emulation.setDeviceMetricsOverride').at(-1);
+    expect(last?.params).toEqual({ width: 393, height: 727, deviceScaleFactor: 2.75, mobile: true, screenWidth: 393, screenHeight: 851 });
+    expect(methods.lastIndexOf('Emulation.setDeviceMetricsOverride')).toBeLessThan(methods.indexOf('agent.cleanup'));
+    expect(methods).toContain('Emulation.setPageScaleFactor');
+    expect(methods).not.toContain('Emulation.clearDeviceMetricsOverride');
   });
 });

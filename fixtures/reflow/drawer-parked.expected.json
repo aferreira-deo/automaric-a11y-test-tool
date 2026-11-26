@@ -1,0 +1,8 @@
+{
+  "description": "An absolutely positioned drawer parked beyond the right edge (translateX(100%)) on a body with overflow-x: hidden, opened by a Menu button with aria-controls. Text wholly beyond the reach of the root, nothing of it cut in part, is parked, as content that is not displayed is: never a failure, and nothing at all when a control names it in aria-controls.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

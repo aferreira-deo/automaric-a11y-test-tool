@@ -1,0 +1,8 @@
+{
+  "description": "A page laid out right to left whose drawer is parked beyond the left edge on a body with overflow-x: hidden: parked, not lost. Nothing is reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

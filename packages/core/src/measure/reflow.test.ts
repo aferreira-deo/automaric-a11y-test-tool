@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig, resolveConfig, resolveReflow } from '../config.js';
 import { runChecks } from '../run.js';
-import type { ReflowClipBox, ReflowLayer, ReflowLayout, ReflowPassName, ReflowSurvey, ReflowText, ReflowViewport } from '../reflow-types.js';
+import type { ReflowClipBox, ReflowLayer, ReflowLayout, ReflowPassName, ReflowRect, ReflowSurvey, ReflowText, ReflowViewport } from '../reflow-types.js';
 import type { Screenshot, Snapshot } from '../types.js';
 import { createImage, encodePng, fillRect } from './image.js';
 import { beyondAxisOf, horizontalLayout, inkConfirms, reflowInk, reflowPassReport, reflowPixelPlan, unionArea } from './reflow.js';
@@ -123,11 +123,47 @@ describe('reflow/two-dimensional-scroll', () => {
   });
 
   it('applies on the vertical axis to a page laid out horizontally, at the short pass only', () => {
-    const horizontal = layout('baseline', 1280, 720, { viewport: viewport(1280, 720, { scrollWidth: 1800, scrollHeight: 720 }) });
+    const horizontal = layout('baseline', 1280, 720, {
+      viewport: viewport(1280, 720, { scrollWidth: 1800, scrollHeight: 720 }),
+      texts: [text(2, [2, 3], [[16, 100, 400, 24]]), text(4, [4, 5], [[1400, 100, 380, 24]])],
+    });
     expect(horizontalLayout(horizontal, settings)).toBe(true);
-    expect(beyondAxisOf('narrow', horizontal, settings)).toBeNull();
+    // The narrow pass always looks at the horizontal axis.
+    expect(beyondAxisOf('narrow', horizontal, settings)).toBe('x');
     expect(beyondAxisOf('short', horizontal, settings)).toBe('y');
     expect(beyondAxisOf('short', base, settings)).toBeNull();
+  });
+
+  it('takes a page for one laid out horizontally on positive evidence only: text beyond the inline end, or a vertical writing mode', () => {
+    // A short page with a ribbon that sticks out by 40 px: no text beyond the edge.
+    const ribbon = layout('baseline', 800, 256, {
+      viewport: viewport(800, 256, { scrollWidth: 840, scrollHeight: 256 }),
+      texts: [text(2, [2, 3], [[16, 20, 700, 24]]), text(4, [4, 5], [[16, 60, 700, 24]])],
+      boxes: [{ key: 9, span: [9, 10], rect: [680, 10, 160, 24], kind: 'box', chain: 0, paints: true, tag: 'div' }],
+    });
+    expect(horizontalLayout(ribbon, settings)).toBe(false);
+    expect(beyondAxisOf('short', ribbon, settings)).toBeNull();
+    const vertical = layout('baseline', 1280, 720, { viewport: viewport(1280, 720, { vertical: true }) });
+    expect(horizontalLayout(vertical, settings)).toBe(true);
+    // Panels side by side whose text all fits at the baseline: the narrow pass, which still fits vertically with the text beyond the right edge, is the evidence.
+    const panels = layout('baseline', 1280, 720, { viewport: viewport(1280, 720, { scrollWidth: 1500, scrollHeight: 720 }), texts: [text(2, [2, 3], [[16, 20, 400, 24]]), text(4, [4, 5], [[1016, 20, 200, 24]])] });
+    const narrowPanels = layout('narrow', 320, 800, { viewport: viewport(320, 800, { scrollWidth: 1500, scrollHeight: 800 }), texts: [text(2, [2, 3], [[16, 20, 400, 24]]), text(4, [4, 5], [[1016, 20, 200, 24]])] });
+    expect(horizontalLayout(panels, settings)).toBe(false);
+    expect(beyondAxisOf('short', panels, settings, narrowPanels)).toBe('y');
+    // A vertical page grows downwards at the narrow pass: no evidence.
+    expect(beyondAxisOf('short', ribbon, settings, { ...narrowPanels, viewport: viewport(320, 800, { scrollWidth: 1500, scrollHeight: 2400 }) })).toBeNull();
+  });
+
+  it('reports nothing beyond the right edge of a page laid out horizontally in the narrow pass', () => {
+    const wideBase = layout('baseline', 1280, 720, {
+      viewport: viewport(1280, 720, { scrollWidth: 3000, scrollHeight: 720 }),
+      texts: [text(2, [2, 3], [[16, 100, 400, 24]]), text(4, [4, 5], [[1400, 100, 380, 24]])],
+    });
+    const narrow = layout('narrow', 320, 800, {
+      viewport: viewport(320, 800, { scrollWidth: 3000, scrollHeight: 800 }),
+      texts: [text(2, [2, 3], [[16, 100, 400, 24]]), text(4, [4, 5], [[1400, 100, 380, 24]])],
+    });
+    expect(report(wideBase, narrow)).toEqual([]);
   });
 });
 
@@ -300,9 +336,15 @@ describe('reflow/sticky-obscures', () => {
   it('takes the status from the configuration, and lowers it one level when what can be dismissed is the cause', () => {
     const config = resolveReflow({ stickyObscuresStatus: 'fail' });
     expect(report(base, short([layer(1, [0, 0, 800, 80]), layer(2, [0, 182, 800, 74])]), {}, config)[0]?.status).toBe('fail');
-    const banner = layer(3, [0, 156, 800, 100], { landmark: false, buttons: 2, controls: 2 });
+    const banner = layer(3, [0, 156, 800, 100], { landmark: false, buttons: 2, controls: 2, dismissControl: true });
     const [found] = report(base, short([layer(1, [0, 0, 800, 60]), banner]));
     expect(found).toMatchObject({ status: 'advisory', key: 3, flags: ['dismissible', 'loweredDismissible'] });
+  });
+
+  it('does not take buttons alone for a way to dismiss: a bar with Menu and Search is not a banner', () => {
+    const bar = layer(3, [0, 156, 800, 100], { landmark: false, buttons: 2, controls: 3 });
+    const [found] = report(base, short([layer(1, [0, 0, 800, 60]), bar]));
+    expect(found).toMatchObject({ status: 'likely', key: 3, flags: [] });
   });
 
   it('counts a sticky element only once it is stuck, and is info when the baseline has the same problem', () => {
@@ -358,7 +400,172 @@ describe('reflow/double-scrollbar', () => {
       expect(report(base, holding(box)), box.tag + box.role).toEqual([]);
     }
     const same = layout('baseline', 1280, 720, { clips: [clip(9, [0, 100, 1280, 640], 'hidden', 'auto', { scroll: [1280, 3000, 0, 0, 1280, 640] })], chains: [[], [9]], texts: [text(2, [2, 3], [[0, 120, 600, 24]], { chain: 1, chars: 900 })] });
-    expect(report(same, holding(scroller()))).toMatchObject([{ status: 'info', flags: ['atBaseline'] }]);
+    // Half the viewport at the baseline as well: a smaller scroller of the page by design.
+    const half = scroller({ scroll: [320, 3000, 0, 0, 320, 500] });
+    expect(report(same, holding(half))).toMatchObject([{ status: 'info', flags: ['atBaseline'] }]);
+  });
+
+  it('is likely, with atBaseline in its values, for a shell as tall as the viewport that the baseline has as well; info when so configured', () => {
+    const same = layout('baseline', 1280, 720, { clips: [clip(9, [0, 60, 1280, 720], 'hidden', 'auto', { scroll: [1280, 3000, 0, 0, 1280, 720] })], chains: [[], [9]], texts: [text(2, [2, 3], [[0, 120, 600, 24]], { chain: 1, chars: 900 })] });
+    expect(report(same, holding(scroller()))).toMatchObject([{ status: 'likely', flags: ['atBaseline'], values: { atBaseline: true } }]);
+    expect(report(same, holding(scroller()), {}, resolveReflow({ doubleScrollbarAtBaselineStatus: 'info' }))).toMatchObject([{ status: 'info', flags: ['atBaseline'] }]);
+  });
+});
+
+describe('reachability through scroll containers, from the inside out', () => {
+  const lostOf = (base: ReflowLayout, pass: ReflowLayout) => report(base, pass).filter((candidate) => candidate.rule === 'reflow/content-lost');
+  // A row of cards that scrolls horizontally, in a body that clips horizontally (html and body overflow-x: hidden).
+  const row = clip(7, [16, 100, 288, 120], 'auto', 'hidden', { scroll: [1100, 120, 0, 0, 288, 120] });
+  const body = clip(2, [0, 0, 320, 2000], 'hidden', 'visible', { tag: 'body' });
+  const cards = [text(10, [10, 11], [[28, 112, 236, 24]], { chain: 1 }), text(12, [12, 13], [[304, 112, 236, 24]], { chain: 1 }), text(14, [14, 15], [[580, 112, 236, 24]], { chain: 1 })];
+  const base = layout('baseline', 1280, 720, { texts: cards.map((card, i) => ({ ...card, chain: 0, lines: [[28 + 276 * i, 112, 236, 24]] })) });
+
+  it('does not take the cards of a horizontal scroller for lost when an outer element or the root clips', () => {
+    const q1 = layout('narrow', 320, 800, { viewport: viewport(320, 800, { overflowX: 'hidden', overflowY: 'auto' }), clips: [row, body], chains: [[], [7, 2]], texts: cards });
+    expect(lostOf(base, q1)).toEqual([]);
+    // In a card that clips (overflow: hidden, rounded corners) around the scroller.
+    const card = clip(3, [8, 92, 304, 136], 'hidden', 'hidden');
+    const q4 = layout('narrow', 320, 800, { clips: [row, card], chains: [[], [7, 3]], texts: cards });
+    expect(lostOf(base, q4)).toEqual([]);
+  });
+
+  it('still finds a scroller that is itself pushed out of reach', () => {
+    const away = clip(7, [400, 100, 288, 120], 'auto', 'hidden', { scroll: [1100, 120, 0, 0, 288, 120] });
+    const out = layout('narrow', 320, 800, { viewport: viewport(320, 800, { overflowX: 'hidden', overflowY: 'auto' }), clips: [away, body], chains: [[], [7, 2]], texts: [text(10, [10, 11], [[412, 112, 236, 24]], { chain: 1 })] });
+    // Partly cut at first sight (the line starts at 300); wholly out of reach through the scroller: parked, not lost.
+    expect(lostOf(base, out).filter((candidate) => candidate.status === 'fail')).toEqual([]);
+    const half = clip(7, [200, 100, 288, 120], 'auto', 'hidden', { scroll: [1100, 120, 0, 0, 288, 120] });
+    const cut = layout('narrow', 320, 800, { viewport: viewport(320, 800, { overflowX: 'hidden', overflowY: 'auto' }), clips: [half, body], chains: [[], [7, 2]], texts: [text(10, [10, 11], [[212, 112, 236, 24]], { chain: 1 })] });
+    expect(lostOf(base, cut)).toMatchObject([{ status: 'fail', flags: ['rootOverflowHidden'] }]);
+  });
+
+  const dialogLayer: ReflowLayer = { key: 20, position: 'fixed', rect: [16, 40, 288, 300], painted: [[16, 40, 288, 300]], buttons: 2, controls: 3, dialog: true, modal: true, dismissControl: true };
+  const dialogTexts = (chain: number) => [
+    text(21, [21, 22], [[32, 56, 256, 24]], { chain, layer: 20, popup: true }),
+    text(23, [23, 24], [[32, 280, 256, 24]], { chain, layer: 20, popup: true }),
+  ];
+  const dialogBase = layout('baseline', 1280, 720, { texts: dialogTexts(0), boxes: [{ key: 25, span: [25, 26], rect: [32, 310, 100, 30], kind: 'control', chain: 0, layer: 20, popup: true, paints: true, tag: 'button' }] });
+
+  it('reaches the content of a fixed dialog through its own scroller (max-height, overflow: auto)', () => {
+    const scroller = clip(20, [16, 12, 288, 230], 'hidden', 'auto', { scroll: [288, 330, 0, 0, 288, 230], layer: 20 });
+    const short = layout('short', 800, 256, {
+      clips: [scroller],
+      chains: [[], [20]],
+      texts: dialogTexts(1),
+      boxes: [{ key: 25, span: [25, 26], rect: [32, 310, 100, 30], kind: 'control', chain: 1, layer: 20, popup: true, paints: true, tag: 'button' }],
+      scrolls: [{ x: 0, y: 0, layers: [{ ...dialogLayer, rect: [16, 12, 288, 230], painted: [[16, 12, 288, 230]] }] }],
+    });
+    expect(lostOf(dialogBase, short)).toEqual([]);
+  });
+
+  it('fails a fixed dialog whose fields and buttons lie below the viewport where nothing scrolls to them, which is then not dismissible', () => {
+    const short = layout('short', 800, 256, {
+      texts: dialogTexts(0),
+      boxes: [{ key: 25, span: [25, 26], rect: [32, 310, 100, 30], kind: 'control', chain: 0, layer: 20, popup: true, paints: true, tag: 'button' }],
+      scrolls: [{ x: 0, y: 0, layers: [{ ...dialogLayer, rect: [16, 40, 288, 300], painted: [[0, 0, 800, 256]] }] }],
+    });
+    const found = report(dialogBase, short);
+    expect(found.find((candidate) => candidate.rule === 'reflow/content-lost')).toMatchObject({ status: 'fail', key: 20, flags: ['control', 'fixedBeyondViewport'], values: { controlsCut: 1, side: 'bottom' } });
+    expect(found.find((candidate) => candidate.rule === 'reflow/sticky-obscures')).toMatchObject({ status: 'likely', values: { dismissibleLayers: 0 } });
+  });
+});
+
+describe('content parked off screen', () => {
+  const nav = (x: number, extra: Partial<ReflowText> = {}) => [0, 1, 2, 3, 4].map((i) => text(30 + 2 * i, [30 + 2 * i, 31 + 2 * i], [[x, 50 + 30 * i, 228, 24]], { chars: 60, ...extra }));
+  const base = layout('baseline', 1280, 720, { texts: nav(700).map((item, i) => ({ ...item, lines: [[700 + 120 * i, 20, 100, 24]] })) });
+  const hidden = { overflowX: 'hidden' as const, overflowY: 'auto' as const };
+
+  it('is never a failure: a drawer parked beyond the right edge of a page that does not scroll horizontally', () => {
+    const p01 = layout('narrow', 320, 800, { viewport: viewport(320, 800, hidden), texts: nav(336) });
+    expect(report(base, p01)).toMatchObject([{ rule: 'reflow/content-lost', status: 'info', flags: ['notDisplayed', 'offScreen'] }]);
+  });
+
+  it('is nothing at all when a control names it in aria-controls, or a disclosure control appeared', () => {
+    expect(report(base, layout('narrow', 320, 800, { viewport: viewport(320, 800, hidden), texts: nav(336, { controlled: true }) }))).toEqual([]);
+    expect(report(base, layout('narrow', 320, 800, { viewport: viewport(320, 800, hidden), texts: nav(336), disclosures: [99] }))).toEqual([]);
+  });
+
+  it('is parked to the left in a page laid out right to left, and text cut in part is still lost, named by the side measured', () => {
+    const p10 = layout('narrow', 320, 800, { viewport: viewport(320, 800, { ...hidden, rtl: true }), texts: nav(-260) });
+    expect(report(base, p10).filter((candidate) => candidate.status === 'fail')).toEqual([]);
+    const cut = layout('narrow', 320, 800, { viewport: viewport(320, 800, { ...hidden, rtl: true }), texts: nav(-100) });
+    expect(report(base, cut)).toMatchObject([{ rule: 'reflow/content-lost', status: 'fail', flags: ['rootOverflowHidden'], values: { side: 'left' } }]);
+  });
+});
+
+describe('decorative and moving content', () => {
+  it('never takes aria-hidden text for the victim of an overlap: real text is tested as the covered one, by hidden ink only', () => {
+    const base = layout('baseline', 1280, 720, { texts: [text(2, [2, 3], [[0, 100, 500, 24]]), text(4, [4, 5], [[900, 60, 300, 160]], { decorative: true })] });
+    const narrow = layout('narrow', 320, 800, { texts: [text(2, [2, 3], [[0, 100, 240, 24]]), text(4, [4, 5], [[20, 60, 280, 160]], { decorative: true })] });
+    const [pair] = reflowPixelPlan(base, narrow, settings);
+    expect(pair).toMatchObject({ a: 2, b: 4, coverOnly: true });
+    // The real text is painted over the decoration: nothing.
+    expect(report(base, { ...narrow, pixels: { [pair!.id]: { region: pair!.region, top: 'a', crops: null } } })).toEqual([]);
+    // Two decorative texts: no candidate at all.
+    const both = layout('narrow', 320, 800, { texts: [text(2, [2, 3], [[0, 100, 240, 24]], { decorative: true }), text(4, [4, 5], [[20, 60, 280, 160]], { decorative: true })] });
+    expect(reflowPixelPlan(base, both, settings)).toEqual([]);
+  });
+
+  it('never fails on decorative text beyond the edge or cut off', () => {
+    const base = layout('baseline', 1280, 720, { texts: [text(4, [4, 5], [[300, 10, 300, 120]], { decorative: true })] });
+    const beyond = layout('narrow', 320, 800, { viewport: viewport(320, 800, { scrollWidth: 627 }), texts: [text(4, [4, 5], [[300, 10, 326, 120]], { decorative: true })] });
+    expect(report(base, beyond).filter((candidate) => candidate.status !== 'info')).toEqual([]);
+    const hero = clip(5, [0, 0, 320, 220], 'hidden', 'hidden');
+    const cut = layout('narrow', 320, 800, { clips: [hero], chains: [[], [5]], texts: [text(4, [4, 5], [[160, 0, 330, 160]], { decorative: true, chain: 1 })] });
+    expect(report(base, cut)).toEqual([]);
+  });
+
+  it('takes text that moves through its clip by itself (a ticker) for info at most, and a clip whose track moves too', () => {
+    const base = layout('baseline', 1280, 720, { clips: [clip(5, [0, 0, 1280, 36], 'hidden', 'hidden')], chains: [[], [5]], texts: [text(6, [6, 7], [[16, 6, 900, 24]], { chain: 1, moving: true })] });
+    const narrow = layout('narrow', 320, 800, { clips: [clip(5, [0, 0, 320, 36], 'hidden', 'hidden')], chains: [[], [5]], texts: [text(6, [6, 7], [[16, 6, 900, 24]], { chain: 1, moving: true })] });
+    expect(report(base, narrow)).toMatchObject([{ rule: 'reflow/content-lost', status: 'info', flags: ['clippedByAncestor', 'moving'] }]);
+    const still = (layoutOf: ReflowLayout): ReflowLayout => ({ ...layoutOf, texts: layoutOf.texts.map((item) => ({ ...item, moving: false })) });
+    const track = { ...narrow, clips: [clip(5, [0, 0, 320, 36], 'hidden', 'hidden', { moving: true })] };
+    expect(report(still(base), still(track))).toMatchObject([{ status: 'info', flags: ['clippedByAncestor', 'moving'] }]);
+  });
+
+  it('lowers an overlap the pixels confirm to likely when something kept moving by script', () => {
+    const base = layout('baseline', 1280, 720, { texts: [text(2, [2, 3], [[0, 100, 500, 24]]), text(4, [4, 5], [[900, 100, 300, 24]])] });
+    const narrow = layout('narrow', 320, 800, { texts: [text(2, [2, 3], [[0, 100, 240, 24]]), text(4, [4, 5], [[20, 100, 280, 24]])] });
+    const [pair] = reflowPixelPlan(base, narrow, settings);
+    const shot = (id: string, inks: [number, number, number, number][]): [string, Screenshot] => {
+      const image = createImage(40, 20, { r: 255, g: 255, b: 255 });
+      for (const [x, y, w, h] of inks) fillRect(image, { x, y, width: w, height: h }, { r: 0, g: 0, b: 0 });
+      return [id, { box: { x: 0, y: 0, width: 20, height: 10 }, scale: 2, png: encodePng(image) }];
+    };
+    const v: [number, number, number, number] = [0, 0, 25, 20];
+    const o: [number, number, number, number] = [15, 0, 25, 20];
+    const clips = Object.fromEntries([shot('n', [v, o]), shot('vc', [o]), shot('cc', [v]), shot('bc', []), shot('ch', [v]), shot('chvc', [])]);
+    const tested = { ...narrow, motion: 1, pixels: { [pair!.id]: { region: pair!.region, top: 'b' as const, crops: { normal: 'n', victimClear: 'vc', coverClear: 'cc', bothClear: 'bc', coverHidden: 'ch', coverHiddenVictimClear: 'chvc' } } } };
+    expect(report(base, tested, clips)).toMatchObject([{ status: 'likely', flags: ['glyphsOverlap', 'pixelConfirmed', 'textOnText', 'unsettled'] }]);
+  });
+});
+
+describe('modal layers and application shells', () => {
+  const base = layout('baseline', 1280, 720, { texts: [text(2, [2, 3], [[16, 300, 600, 24]]), text(3, [3, 4], [[16, 400, 600, 24]])] });
+  const lockedVp = viewport(800, 256, { overflowX: 'hidden', overflowY: 'hidden', scrollHeight: 600 });
+
+  it('is info (modalOpen) when an open modal locks the page behind it', () => {
+    const modal: ReflowLayer = { key: 20, position: 'fixed', rect: [200, 20, 400, 200], painted: [[200, 20, 400, 200]], buttons: 2, controls: 2, dialog: true, modal: true, dismissControl: true };
+    const short = layout('short', 800, 256, { viewport: lockedVp, texts: [text(2, [2, 3], [[16, 100, 600, 24]]), text(3, [3, 4], [[16, 400, 600, 24]])], scrolls: [{ x: 0, y: 0, layers: [modal] }] });
+    expect(report(base, short)).toMatchObject([{ rule: 'reflow/scroll-locked', status: 'info', flags: ['modalOpen'] }]);
+    // Without the modal: a failure, as before.
+    expect(report(base, { ...short, scrolls: [{ x: 0, y: 0, layers: [] }] })).toMatchObject([{ rule: 'reflow/scroll-locked', status: 'fail' }]);
+  });
+
+  it('counts a sticky footer stuck to the bottom from the start, and layers stuck inside the scroller of an application shell', () => {
+    const header = (y: number) => ({ key: 4, position: 'sticky' as const, rect: [0, y, 800, 78] as ReflowRect, painted: [[0, y, 800, 78]] as ReflowRect[], buttons: 0, controls: 0, landmark: true });
+    const footer = { key: 5, position: 'sticky' as const, rect: [0, 184, 800, 72] as ReflowRect, painted: [[0, 184, 800, 72]] as ReflowRect[], buttons: 0, controls: 0, landmark: true };
+    const shell = layout('short', 800, 256, {
+      viewport: lockedVp,
+      scrolls: [
+        { x: 0, y: 0, scroller: 9, layers: [header(0), footer] },
+        { x: 0, y: 500, scroller: 9, layers: [header(0), footer] },
+        { x: 0, y: 1000, scroller: 9, layers: [header(0), { ...footer, rect: [0, 150, 800, 72], painted: [[0, 150, 800, 72]] }] },
+      ],
+    });
+    const [found] = report(layout('baseline', 1280, 720), shell);
+    expect(found).toMatchObject({ rule: 'reflow/sticky-obscures', status: 'likely', values: { readableShare: 0.41, scrollY: 0 }, flags: ['mainScroller'] });
   });
 });
 
@@ -406,6 +613,23 @@ describe('the reflow check', () => {
     expect(twoDimensional[0]?.evidence.flags).toContain('notCaptured');
     const survey = findings.find((finding) => finding.rule === 'reflow/survey');
     expect(survey).toMatchObject({ status: 'info', wcag: null, evidence: { values: { passes: 'narrow short', findings: 2 } } });
+  });
+
+  it('says why the survey stopped, with nothing else to report, when the page went elsewhere before the baseline', () => {
+    const stopped: Snapshot = { ...snapshot, reflow: { baseline: null, passes: [], skipped: [], names: {}, original: { width: 1280, height: 720 }, stopped: { reason: 'navigated', detail: 'Inspected target navigated or closed' } } };
+    const findings = runChecks(stopped, resolveConfig({ checks: ['reflow'] }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ rule: 'reflow/survey', status: 'info', evidence: { values: { stopped: 'navigated' }, flags: ['stopped'] } });
+    expect(findings[0]?.message).toContain('went to another document');
+  });
+
+  it('names the physical side measured: the left edge of a page laid out right to left', () => {
+    const rtlBase = layout('baseline', 1280, 720, { texts: [text(2, [2, 3], [[600, 100, 600, 24]])] });
+    const rtlPass = layout('narrow', 320, 800, { viewport: viewport(320, 800, { rtl: true, overflowX: 'hidden', overflowY: 'auto' }), texts: [text(2, [2, 3], [[-280, 100, 584, 24]])] });
+    const findings = runChecks({ ...snapshot, reflow: { ...survey, baseline: rtlBase, passes: [rtlPass], names: { '2': { selector: '#rtl', frame: '' } } } }, resolveConfig({ checks: ['reflow'] }));
+    const lost = findings.find((finding) => finding.rule === 'reflow/content-lost');
+    expect(lost?.status).toBe('fail');
+    expect(lost?.message).toContain('beyond the left edge');
   });
 });
 

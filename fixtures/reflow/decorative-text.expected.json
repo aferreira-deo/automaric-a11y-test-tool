@@ -1,0 +1,8 @@
+{
+  "description": "A large decorative year (aria-hidden) behind the heading of a hero. At 320 px it lies under the heading and the paragraph: decoration is never the victim of an overlap, and only ink of the real text that it hides would count; the heading is painted over it. Nothing is reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

@@ -192,8 +192,11 @@ test('without the accessibility tree a heading that does not read as one is info
   await page.goto('/headings/not-a-heading.html');
   const before = (await new A11yVision({ page }).withChecks(['headings']).analyze()).findings.filter((finding) => finding.rule === NOT_A_HEADING);
   expect(before.filter((finding) => finding.status === 'likely').length).toBe(5);
-  withoutAccessibilityTree(page);
-  const { findings } = await new A11yVision({ page }).withChecks(['headings']).analyze();
+  // A page of its own: the scanner keeps one session per page, made when the page is first scanned.
+  const other = await page.context().newPage();
+  await other.goto('/headings/not-a-heading.html');
+  withoutAccessibilityTree(other);
+  const { findings } = await new A11yVision({ page: other }).withChecks(['headings']).analyze();
   expect(findings.filter((finding) => finding.status !== 'info')).toEqual([]);
 });
 

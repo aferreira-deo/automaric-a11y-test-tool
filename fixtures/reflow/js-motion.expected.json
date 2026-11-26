@@ -1,0 +1,9 @@
+{
+  "description": "A line of text that a script moves every 16 ms through a box with overflow: hidden. Its changes are no longer waited for after settleMotionMs: the scan stays short, the survey records the motion, and the line it moves through the box is info (moving).",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > main > div", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["moving", "clippedByAncestor"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

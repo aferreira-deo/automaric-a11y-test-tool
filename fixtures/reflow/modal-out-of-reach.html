@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: modal-out-of-reach</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body { margin: 0; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      main { padding: 16px; max-width: 960px; }
+      /* The script of the dialog locks the page while it is open. */
+      body.locked { overflow: hidden; }
+      .backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); }
+      /* Fixed, as tall as what it holds, and no scroll bar of its own: in a short window its end lies below the viewport. */
+      .dialog { position: fixed; left: 50%; top: 40px; transform: translateX(-50%); width: min(90vw, 600px); background: #fff; padding: 16px; }
+      .dialog h2 { margin: 0 0 8px; }
+      .dialog p { margin: 0 0 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>News</h1>
+      <p>Residents of the controlled zones can apply for a permit for each car registered at their address, up to two per household.</p>
+      <p>The permit is valid for a year from the date it is issued, and is renewed online from the account of the resident.</p>
+    </main>
+    <div class="backdrop"></div>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <h2 id="dialog-title">Subscribe to the newsletter</h2>
+      <p>Once a month we send the programme of the theatre, the concerts in the park and the exhibitions of the museum.</p>
+      <p>We also tell you about road works, changes to the collection of bins and the dates of the council meetings.</p>
+      <p><label>Email <input id="email" type="email" /></label></p>
+      <p><button id="subscribe" type="button">Subscribe</button> <button id="no-thanks" type="button">No thanks</button></p>
+    </div>
+    <script>document.body.classList.add('locked');</script>
+  </body>
+</html>

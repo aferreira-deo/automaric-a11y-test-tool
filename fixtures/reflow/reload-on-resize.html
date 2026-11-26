@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reflow: reload-on-resize</title>
+    <!-- No manifest: e2e/reflow.spec.ts scans it. The page reloads itself whenever the viewport changes. -->
+    <style>
+      body { margin: 16px; font: 16px/1.5 Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; }
+      .lead { font-size: 32px; font-weight: bold; margin: 0 0 16px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Reload on resize</h1>
+      <p class="lead">Parking permits</p>
+      <p>Residents of the controlled zones can apply for a permit for each car registered at their address, up to two per household.</p>
+      <p>The permit is valid for a year from the date it is issued, and is renewed online from the account of the resident.</p>
+    </main>
+    <script>addEventListener('resize', () => location.reload());</script>
+  </body>
+</html>

@@ -9,7 +9,11 @@
 
 export type ReflowRect = [number, number, number, number];
 
-/** `baseline`: the viewport the caller gave the page. `narrow`: 320 by 800 by default. `short`: 800 by 256 by default. */
+/**
+ * `baseline`: the reference layout every pass is compared with: the viewport the caller gave the page when it is at
+ * least `referenceMinWidthCssPx` by `referenceMinHeightCssPx`, otherwise `referenceWidthCssPx` by
+ * `referenceHeightCssPx` (1280 by 720). `narrow`: 320 by 800 by default. `short`: 800 by 256 by default.
+ */
 export type ReflowPassName = 'baseline' | 'narrow' | 'short';
 
 /** Computed `overflow-x` or `overflow-y`; `overlay` is read as `auto`. */
@@ -37,6 +41,8 @@ export interface ReflowViewport {
   overflowY: ReflowOverflow;
   /** The root is laid out right to left: horizontal overflow goes to the left. */
   rtl: boolean;
+  /** The root has a vertical writing mode: its lines run top to bottom and the page grows sideways. */
+  vertical?: boolean;
 }
 
 /**
@@ -51,14 +57,23 @@ export interface ReflowClipBox {
   y: ReflowOverflow;
   /** `scrollWidth`, `scrollHeight`, `scrollLeft`, `scrollTop`, `clientWidth`, `clientHeight`. */
   scroll: [number, number, number, number, number, number];
+  /** Laid out right to left: its horizontal overflow, and its scroll range, go to the left. */
+  rtl?: boolean;
   tag: string;
   role: string;
   /** Single-line truncation by design: `text-overflow: ellipsis` with `white-space: nowrap`, or `-webkit-line-clamp`. */
   truncates?: 'ellipsis' | 'line-clamp';
   /** It, or its parent, holds a control that may show what it hides: a button, a `summary`, an element with `aria-expanded`. */
   revealControl?: boolean;
-  /** Scroll snapping or `aria-roledescription`: the viewport of a carousel. */
+  /**
+   * The viewport of a carousel: scroll snapping; `aria-roledescription` on it or around it; it or the track it
+   * holds is named in `aria-controls` of a control; previous, next or pagination controls in the region it
+   * shares with them (`carouselControlLevels` ancestors up); or a track wider than it, moved by a translation
+   * or with a declared transition of its position.
+   */
   carousel?: boolean;
+  /** Its content is moved through it by an animation (a ticker, a marquee): see `ReflowText.moving`. */
+  moving?: boolean;
   /** It holds a `table` or an element with the role `table` or `grid`. */
   holdsTable?: boolean;
   /** Excepted content it is, or is inside of. */
@@ -90,6 +105,15 @@ export interface ReflowText {
   ruby?: number;
   /** In a dialog, a menu, a list box or a tooltip. */
   popup?: boolean;
+  /** Under `aria-hidden="true"` or `inert`: decoration. Never the victim of a rule nor the cause of a failure. */
+  decorative?: boolean;
+  /**
+   * It, or an element it is in, moves by itself: a CSS animation is declared on it, an animation or a transition
+   * was running when the scan began, or a script kept changing its style while the layout was waited for.
+   */
+  moving?: boolean;
+  /** It is, or is inside, an element that a visible control names in `aria-controls`: what such a control may show. */
+  controlled?: boolean;
   /** The start of its text, white space collapsed. */
   sample: string;
 }
@@ -109,6 +133,8 @@ export interface ReflowBox {
   paints: boolean;
   /** `display: inline`: laid out in the lines of text, whose rectangle spans the lines it wraps over. */
   inline?: boolean;
+  /** Under `aria-hidden="true"` or `inert`. */
+  decorative?: boolean;
   tag: string;
 }
 
@@ -127,8 +153,12 @@ export interface ReflowLayer {
   rect: ReflowRect;
   /** What it paints: its own box when it paints, otherwise the boxes and text inside it that do. */
   painted: ReflowRect[];
-  /** A dialog: the role `dialog` or `alertdialog`, `aria-modal`, an open `dialog`. */
+  /** A dialog: the element itself has the role `dialog` or `alertdialog`, `aria-modal`, or is an open `dialog`. What it holds, hidden or not, does not count. */
   dialog?: boolean;
+  /** Modal: `aria-modal="true"` on it or on a visible dialog it holds, or a `dialog` opened modally (`:modal`). */
+  modal?: boolean;
+  /** It holds a visible control whose accessible name contains one of `dismissWords` (close, accept, refuse...). */
+  dismissControl?: boolean;
   /** A landmark: `header`, `footer`, `nav`, `aside` or their roles. */
   landmark?: boolean;
   /** Buttons inside it, and controls of every kind. */
@@ -136,10 +166,12 @@ export interface ReflowLayer {
   controls: number;
 }
 
-/** Fixed and sticky elements at one scroll position of the window. */
+/** Fixed and sticky elements at one scroll position of the window, or of the main scroller of a document that does not scroll. */
 export interface ReflowScrollState {
   x: number;
   y: number;
+  /** Key of the scroll container that was scrolled, when it was not the window (an application shell). */
+  scroller?: number;
   layers: ReflowLayer[];
 }
 
@@ -180,6 +212,10 @@ export interface ReflowLayout {
   viewport: ReflowViewport;
   /** The layout settled within `settleMaxMs` (no change to the document for `settleQuietMs`). */
   settled: boolean;
+  /** Elements that kept moving by script after `settleMotionMs`: their changes were no longer waited for (`unsettled`). */
+  motion?: number;
+  /** The waits of this pass used up `settleBudgetMs`: the later ones were cut short. */
+  budgetSpent?: boolean;
   texts: ReflowText[];
   boxes: ReflowBox[];
   clips: ReflowClipBox[];
@@ -190,7 +226,11 @@ export interface ReflowLayout {
   beyondAxis: 'x' | 'y' | null;
   /** Keys of the controls that disclose content (`aria-expanded`, `aria-haspopup`, `aria-controls` on a button, `summary`). */
   disclosures: number[];
-  /** Fixed and sticky elements at each scroll position of `stickyScrollPositions`; the first is the top. */
+  /**
+   * Fixed and sticky elements at each scroll position of `stickyScrollPositions`; the first is the top. When the
+   * document does not scroll and one scroll container covers most of the viewport (`mainScrollerMinShare`), the
+   * positions are those of that container (`ReflowScrollState.scroller`).
+   */
   scrolls: ReflowScrollState[];
   /** The largest scroll position of the window on each axis. */
   maxScroll: { x: number; y: number };
@@ -221,6 +261,16 @@ export interface ReflowConfig {
   shortWidthCssPx: number;
   shortHeightCssPx: number;
   /**
+   * The layout every pass is compared with (`baseline`). The caller's viewport when it is at least
+   * `referenceMinWidthCssPx` by `referenceMinHeightCssPx`; otherwise the page is laid out at
+   * `referenceWidthCssPx` by `referenceHeightCssPx` for it, so that a problem a narrow caller's viewport already
+   * shows is still compared with a wide layout.
+   */
+  referenceWidthCssPx: number;
+  referenceHeightCssPx: number;
+  referenceMinWidthCssPx: number;
+  referenceMinHeightCssPx: number;
+  /**
    * After the viewport changes, the layout is waited for: at least `settleMinMs`, then until
    * nothing in the document (elements, attributes, text, the size of the root and of `body`) has
    * changed for `settleQuietMs`, `settleMaxMs` at most. Fonts are waited for within that time.
@@ -231,6 +281,13 @@ export interface ReflowConfig {
   /** The same after the window is scrolled to look at fixed and sticky elements. */
   scrollSettleMs: number;
   scrollSettleMaxMs: number;
+  /**
+   * Changes that only an element moving by script keeps making (its `style` or `class` changed at least three
+   * times) are no longer waited for after this long; the pass records them (`motion`, `unsettled`).
+   */
+  settleMotionMs: number;
+  /** All waits of one layout together (settling, scrolling, captures) at most; once used up, each wait is one frame. */
+  settleBudgetMs: number;
   /** At most this many elements are walked in one layout, text items and boxes kept, line boxes per text, elements beyond the edge kept. */
   maxElements: number;
   maxTextItems: number;
@@ -284,8 +341,28 @@ export interface ReflowConfig {
   stickyScrollPositions: number[];
   /** Elements looked at inside a fixed or sticky element that paints nothing itself. */
   layerMaxDescendants: number;
-  /** A layer with a button and at most this many controls, that is no landmark, counts as one a user can dismiss (a cookie banner). */
+  /**
+   * A layer counts as one a user can dismiss when it is itself a visible, open dialog, or when it holds a
+   * visible control whose accessible name contains one of `dismissWords` (whole words, any case) and at most
+   * `maxDismissControls` controls in all (a cookie banner). Hidden descendants never count.
+   */
   maxDismissControls: number;
+  dismissWords: string[];
+  /**
+   * A clipping element is the viewport of a carousel when an ancestor at most `carouselControlLevels` up holds,
+   * outside it, a visible control whose accessible name contains one of `carouselControlWords` (previous, next,
+   * slide...), or a tab list: the arrows and dots of a slider.
+   */
+  carouselControlLevels: number;
+  carouselControlWords: string[];
+  /** A document that does not scroll, with a scroll container this share of the viewport or more: that container is the page (an application shell). */
+  mainScrollerMinShare: number;
+  /**
+   * A page counts as laid out horizontally (positive evidence only) when its root has a vertical writing mode, or
+   * when at the baseline it scrolls horizontally and fits vertically and at least this share of its running text
+   * is laid out in lines wholly beyond the inline end, where that scrolling reaches them (a panel, a column).
+   */
+  horizontalMinTextShare: number;
   /** A layer that covers this share of the viewport is a full-screen layer. */
   fullScreenLayerMinShare: number;
   /** Below this, `scrollHeight - clientHeight` is not something to scroll. */
@@ -293,10 +370,18 @@ export interface ReflowConfig {
   /** A nested scroller on the axis of the page counts as a second scroll bar for the main content from this share of the viewport on that axis, holding this much text. */
   nestedScrollerMinShare: number;
   nestedScrollerMinTextChars: number;
+  /**
+   * A second scroll bar that the baseline has as well is reported with this status (`atBaseline` in its values)
+   * when it takes at least `nestedScrollerAtBaselineMinShare` of the viewport: what is asked of the reflowed view
+   * does not depend on the baseline. Smaller ones that the baseline has are `info`.
+   */
+  doubleScrollbarAtBaselineStatus: 'likely' | 'info';
+  nestedScrollerAtBaselineMinShare: number;
 }
 
 export interface ReflowSurvey {
-  baseline: ReflowLayout;
+  /** Null only when the survey stopped before the baseline was measured (`stopped`). */
+  baseline: ReflowLayout | null;
   /** The passes that ran, in order. */
   passes: ReflowLayout[];
   /** Passes switched off in the configuration. */
@@ -305,4 +390,12 @@ export interface ReflowSurvey {
   names: Record<string, { selector: string; frame: string }>;
   /** The viewport of the page as the scan found it, which is put back. */
   original: { width: number; height: number };
+  /** The size the baseline was measured at: the caller's viewport, or the configured reference size. */
+  reference?: { width: number; height: number; source: 'caller' | 'configured' };
+  /**
+   * Why the survey stopped before its end, when it did: the page went to another document while a pass was in
+   * effect (it reloads or navigates on resize), or a step failed. What was measured before is kept; the other
+   * checks are not affected.
+   */
+  stopped?: { reason: 'navigated' | 'error'; detail: string };
 }

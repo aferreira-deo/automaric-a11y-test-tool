@@ -1,0 +1,8 @@
+{
+  "description": "A row of cards that scrolls horizontally inside a page wrapper that clips. Nothing is lost.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

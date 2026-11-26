@@ -1,0 +1,10 @@
+{
+  "description": "A scroll container 100vh tall that holds the page, inside a body that scrolls as well: two scroll bars for one direction. The baseline has it too; what the reflowed view gives the reader does not depend on that: likely in both passes, with atBaseline in its values (doubleScrollbarAtBaselineStatus).",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html > body > div", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/double-scrollbar", "flags": ["atBaseline"] },
+    { "selector": "html > body > div", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/double-scrollbar", "flags": ["atBaseline"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

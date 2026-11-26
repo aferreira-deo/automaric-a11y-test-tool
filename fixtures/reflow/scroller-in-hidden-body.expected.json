@@ -1,0 +1,8 @@
+{
+  "description": "A row of cards that scrolls horizontally (overflow-x: auto) in a page whose html and body clip horizontally. At 320 px the cards lie beyond the right edge of the viewport, but the row scrolls to them, and its own box is inside the viewport: reachability is worked out scroller by scroller from the inside out, so nothing is lost.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

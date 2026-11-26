@@ -500,6 +500,8 @@ export interface Agent {
   keyFor(element: Element): number;
   /** Selector and frame of an element, as findings name it (its signature is recorded). */
   named(element: Element): { selector: string; frame: string };
+  /** An animation or a transition was running on the element when the page was stabilised (which stops them all). Read only. */
+  wasAnimated(element: Element): boolean;
   /** The Tab walk of this collection reached the element. */
   wasTabbed(element: Element): boolean;
   /** The stabilising style sheet is adopted around the element (its document, its shadow roots, the frames it is in). */
@@ -542,6 +544,8 @@ export function agentFactory(options: AgentOptions): Agent {
   const elements = new Map<number, Element>();
   const keys = new WeakMap<Element, number>();
   const tabbed = new Set<number>();
+  /** Targets of the animations and transitions running when stabilise() began: the stabiliser ends them all. */
+  const animated = new WeakSet<Element>();
   const sheets: { root: Document | ShadowRoot; sheet: CSSStyleSheet }[] = [];
   const styledRoots = new WeakSet<Node>();
   /** Frames taken out of the Tab order by skipFrames, with the tabindex attribute they had. */
@@ -1267,6 +1271,11 @@ export function agentFactory(options: AgentOptions): Agent {
         if (view && frame) restoreScroll(view);
         current = frame;
       }
+    }
+    // What was scrolled when the agent came in, wherever it is: a layout in between (a viewport of the collection
+    // other than the page's own, as in a mobile context) can clamp it.
+    for (const target of initialScrolls.keys()) {
+      if ('scrollX' in target || (target.isConnected && !seen.has(target))) restoreScroll(target);
     }
     window.scrollTo({ left: initialScroll.x, top: initialScroll.y, behavior: 'instant' });
   }
@@ -3820,6 +3829,14 @@ export function agentFactory(options: AgentOptions): Agent {
 
   return {
     async stabilise() {
+      try {
+        for (const animation of document.getAnimations()) {
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          if (target && animation.playState === 'running') animated.add(target);
+        }
+      } catch {
+        // An old browser without getAnimations: nothing is known to move.
+      }
       ensureStable(document);
       await Promise.race([
         document.fonts.ready,
@@ -3994,6 +4011,10 @@ export function agentFactory(options: AgentOptions): Agent {
 
     named(element) {
       return { selector: selectorOf(element), frame: frameOf(element) };
+    },
+
+    wasAnimated(element) {
+      return animated.has(element);
     },
 
     wasTabbed(element) {

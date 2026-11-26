@@ -1,0 +1,8 @@
+{
+  "description": "A row of cards that scrolls horizontally inside a card that clips (overflow: hidden). The card cuts the raw position of the cards, not the box of the row they scroll in: nothing is lost.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

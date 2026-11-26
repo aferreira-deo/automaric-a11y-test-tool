@@ -1,0 +1,8 @@
+{
+  "description": "A drawer at right: -280px with overflow-x: hidden on html and body, behind a Menu button with aria-controls: parked, not lost. Nothing is reported.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}
