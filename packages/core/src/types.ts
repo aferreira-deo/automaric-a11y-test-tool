@@ -1285,6 +1285,13 @@ export interface RunConfig {
    * gets the address as it was given.
    */
   redactQueryParams: string[];
+  /**
+   * How the CLI's browser reaches the pages (`--proxy`): `system` (as the system says, the
+   * default), `none` (directly, `--no-proxy-server`), or the address of an HTTP proxy
+   * (`http://host:port`, without credentials: they come from the environment). The copies the
+   * name-role-value check probes in are told the same.
+   */
+  proxy: string;
 }
 
 /** How an element is named in a finding: its selector and its signature. Read by the collector. */

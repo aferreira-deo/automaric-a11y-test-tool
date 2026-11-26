@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, rmdirSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createServer, isIP } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +7,7 @@ import { ProbeRoutingError } from '@a11y-vision/collector-cdp';
 import type { CdpSession, CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage } from '@a11y-vision/collector-cdp';
 import type { Browser, BrowserContext, BrowserContextOptions, BrowserType, CDPSession, LaunchOptions, Page } from 'playwright-core';
 import { pageIsLoopback, pageIsPrivate, sendRead } from './probe-fetch.js';
-import { RoutingRefusal, commandLineArgs, resolveRouting, switchesOf, systemAutoDetect, systemProxy } from './probe-routing.js';
+import { RoutingRefusal, addressClass, commandLineArgs, loopbackName, resolveRouting, switchesOf, systemAutoDetect, systemProxy } from './probe-routing.js';
 import type { ProbeRouting, ReadRouting } from './probe-routing.js';
 
 /** What the copies of a page are given beyond what the collector reads from the page itself, and how their reads are sent. */
@@ -30,10 +30,22 @@ export interface ProbeContextOptions {
   hostResolverRules?: string;
   /** Certificate errors are ignored for the reads of the copies. By default, as the page's context (`ignoreHTTPSErrors`) and browser (`--ignore-certificate-errors`) do. */
   ignoreHTTPSErrors?: boolean;
+  /**
+   * How the caller enables probing when the proxy of the system cannot be followed (a proxy the system
+   * sets, or one it detects on the network, WPAD), as the end of the reason the survey gives; by
+   * default it names `probeContext.proxy` and the launch options. The CLI names its `--proxy`.
+   */
+  routingAdvice?: string;
   /** The Chromium to probe in. By default, the executable of the page's browser when it is on this machine; else Playwright's own. */
   executablePath?: string;
   /** A Chromium channel to probe in (`chrome`, `msedge`), when no `executablePath` is given. */
   channel?: string;
+}
+
+/** An address of this machine by name or by address (`localhost`, `127.0.0.1`, `[::1]`): what Chromium never sends to a proxy. */
+function onThisMachineByName(url: string): boolean {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return loopbackName(host) || (isIP(host) !== 0 && addressClass(host) === 'loopback');
 }
 
 function cdpOf(session: CDPSession): CdpSession {
@@ -271,11 +283,13 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
       const read = await readRouting(page, options);
       let routing: ProbeRouting;
       try {
-        routing = resolveRouting({ ...(options.proxy !== undefined ? { proxy: options.proxy } : {}), ...(options.hostResolverRules !== undefined ? { hostResolverRules: options.hostResolverRules } : {}), ...(options.ignoreHTTPSErrors !== undefined ? { ignoreHTTPSErrors: options.ignoreHTTPSErrors } : {}) }, read);
+        routing = resolveRouting({ ...(options.proxy !== undefined ? { proxy: options.proxy } : {}), ...(options.hostResolverRules !== undefined ? { hostResolverRules: options.hostResolverRules } : {}), ...(options.ignoreHTTPSErrors !== undefined ? { ignoreHTTPSErrors: options.ignoreHTTPSErrors } : {}), ...(options.routingAdvice !== undefined ? { advice: options.routingAdvice } : {}) }, read);
       } catch (error) {
         if (error instanceof RoutingRefusal) throw new ProbeRoutingError(error.message);
         throw error;
       }
+      // A proxy the system detects by itself: only this machine is read, so a page elsewhere has no copy to probe in.
+      if (routing.proxyUnknown && !onThisMachineByName(pageUrl)) throw new ProbeRoutingError(routing.proxyUnknown);
       const privateAllowed = await pageIsPrivate(routing, pageUrl);
       const loopbackAllowed = await pageIsLoopback(routing, pageUrl);
 

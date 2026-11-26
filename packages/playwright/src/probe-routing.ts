@@ -433,7 +433,12 @@ export interface StatedRouting {
   proxy?: { server: string; bypass?: string; username?: string; password?: string } | null;
   hostResolverRules?: string;
   ignoreHTTPSErrors?: boolean;
+  /** How the caller enables probing where the proxy of the system cannot be followed (the CLI names its `--proxy`); by default `DEFAULT_ADVICE`. */
+  advice?: string;
 }
+
+/** How probing is enabled where the proxy of the system cannot be followed, said to a caller of the Playwright API. */
+export const DEFAULT_ADVICE = 'to probe, say how the page reaches the network: probeContext.proxy (null when this machine reaches the site directly), or launch its browser with --no-proxy-server or a proxy';
 
 /** What was read of the browser and the context of the page. */
 export interface ReadRouting {
@@ -471,6 +476,7 @@ function playwrightBypass(bypass: string | undefined): string {
  * cannot be read or followed.
  */
 export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeRouting {
+  const advice = stated.advice ?? DEFAULT_ADVICE;
   // A browser this process did not launch may be on another machine, behind another network: its command line
   // and its context say how it is set up, not where its requests go from there. Only what the caller says is followed.
   if (!read.launchedHere && (stated.proxy === undefined || stated.hostResolverRules === undefined)) {
@@ -499,11 +505,11 @@ export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeR
   } else if (read.systemProxy === undefined) {
     throw new RoutingRefusal('the browser of the page is not on this machine, so the proxy of its system cannot be read; say it with probeContext.proxy (null for none)');
   } else if (read.systemProxy !== null) {
-    throw new RoutingRefusal(`the browser of the page uses the proxy of the system (${read.systemProxy}), which the reads of the copies do not follow; say it with probeContext.proxy`);
+    throw new RoutingRefusal(`the browser of the page uses the proxy of the system (${read.systemProxy}), which the reads of its copies do not follow, so no control was activated and what controls do was not examined; ${advice}`);
   } else {
     proxy = null;
     // The system's settings, with automatic detection on: on a network that offers a proxy (WPAD), the page's requests go there.
-    if (read.systemAutoDetect) proxyUnknown = `the browser of the page uses the settings of the system, which detect a proxy automatically (${read.systemAutoDetect}): where its requests to other machines go cannot be known here; say it with probeContext.proxy (null for none)`;
+    if (read.systemAutoDetect) proxyUnknown = `the browser of the page uses the settings of the system, which detect a proxy on the network automatically (${read.systemAutoDetect}), so where the reads of its copies would go cannot be known, no control was activated and what controls do was not examined; ${advice}`;
   }
   let hostRules: HostRule[];
   let connectionRules: HostRule[] = [];
@@ -576,7 +582,7 @@ export interface SystemReaders {
   home: string;
 }
 
-const systemReaders: SystemReaders = {
+const nativeReaders: SystemReaders = {
   run,
   readFile: (path) => readFile(path, 'utf8').catch(() => null),
   home: homedir(),
@@ -607,7 +613,16 @@ export function linuxDesktop(env: NodeJS.ProcessEnv): 'gnome' | 'kde' | 'other' 
  * cannot be read counts as a proxy: probing then does not start unless `probeContext.proxy` says
  * it. Automatic detection (WPAD) is read apart (`systemAutoDetect`).
  */
-export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, readers: SystemReaders = systemReaders): Promise<string | null> {
+let systemReaders: SystemReaders = nativeReaders;
+let systemEnv: NodeJS.ProcessEnv | null = null;
+
+/** Tests only: what the system is read with, in place of the system itself (`null`: the system again), and the environment then read. */
+export function setSystemReaders(readers: SystemReaders | null, env: NodeJS.ProcessEnv = {}): void {
+  systemReaders = readers ?? nativeReaders;
+  systemEnv = readers ? env : null;
+}
+
+export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = systemEnv ?? process.env, readers: SystemReaders = systemReaders): Promise<string | null> {
   if (platform === 'win32') {
     const out = (await readers.run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'])) ?? '';
     const value = (name: string): string | undefined => new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.*)$`, 'im').exec(out)?.[1]?.trim();

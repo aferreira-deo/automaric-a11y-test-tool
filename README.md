@@ -81,6 +81,7 @@ node packages/cli/dist/bin.js scan https://example.com \
 | `--ai-cache <file>`, `--no-ai-cache` | | Where verdicts are kept (default `.a11y-vision/verdicts.json` in the working directory), or keep none. |
 | `--no-ai` | | Ask no model, whatever the environment or the config file say. |
 | `--config <file>` | | JSON file with any setting (`checks`, `focus`, `icon`, `headings`, `lists`, `grouping`, `nameRoleValue`, `reflow`, `adjudication`, `baseline`, `run`, `selector`). Options win over the environment, which wins over the file. |
+| `--proxy <how>` (`run.proxy`) | `A11Y_VISION_PROXY_USERNAME`, `A11Y_VISION_PROXY_PASSWORD` (credentials of the proxy only) | How the browser reaches the pages, and how the copies the name-role-value check probes in read them: `system` (default: the browser is launched as it always was and takes the system's settings), `none` (the browser gets `--no-proxy-server`, and the copies are told the same: the page and its copies go directly), or an HTTP proxy, `http://host:port` (the browser is launched with it, the copies are told the same). Credentials of the proxy come from the two environment variables only, are sent once the proxy asks for them, and are written nowhere; a value with credentials in it, another scheme, a path, or anything else is a usage error (exit 2), and credentials in it are not repeated. Where the system sets a proxy, or detects one on the network by itself (Windows' "Automatically detect settings", WPAD, on by default), the copies cannot follow it and no control is activated on a page of another machine: the report and stderr say so, with these two ways to probe. Changing how the page under test is reached is the owner's decision: the default leaves it as it is. |
 
 Giving a base URL and a model selects the adapter; giving one without the other is an error (exit 2), as is a key
 variable that is not set. A scan is never run half configured.
@@ -1366,8 +1367,20 @@ and sends the read itself, in Node:
   default, read from `Connections\DefaultConnectionSettings`), where its requests go cannot be known from here, so
   only reads of this machine by name or by address (`localhost`, `127.0.0.1`, `[::1]`), which Chromium never sends
   to a proxy, are sent; the others are not sent, with the reason (`copyReadsRoute: direct to this machine only`). A
-  page on another machine is then not probed unless `probeContext.proxy` says how it is routed (`null` for none), or
-  its browser is launched with `--no-proxy-server` or a proxy.
+  page on another machine is then not probed (`probeStopped:routing`): the detail says that no control was
+  activated, so what controls do was not examined, and how to probe. With the CLI: `--proxy none` when this machine
+  reaches the site directly, or `--proxy http://host:port` (see the options of the CLI). With the Playwright API,
+  either launch the page's browser so that it does not take the system's settings:
+
+  ```js
+  const browser = await chromium.launch({ args: ['--no-proxy-server'] }); // or { proxy: { server: 'http://proxy:3128' } }
+  const result = await new A11yVision({ page: await browser.newPage() }).analyze();
+  ```
+
+  or keep the browser as it is and say how it reaches the network:
+  `new A11yVision({ page, probeContext: { proxy: null } })` (or `{ proxy: { server: 'http://proxy:3128' } }`).
+  `probeContext.routingAdvice` replaces the end of that detail, for a tool that wraps the API (the CLI names its
+  `--proxy`).
 - **Its ports**: a port Chromium refuses whatever the page asks (`net::ERR_UNSAFE_PORT`: 6667, 10080, 5060, 1719
   and the 76 others of its list) is never read, nor one the host rules send a read to, nor port 0; it refuses them
   after the request was held, so the collector would otherwise be handed reads the page's own request never makes.
@@ -2233,6 +2246,7 @@ Limits, all in the `run` section of the config file:
 | `sitemapMaxDepth` | 16 | Elements nested deeper than this in a sitemap are refused. |
 | `minSecretChars` | 8 | See "Signed-in pages". |
 | `redactQueryParams` | `access_token`, `api_key`, `apikey`, `auth`, `code`, `id_token`, `key`, `password`, `refresh_token`, `secret`, `sig`, `signature`, `token` | See "Credentials and tokens in an address". |
+| `proxy` (`--proxy`) | `system` | `system`, `none` or `http://host:port`: see `--proxy` above. |
 
 A sitemap that is cut at `maxUrls` does not change the exit code: the pages that were scanned were scanned. The
 cut is said on stderr, in the JSON report (`a11yVision.input.overLimit`), in a line in bold at the top of the

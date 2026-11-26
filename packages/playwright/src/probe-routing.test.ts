@@ -174,8 +174,12 @@ describe('automatic detection of a proxy (WPAD)', () => {
   it('where the browser of the page takes its proxy from the system: reads go to this machine only, and the survey says why', () => {
     const routing = resolveRouting({}, { ...local, systemAutoDetect: 'Windows: "Automatically detect settings"' });
     expect(routing.proxy).toBeNull();
-    expect(routing.proxyUnknown).toContain('detect a proxy automatically');
+    expect(routing.proxyUnknown).toContain('detect a proxy on the network automatically');
     expect(routing.description).toContain('this machine only');
+    // The reason says what was not examined, and how to probe: the caller's way (the CLI's --proxy), or the API's.
+    expect(routing.proxyUnknown).toContain('no control was activated and what controls do was not examined; to probe, say how the page reaches the network: probeContext.proxy');
+    expect(resolveRouting({ advice: 'run with --proxy none' }, { ...local, systemAutoDetect: 'x' }).proxyUnknown).toMatch(/not examined; run with --proxy none$/);
+    expect(refusal(() => resolveRouting({ advice: 'run with --proxy none' }, { ...local, systemProxy: 'proxy.corp:8080' }))).toMatch(/proxy of the system \(proxy\.corp:8080\).*not examined; run with --proxy none$/);
     // A proxy said, or none: followed.
     expect(resolveRouting({ proxy: null }, { ...local, systemAutoDetect: 'x' }).proxyUnknown).toBeUndefined();
     // A browser whose command line says its proxy does not use the system's.
