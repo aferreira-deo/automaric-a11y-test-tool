@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { ProbeRoutingError } from '@a11y-vision/collector-cdp';
 import type { CdpSession, CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage } from '@a11y-vision/collector-cdp';
 import type { Browser, BrowserContext, BrowserContextOptions, BrowserType, CDPSession, LaunchOptions, Page } from 'playwright-core';
-import { pageIsPrivate, sendRead } from './probe-fetch.js';
-import { RoutingRefusal, commandLineArgs, resolveRouting, switchesOf, systemProxy } from './probe-routing.js';
+import { pageIsLoopback, pageIsPrivate, sendRead } from './probe-fetch.js';
+import { RoutingRefusal, commandLineArgs, resolveRouting, switchesOf, systemAutoDetect, systemProxy } from './probe-routing.js';
 import type { ProbeRouting, ReadRouting } from './probe-routing.js';
 
 /** What the copies of a page are given beyond what the collector reads from the page itself, and how their reads are sent. */
@@ -173,11 +173,15 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
   let persistent: boolean;
   try {
     const impl = typeof toImpl === 'function' ? toImpl.call(internals._connection, context) : undefined;
-    // No server object, or one without options: not known, which is not the same as none.
-    contextProxy = impl?._options ? (impl._options.proxy ?? null) : undefined;
+    // No server object, or one without options: not known, which is not the same as none. What the context was
+    // created with on this side (its options as the test gave them) counts too: a proxy either side names is followed.
+    contextProxy = impl?._options ? (impl._options.proxy ?? internals._options?.proxy ?? null) : undefined;
     launched = launchedHere(impl);
     // The default context of a browser launched with a profile (launchPersistentContext): its settings are not read.
-    persistent = impl?._browser?._defaultContext !== undefined && impl._browser._defaultContext !== null && impl._browser._defaultContext === impl;
+    // Not a profile only when Playwright's browser has that field and it holds no context: a field renamed, or
+    // anything else in it, counts as a profile.
+    const owner = impl?._browser as Record<string, unknown> | undefined;
+    persistent = !(owner !== undefined && Object.prototype.hasOwnProperty.call(owner, '_defaultContext') && owner['_defaultContext'] === null);
   } catch {
     contextProxy = undefined;
     launched = false;
@@ -187,7 +191,10 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
   const program = commandLine !== null ? switchesOf(commandLineArgs(commandLine)).program : '';
   const routingSwitch = commandLine !== null && /(^|\s)"?--(no-proxy-server|proxy-server|proxy-pac-url|proxy-auto-detect)\b/.test(commandLine);
   // The system's proxy is read only when it is what the browser of the page uses, and that browser is on this machine.
-  const system = stated.proxy !== undefined || contextProxy !== null || routingSwitch ? null : program !== '' && existsSync(program) ? await systemProxy() : undefined;
+  const usesSystem = !(stated.proxy !== undefined || contextProxy !== null || routingSwitch);
+  const system = !usesSystem ? null : program !== '' && existsSync(program) ? await systemProxy() : undefined;
+  // Automatic detection matters only where the browser of the page takes its proxy from the system.
+  const autoDetect = usesSystem && system === null ? await systemAutoDetect() : null;
   const launch = (browser as unknown as Internals | null)?._options?.proxy;
   return {
     commandLine,
@@ -195,6 +202,7 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
     ...(launch ? { launchProxy: launch } : {}),
     contextIgnoresHTTPSErrors: internals._options?.ignoreHTTPSErrors === true,
     systemProxy: system,
+    ...(autoDetect ? { systemAutoDetect: autoDetect } : {}),
     launchedHere: launched,
     persistent,
     program,
@@ -269,6 +277,7 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
         throw error;
       }
       const privateAllowed = await pageIsPrivate(routing, pageUrl);
+      const loopbackAllowed = await pageIsLoopback(routing, pageUrl);
 
       let refused = 0;
       const sockets = new Set<Socket>();
@@ -316,6 +325,10 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
         dead.close();
         throw error;
       }
+      const ended = new Promise<void>((resolve) => {
+        if (!browser.isConnected()) resolve();
+        else browser.once('disconnected', () => resolve());
+      });
       let browserSession: CDPSession;
       let probeLine: string | null;
       try {
@@ -359,6 +372,7 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
         routing,
         pageUrl,
         privateAllowed,
+        loopbackAllowed,
         routed: (url: string) => routes.routed(url),
         signal: reads.signal,
       };
@@ -411,6 +425,7 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
           return sendRead(request, limits, withHeaders((url) => (ours(url) ? { authorization } : {})));
         },
         refusedConnections: () => refused,
+        ended,
         async close() {
           reads.abort();
           for (const context of contexts) await context.close().catch(() => undefined);

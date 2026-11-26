@@ -36,7 +36,7 @@ export const defaultConfig: Config = {
     activationQuietMs: 150,
     activationQuietMaxMs: 2000,
     activationTimerMaxMs: 2000,
-    activationTimerChainMax: 5,
+    activationTimerChainMax: 250,
     probeExcludeSelector: '[data-a11y-vision-no-probe]',
     probeReads: 'cache',
     probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],

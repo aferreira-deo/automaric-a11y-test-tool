@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -343,7 +343,7 @@ test.describe('the reads of the copies go where the page under test reads, or no
     // The name of the page is localhost; the browser of the page sends it to the fixture server (a staging server).
     const staging = new URL(baseURL!).host;
     const rules = `MAP localhost:${real.port} ${staging}`;
-    const browser = await playwright.chromium.launch({ args: [`--host-resolver-rules=${rules}`] });
+    const browser = await playwright.chromium.launch({ args: ['--no-proxy-server', `--host-resolver-rules=${rules}`] });
     try {
       const page = await browser.newPage();
       await page.goto(`http://localhost:${real.port}/name-role-value/link-button.html`);
@@ -548,6 +548,64 @@ test.describe('probing is bounded and spends its probes on open questions', () =
     expect(withProbing - withoutProbing).toBeLessThan(4000 + 8000);
     // The 100 toggle buttons; never the 100 checkboxes (native fields) nor the 100 links with an address and no handler.
     expect(Number(values['probesPlanned'])).toBe(100);
+  });
+
+  test('a CLI scan that probes exits as soon as it has printed its report: nothing of the probing keeps it alive', async ({ baseURL }) => {
+    const child = spawn(process.execPath, [bin, 'scan', `${baseURL}/name-role-value/link-button.html`, '--checks', 'name-role-value'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    let printed = 0;
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += String(chunk);
+      printed = Date.now();
+    });
+    child.stderr.resume();
+    const exited = await new Promise<number>((resolve) => child.once('exit', () => resolve(Date.now())));
+    const report = JSON.parse(output) as { a11yVision: { findings: Finding[] } };
+    expect(Number(survey(report.a11yVision.findings)['probesDone'])).toBeGreaterThan(0);
+    // It was 10 s (a timer of the closing of the probing browser that was never cleared).
+    expect(exited - printed).toBeLessThan(3000);
+  });
+
+  test('a probing browser killed in the middle of a scan: the scan ends within its budget, and says so', async ({ page }) => {
+    await page.goto('/name-role-value/legit-patterns.html');
+    const { collectSnapshot } = (await import(new URL('../packages/collector-cdp/dist/index.js', import.meta.url).href)) as typeof CollectorModule;
+    const cdpSession = await page.context().newCDPSession(page);
+    const host = playwrightProbeHost(page);
+    let started = 0;
+    let killed = false;
+    const killing = {
+      start: async () => {
+        const probe = await host.start();
+        started = Date.now();
+        const { processInfo } = (await probe.browser.send('SystemInfo.getProcessInfo')) as { processInfo: { type: string; id: number }[] };
+        const pid = processInfo.find((entry) => entry.type === 'browser')!.id;
+        // Once the first copy is loading or probed.
+        setTimeout(() => {
+          killed = true;
+          process.kill(pid);
+        }, 2500);
+        return probe;
+      },
+    };
+    try {
+      const budget = 8000;
+      const snapshot = await collectSnapshot(
+        {
+          send: (method, params) => cdpSession.send(method as never, params as never),
+          on: (event, handler) => void cdpSession.on(event as never, handler as never),
+          off: (event, handler) => void cdpSession.off(event as never, handler as never),
+        },
+        resolveConfig({ checks: ['name-role-value'], nameRoleValue: { probeBudgetMs: budget } }),
+        { probeHost: killing },
+      );
+      const ended = Date.now();
+      expect(killed).toBe(true);
+      expect(snapshot.nameRoleValue!.probe.stopped).toBe('crash');
+      // The budget, and the close of what is left of the browser: not two waits of 10 s for events that never come.
+      expect(ended - started).toBeLessThan(budget + 2500);
+    } finally {
+      await cdpSession.detach().catch(() => undefined);
+    }
   });
 
   test('a probe that demonstrably changed nothing leaves its copy to the next probe', async ({ page }) => {

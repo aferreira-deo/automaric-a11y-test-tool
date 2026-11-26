@@ -1,0 +1,31 @@
+{
+  "description": "A link whose own handler polls every 50 ms and navigates after 30 runs (1.5 s, inside activationTimerMaxMs) is waited for to its end and is a link: no link-acts-as-button, never likely. One that navigates after 60 runs (3 s) is still polling when waiting stops: info, timerPending. The link that only shows a panel acts as a button, likely.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#go-late",
+      "check": "name-role-value",
+      "status": "info",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides",
+        "timerPending"
+      ]
+    },
+    {
+      "selector": "#opens",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    }
+  ]
+}

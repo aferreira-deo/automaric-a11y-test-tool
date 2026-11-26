@@ -211,7 +211,7 @@ test.describe('the cookies of the reads of the copies', () => {
     // The other side of a public suffix: y.github.io is another site than x.github.io.
     pages.set('/gh', () => ({ body: `<!doctype html><html lang="en"><title>gh</title><h1>Public suffix</h1>${CONTROL}<img alt="" src="${S('x.github.io', '/img?tag=x-from-y')}"><img alt="" src="${S('y.github.io', '/img?tag=y-self')}"></html>` }));
     const set = (host: string, cookies: string[], frame?: string) => `${S(host, '/set')}?c=${encodeURIComponent(cookies.join('|'))}${frame ? `&frame=${encodeURIComponent(frame)}` : ''}`;
-    const browser: Browser = await playwright.chromium.launch({ args: ['--host-resolver-rules=MAP *.test 127.0.0.1, MAP *.github.io 127.0.0.1'] });
+    const browser: Browser = await playwright.chromium.launch({ args: ['--no-proxy-server', '--host-resolver-rules=MAP *.test 127.0.0.1, MAP *.github.io 127.0.0.1'] });
     try {
       const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
@@ -351,6 +351,99 @@ test.describe('the credentials passed for the copies', () => {
     } finally {
       await context.close();
       for (const server of [own, other]) await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+test.describe('what the browser of the page refuses after a request is held', () => {
+  test.slow();
+
+  test('every port the fetcher refuses, Chromium refuses (ERR_UNSAFE_PORT), and ports it does not are not', async ({ playwright }) => {
+    const { RESTRICTED_PORTS } = (await import(new URL('../packages/playwright/dist/probe-fetch.js', import.meta.url).href)) as { RESTRICTED_PORTS: number[] };
+    const browser = await playwright.chromium.launch({ args: ['--no-proxy-server'] });
+    try {
+      const page = await browser.newPage();
+      const errors = new Map<number, string>();
+      page.on('requestfailed', (request) => errors.set(Number(new URL(request.url()).port || 80), request.failure()?.errorText ?? ''));
+      await page.goto('data:text/html,<title>ports</title>');
+      // A name that never resolves: the port is checked before the name, and nothing is sent anywhere.
+      const others = [80, 81, 8080, 4395, 6670, 10081];
+      await page.evaluate((ports) => Promise.all(ports.map((port) => fetch(`http://ports.invalid:${port}/`, { mode: 'no-cors' }).catch(() => undefined))), [...RESTRICTED_PORTS, ...others]);
+      await expect.poll(() => errors.size).toBe(RESTRICTED_PORTS.length + others.length);
+      expect(RESTRICTED_PORTS.filter((port) => errors.get(port) !== 'net::ERR_UNSAFE_PORT')).toEqual([]);
+      expect(others.filter((port) => errors.get(port) === 'net::ERR_UNSAFE_PORT')).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test('a page that reads a restricted port: the page browser sends nothing there, nor does its copy; unless the browser lets that port through', async ({ playwright }) => {
+    const ports = [6667, 10080];
+    const seen: string[] = [];
+    const state = { phase: 'page' };
+    const listeners: Server[] = [];
+    for (const port of ports) {
+      const listener = createServer((request, response) => {
+        seen.push(`${state.phase} ${port} ${request.url} cookie=${request.headers.cookie ?? ''}`);
+        response.writeHead(200, { 'content-type': 'image/png' }).end(PNG);
+      });
+      const bound = await new Promise<boolean>((resolve) => {
+        listener.once('error', () => resolve(false));
+        listener.listen(port, '127.0.0.1', () => resolve(true));
+      });
+      if (bound) listeners.push(listener);
+    }
+    test.skip(listeners.length === 0, 'the restricted ports cannot be listened on here');
+    const site = createServer((_request, response) =>
+      response.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'sid=SECRET; Path=/', 'cache-control': 'no-store' }).end(`<!doctype html><html lang="en"><title>p</title><h1>Ports</h1>${CONTROL}${ports.map((port) => `<img alt="" src="http://127.0.0.1:${port}/img">`).join('')}</html>`),
+    );
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(site.address() as AddressInfo).port}/`;
+    try {
+      for (const allowed of [false, true]) {
+        seen.length = 0;
+        const browser = await playwright.chromium.launch({ args: ['--no-proxy-server', ...(allowed ? [`--explicitly-allowed-ports=${ports.join(',')}`] : [])] });
+        try {
+          const page = await browser.newPage();
+          state.phase = 'page';
+          await page.goto(url);
+          await page.waitForLoadState('networkidle');
+          state.phase = 'copy';
+          const values = await scan(page);
+          expect(Number(values['probesDone'])).toBeGreaterThan(0);
+          const of = (phase: string) => seen.filter((entry) => entry.startsWith(`${phase} `)).map((entry) => entry.slice(phase.length + 1)).sort();
+          if (!allowed) {
+            expect(seen).toEqual([]);
+            expect(String(values['blockedRequests'])).toContain('which Chromium restricts');
+          } else {
+            expect(of('page').length).toBeGreaterThan(0);
+            expect(of('copy')).toEqual(of('page'));
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+    } finally {
+      for (const listener of listeners) await new Promise<void>((resolve) => listener.close(() => resolve()));
+      await new Promise<void>((resolve) => site.close(() => resolve()));
+    }
+  });
+
+  test('host rules said for the copies never replace those of the page browser: a contradiction is not probed, the same rules are', async ({ playwright, baseURL }) => {
+    const port = new URL(baseURL!).port;
+    const browser = await playwright.chromium.launch({ args: ['--no-proxy-server', `--host-resolver-rules=MAP shop.test 127.0.0.1:${port}`] });
+    try {
+      const page = await browser.newPage();
+      await page.goto('http://shop.test/name-role-value/link-button.html');
+      const none = await scan(page, { hostResolverRules: '' });
+      expect(none['probeStopped']).toBe('routing');
+      expect(String(none['probeStoppedDetail'])).toContain('not what the browser of the page has');
+      expect(none['copiesLoaded']).toBe(0);
+      const same = await scan(page, { hostResolverRules: `MAP shop.test 127.0.0.1:${port}` });
+      expect(same['probeStopped']).toBeUndefined();
+      expect(Number(same['probesDone'])).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
     }
   });
 });

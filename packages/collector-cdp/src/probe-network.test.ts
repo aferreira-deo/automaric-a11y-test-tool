@@ -26,7 +26,7 @@ function fake(answer?: (request: ProbeFetchRequest) => Promise<ProbeFetchRespons
     fetch: (request) => {
       fetched.push(request);
       if (answer) return answer(request);
-      return Promise.resolve({ status: 200, headers: [{ name: 'content-type', value: 'text/plain' }, { name: 'content-encoding', value: 'gzip' }], body: 'b2s=', size: 2 });
+      return Promise.resolve({ status: 200, headers: [{ name: 'content-type', value: 'text/plain' }, { name: 'content-encoding', value: 'gzip' }], body: new TextEncoder().encode('ok'), size: 2 });
     },
     refusedConnections: () => 0,
     close: () => Promise.resolve(),
@@ -88,6 +88,8 @@ describe('the network of the probing browser', () => {
     await tick();
     expect(fetched).toHaveLength(1);
     expect(sent.filter((entry) => entry.method === 'Fetch.fulfillRequest')).toHaveLength(2);
+    // Kept as the bytes the host gave, encoded only as it is given to a copy: both times the same body.
+    expect(sent.filter((entry) => entry.method === 'Fetch.fulfillRequest').map((entry) => entry.params['body'])).toEqual(['b2s=', 'b2s=']);
     expect(log.fetched).toBe(1);
     expect(log.allowed).toBe(2);
   });
@@ -180,7 +182,7 @@ describe('the network of the probing browser', () => {
         waiting.push(() => {
           open--;
           if (request.url.endsWith('/bomb.js')) reject(new ProbeReadTooLarge('the response is larger than allowed decoded'));
-          else resolve({ status: 200, headers: [], body: '', size: 0 });
+          else resolve({ status: 200, headers: [], body: new Uint8Array(0), size: 0 });
         });
       });
     });

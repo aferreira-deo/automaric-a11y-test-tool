@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Links that poll, then go</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; }
+  nav a { display: inline-block; margin: 0 16px 8px 0; }
+  .spinner { display: none; width: 260px; height: 80px; background: #fde8ee; }
+  .spinner.on { display: block; }
+  #panel { width: 320px; height: 120px; background: #eef; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Links that poll, then go</h1>
+  <p>A link whose own handler shows a spinner, checks every 50 ms that the basket is saved, and goes to its address after 30 checks (1.5 s) is a link. One that goes after 60 checks (3 s), later than probing waits, says nothing either way. The link that only shows a panel acts as a button.</p>
+  <nav aria-label="Account">
+    <a id="go" href="/name-role-value/roles.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin').classList.add('on'); let n = 0; (function tick() { if (++n >= 30) location.href = to; else setTimeout(tick, 50); })();">Archive</a>
+    <a id="go-late" href="/name-role-value/names.html" onclick="event.preventDefault(); const to = this.href; document.getElementById('spin-late').classList.add('on'); let n = 0; (function tick() { if (++n >= 60) location.href = to; else setTimeout(tick, 50); })();">Orders</a>
+    <a id="opens" href="#" onclick="event.preventDefault(); document.getElementById('panel').hidden = false;">Delivery options</a>
+  </nav>
+  <div id="spin" class="spinner">Saving your basket, then taking you there…</div>
+  <div id="spin-late" class="spinner">Saving your orders, then taking you there…</div>
+  <div id="panel" hidden>Standard, express or collection in store.</div>
+</main>
+</body>
+</html>

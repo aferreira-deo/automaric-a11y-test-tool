@@ -1,6 +1,6 @@
 import { NRV_SCRIPT_READ_TYPES } from '@a11y-vision/core';
 import type { NameRoleValueConfig, NrvNavigation, NrvProbeLog } from '@a11y-vision/core';
-import { isProbeReadRefused, isProbeReadTooLarge } from './probe-host.js';
+import { base64Of, isProbeReadRefused, isProbeReadTooLarge } from './probe-host.js';
 import type { ProbeBrowser, ProbeFetchResponse } from './probe-host.js';
 
 /**
@@ -189,15 +189,20 @@ export class ProbeNetwork {
     this.log.blocked = [...this.blockedKinds].sort();
   }
 
-  /** A promise that settles when the target is destroyed, `timeoutMs` at most. */
-  destroyedOf(targetId: string, timeoutMs: number): Promise<void> {
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs);
-      this.destroyed.set(targetId, () => {
+  /** A promise that settles when the target is destroyed, `timeoutMs` at most, or at once when `stop` is called; its timer never outlives it. */
+  destroyedOf(targetId: string, timeoutMs: number): { done: Promise<void>; stop(): void } {
+    let stop = (): void => undefined;
+    const done = new Promise<void>((resolve) => {
+      const end = (): void => {
         clearTimeout(timer);
+        if (this.destroyed.get(targetId) === end) this.destroyed.delete(targetId);
         resolve();
-      });
+      };
+      const timer = setTimeout(end, timeoutMs);
+      this.destroyed.set(targetId, end);
+      stop = end;
     });
+    return { done, stop };
   }
 
   setCurrent(copy: CurrentCopy | null): void {
@@ -352,7 +357,7 @@ export class ProbeNetwork {
       requestId: event.requestId,
       responseCode: response.status,
       responseHeaders: response.headers.length > 0 ? response.headers : [{ name: 'content-type', value: 'application/octet-stream' }],
-      body: response.body,
+      body: base64Of(response.body),
     });
   }
 
