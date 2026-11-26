@@ -7,7 +7,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isProbeReadRefused, isProbeReadTooLarge } from '@a11y-vision/collector-cdp';
-import { pageIsPrivate, sendRead } from './probe-fetch.js';
+import { isRestrictedPort, pageIsLoopback, pageIsPrivate, sendRead } from './probe-fetch.js';
 import type { ReadPolicy } from './probe-fetch.js';
 import { parseHostRules, resolveRouting } from './probe-routing.js';
 import type { ProbeRouting } from './probe-routing.js';
@@ -133,7 +133,7 @@ describe('a read for a copy', () => {
     hits.length = 0;
     expect(await pageIsPrivate(direct, `http://127.0.0.1:${port}/`, resolve)).toBe(true);
     const response = await read(`http://127.0.0.1:${port}/gzip`, { privateAllowed: true });
-    expect(Buffer.from(response.body, 'base64').toString()).toBe('decoded');
+    expect(Buffer.from(response.body).toString()).toBe('decoded');
     expect(response.headers.filter((header) => header.name === 'set-cookie').map((header) => header.value)).toEqual(['a=1; Path=/', 'b=2; Path=/']);
     expect((await read(`http://127.0.0.1:${port}/redirect`, { privateAllowed: true })).status).toBe(302);
     expect(hits).toEqual([`GET /gzip host=127.0.0.1:${port}`, `GET /redirect host=127.0.0.1:${port}`]);
@@ -144,7 +144,7 @@ describe('a read for a copy', () => {
     const routing = { ...direct, hostRules: parseHostRules(`MAP staging.example 127.0.0.1:${port}`) };
     expect(await pageIsPrivate(routing, 'http://staging.example/', resolve)).toBe(true);
     const response = await read('http://staging.example/page', { routing, privateAllowed: true, pageUrl: 'http://staging.example/' });
-    expect(Buffer.from(response.body, 'base64').toString()).toBe('served /page');
+    expect(Buffer.from(response.body).toString()).toBe('served /page');
     expect(hits).toEqual(['GET /page host=staging.example']);
   });
 
@@ -153,7 +153,7 @@ describe('a read for a copy', () => {
     // a.example goes to b.example (connection rules), which resolves to the server (resolver rules).
     const routing = { ...direct, connectionRules: parseHostRules('MAP a.example b.example'), hostRules: parseHostRules(`MAP b.example 127.0.0.1:${port}`) };
     const response = await read('http://a.example/layered', { routing, privateAllowed: true, pageUrl: 'http://a.example/' });
-    expect(Buffer.from(response.body, 'base64').toString()).toBe('served /layered');
+    expect(Buffer.from(response.body).toString()).toBe('served /layered');
     expect(hits).toEqual(['GET /layered host=a.example']);
     expect(await refused(read('https://a.example/secure', { routing, privateAllowed: true, pageUrl: 'https://a.example/' }))).toContain('--host-rules');
     expect(hits).toHaveLength(1);
@@ -192,10 +192,10 @@ describe('a read for a copy', () => {
     try {
       const routing = resolveRouting({ proxy: { server: `http://127.0.0.1:${at.port}`, username: 'u', password: 'p' }, hostResolverRules: '' }, { commandLine: null, contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null, launchedHere: true });
       const response = await read('http://public.example/page?q=1', { routing, pageUrl: 'http://public.example/' });
-      expect(Buffer.from(response.body, 'base64').toString()).toBe('from the proxy');
+      expect(Buffer.from(response.body).toString()).toBe('from the proxy');
       await expect(read('https://public.example/secure', { routing })).rejects.toThrow('the proxy refused the tunnel (403)');
-      const basic = `Basic ${Buffer.from('u:p').toString('base64')}`;
-      expect(asked).toEqual([`GET http://public.example/page?q=1 auth=${basic}`, `CONNECT public.example:443 auth=${basic}`]);
+      // A proxy that does not ask for credentials is not sent them (see below).
+      expect(asked).toEqual(['GET http://public.example/page?q=1 auth=', 'CONNECT public.example:443 auth=']);
       // An address of this machine written in the URL is still refused for a public page: the proxy is not asked.
       expect(await refused(read('http://127.0.0.1/', { routing }))).toContain('not on one');
       expect(asked).toHaveLength(2);
@@ -232,7 +232,7 @@ describe('a read for a copy', () => {
         { routing: viaProxy(at.port, { ignoreHTTPSErrors: true }), pageUrl: 'https://bank.example/', extraHeaders: () => ({ authorization: 'Basic c2VjcmV0' }) },
         { accept: '*/*', cookie: 'session=SECRET' },
       );
-      expect(Buffer.from(response.body, 'base64').toString()).toBe('from the origin, over TLS');
+      expect(Buffer.from(response.body).toString()).toBe('from the origin, over TLS');
       expect(tunnels).toEqual(['bank.example:443']);
       expect(origin).toEqual(['GET /account?id=1 host=bank.example cookie=session=SECRET authorization=Basic c2VjcmV0']);
       expect(decoy.seen).toEqual([]);
@@ -270,9 +270,141 @@ describe('a read for a copy', () => {
       const url = `https://127.0.0.1:${secure.port}/tls`;
       await expect(read(url, { privateAllowed: true })).rejects.toThrow(/self[- ]signed certificate/);
       const response = await read(url, { privateAllowed: true, routing: { ...direct, ignoreHTTPSErrors: true } });
-      expect(Buffer.from(response.body, 'base64').toString()).toBe('served /tls');
+      expect(Buffer.from(response.body).toString()).toBe('served /tls');
     } finally {
       await secure.close();
+    }
+  });
+});
+
+describe('what Chromium refuses after a request is paused, a read refuses too', () => {
+  it('a port Chromium restricts (ERR_UNSAFE_PORT), and port 0: never sent, by address, by name, mapped by host rules, through a proxy', async () => {
+    const seen: string[] = [];
+    const proxy = await listen(createNetServer((socket) => void socket.once('data', (data) => seen.push(String(data).split('\r\n')[0]!))));
+    try {
+      for (const restricted of [1, 6667, 10080, 5060, 1719, 6697, 3659, 0]) {
+        expect(await refused(read(`http://127.0.0.1:${restricted}/x`, { privateAllowed: true })), String(restricted)).toContain('restricts');
+        expect(await refused(read(`https://public.example:${restricted}/x`, { routing: viaProxy(proxy.port) })), String(restricted)).toContain('restricts');
+      }
+      const mapped = { ...direct, hostRules: parseHostRules('MAP staging.example 127.0.0.1:6667') };
+      expect(await refused(read('http://staging.example/x', { routing: mapped, privateAllowed: true, pageUrl: 'http://staging.example/' }))).toContain('restricts');
+      expect(seen).toEqual([]);
+      expect(hits.filter((hit) => hit.includes(':6667'))).toEqual([]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('a restricted port the browser of the page lets through (--explicitly-allowed-ports) is read', async () => {
+    expect(isRestrictedPort(6667, [])).toBe(true);
+    expect(isRestrictedPort(6667, [6667])).toBe(false);
+    expect(isRestrictedPort(8080, [])).toBe(false);
+    expect(isRestrictedPort(0, [0])).toBe(true);
+    // Sent, when the port can be listened on here.
+    const restricted = createServer(handler);
+    const bound = await new Promise<boolean>((done) => {
+      restricted.once('error', () => done(false));
+      restricted.listen(6667, '127.0.0.1', () => done(true));
+    });
+    if (!bound) return;
+    try {
+      const response = await read('http://127.0.0.1:6667/allowed', { privateAllowed: true, routing: { ...direct, allowedPorts: [6667] } });
+      expect(Buffer.from(response.body).toString()).toBe('served /allowed');
+    } finally {
+      await new Promise<void>((done) => restricted.close(() => done()));
+    }
+  });
+
+  it('a page on a private network does not read this machine (Local Network Access may hold it); a page on this machine does', async () => {
+    hits.length = 0;
+    const lan = { privateAllowed: true, loopbackAllowed: false, pageUrl: 'http://router.example/' };
+    expect(await pageIsLoopback(direct, 'http://router.example/', resolve)).toBe(false);
+    expect(await pageIsLoopback(direct, `http://back.example:${port}/`, resolve)).toBe(true);
+    expect(await refused(read(`http://127.0.0.1:${port}/x`, lan))).toContain('Local Network Access');
+    expect(await refused(read(`http://back.example:${port}/x`, lan))).toContain('Local Network Access');
+    expect(await refused(read('http://localhost/x', { ...lan, routing: viaProxy(1) }))).toContain('Local Network Access');
+    expect(hits).toEqual([]);
+    expect((await read(`http://127.0.0.1:${port}/x`, { ...lan, loopbackAllowed: true })).status).toBe(200);
+  });
+
+  it('where the browser of the page detects its proxy itself (WPAD), only this machine is read, by name or by address', async () => {
+    const routing = { ...direct, proxyUnknown: 'the system detects a proxy automatically' };
+    expect(await refused(read('https://public.example/x', { routing }))).toContain('detects a proxy automatically');
+    expect(await refused(read('http://router.example/x', { routing, privateAllowed: true }))).toContain('detects a proxy automatically');
+    // A name that resolves to this machine is still a name the proxy is asked about.
+    expect(await refused(read(`http://back.example:${port}/x`, { routing, privateAllowed: true }))).toContain('detects a proxy automatically');
+    hits.length = 0;
+    expect((await read(`http://127.0.0.1:${port}/here`, { routing, privateAllowed: true })).status).toBe(200);
+    expect(hits).toEqual([`GET /here host=127.0.0.1:${port}`]);
+  });
+});
+
+describe('what a read is sent with', () => {
+  it('never the headers of the connection, whatever it is given (extraHTTPHeaders may hold them)', async () => {
+    const raw: string[] = [];
+    const server = await listen(
+      createNetServer((socket) => {
+        let text = '';
+        socket.on('data', (data) => {
+          text += String(data);
+          if (text.includes('\r\n\r\n')) {
+            raw.push(text);
+            socket.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok');
+          }
+        });
+      }),
+    );
+    try {
+      const given = { 'Content-Length': '5', 'transfer-encoding': 'chunked', Expect: '100-continue', connection: 'upgrade', Upgrade: 'websocket', TE: 'trailers', trailer: 'x', 'Proxy-Authorization': 'Basic c2VjcmV0', 'proxy-connection': 'keep-alive', Host: 'evil.example', 'keep-alive': '1', 'x-kept': 'yes' };
+      const response = await read(`http://127.0.0.1:${server.port}/h`, { privateAllowed: true, extraHeaders: () => given }, { ...given, accept: '*/*' });
+      expect(response.status).toBe(200);
+      const lines = raw[0]!.split('\r\n').map((line) => line.toLowerCase());
+      for (const name of ['content-length', 'transfer-encoding', 'expect', 'upgrade', 'te', 'trailer', 'proxy-authorization', 'proxy-connection', 'keep-alive']) expect(lines.some((line) => line.startsWith(`${name}:`)), name).toBe(false);
+      expect(lines.filter((line) => line.startsWith('host:'))).toEqual([`host: 127.0.0.1:${server.port}`]);
+      expect(lines.filter((line) => line.startsWith('connection:'))).not.toContain('connection: upgrade');
+      expect(lines).toContain('x-kept: yes');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a proxy is sent its credentials only once it asks (407), as Chromium under Playwright does, and from then on', async () => {
+    const asked: string[] = [];
+    const proxy = createServer((request, response) => {
+      const auth = request.headers['proxy-authorization'] ?? '';
+      asked.push(`${request.method} ${request.url} auth=${auth}`);
+      if (!auth) response.writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' }).end();
+      else response.writeHead(200, { 'content-type': 'text/plain' }).end('from the proxy');
+    });
+    proxy.on('connect', (request: IncomingMessage, socket: Socket) => {
+      asked.push(`CONNECT ${request.url} auth=${request.headers['proxy-authorization'] ?? ''}`);
+      socket.end(request.headers['proxy-authorization'] ? 'HTTP/1.1 403 Forbidden\r\n\r\n' : 'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="corp"\r\n\r\n');
+    });
+    const at = await listen(proxy);
+    try {
+      const routing = resolveRouting({ proxy: { server: `http://127.0.0.1:${at.port}`, username: 'u', password: 'p' }, hostResolverRules: '' }, { commandLine: null, contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null, launchedHere: true });
+      const basic = `Basic ${Buffer.from('u:p').toString('base64')}`;
+      expect(Buffer.from((await read('http://public.example/a', { routing, pageUrl: 'http://public.example/' })).body).toString()).toBe('from the proxy');
+      expect(asked).toEqual(['GET http://public.example/a auth=', `GET http://public.example/a auth=${basic}`]);
+      // Once it asked, as Chromium keeps the answer for that proxy.
+      await read('http://public.example/b', { routing, pageUrl: 'http://public.example/' });
+      expect(asked[2]).toBe(`GET http://public.example/b auth=${basic}`);
+      // A tunnel: the same.
+      const fresh = resolveRouting({ proxy: { server: `http://127.0.0.1:${at.port}`, username: 'u', password: 'p' }, hostResolverRules: '' }, { commandLine: null, contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null, launchedHere: true });
+      asked.length = 0;
+      await expect(read('https://public.example/secure', { routing: fresh })).rejects.toThrow('the proxy refused the tunnel (403)');
+      expect(asked).toEqual(['CONNECT public.example:443 auth=', `CONNECT public.example:443 auth=${basic}`]);
+    } finally {
+      await at.close();
+    }
+  });
+
+  it('the status of the answer to CONNECT is read whole: 2000 is not 200', async () => {
+    const proxy = await listen(createNetServer((socket) => void socket.once('data', () => socket.write('HTTP/1.1 2000 OK\r\n\r\n'))));
+    try {
+      await expect(read('https://public.example/x', { routing: viaProxy(proxy.port) })).rejects.toThrow('the proxy refused the tunnel');
+    } finally {
+      await proxy.close();
     }
   });
 });

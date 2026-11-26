@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A router that looks at every click</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; }
+  nav a { display: inline-block; margin: 0 16px 8px 0; }
+  .spinner { display: none; width: 260px; height: 80px; background: #fde8ee; }
+  .spinner.on { display: block; }
+  #panel { width: 320px; height: 120px; background: #eef; }
+</style>
+</head>
+<body>
+<main>
+  <h1>A router that looks at every click</h1>
+  <p>What listens to every click on this page sets the same 3 s timer whatever is clicked; when it runs, it goes to the address of the link clicked if that link is one of the app's (<code>a.later</code>), and does nothing otherwise. The links of the app show a spinner and then go: they are links. The link that only shows a panel acts as a button.</p>
+  <nav aria-label="Account">
+    <a id="archive" class="later" href="/name-role-value/roles.html" onclick="event.preventDefault(); document.getElementById('spin').classList.add('on');">Archive</a>
+    <a id="orders" class="later" href="/name-role-value/names.html" onclick="event.preventDefault(); document.getElementById('spin').classList.add('on');">Orders</a>
+    <a id="opens" href="#" onclick="event.preventDefault(); document.getElementById('panel').hidden = false;">Delivery options</a>
+  </nav>
+  <div id="spin" class="spinner">Taking you there…</div>
+  <div id="panel" hidden>Standard, express or collection in store.</div>
+</main>
+<script>
+  // A router: every click is looked at once it is over; a link of the app goes after 3 s.
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    setTimeout(() => {
+      const link = target.closest && target.closest('a.later');
+      if (link) location.href = link.href;
+    }, 3000);
+  }, true);
+  // An analytics library: every click is queued, and the queue is sent 3 s later.
+  window.__queued = 0;
+  document.addEventListener('click', () => { window.__queued++; setTimeout(() => { window.__queued = 0; }, 3000); }, true);
+</script>
+</body>
+</html>

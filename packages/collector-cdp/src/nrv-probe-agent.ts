@@ -855,9 +855,14 @@ export const GUARD_SCRIPT = `(() => {
   if (globalThis.${GUARD_GLOBAL}) return true;
   let top = null;
   try { if (window.top !== window && window.top.${GUARD_GLOBAL}) top = window.top.${GUARD_GLOBAL}; } catch {}
-  const own = { log: [], recording: false, timers: new Set(), activating: 0, epoch: 0, baseline: false, pageWide: new Set(), running: null };
+  const own = { log: [], recording: false, timers: new Set(), activating: 0, epoch: 0, baseline: false, pageWide: new Set(), running: null, open: new Set(), seen: new Set(), ran: new Set(), harmful: new Set(), harmless: new Set() };
   const state = top ? top.state : own;
-  const record = (kind, url) => { if (state.recording || kind === 'dialog' || kind === 'window' || kind === 'download' || kind === 'print') state.log.push({ kind, url: typeof url === 'string' ? url : (url && typeof url.href === 'string' ? url.href : '') }); };
+  // While the timers of the neutral activation run (see baselineBegin), what changes the page or goes somewhere marks them: they are not harmless.
+  const harm = () => { if (state.baseline) for (const token of state.open) state.harmful.add(token.sig); };
+  const record = (kind, url) => {
+    if (['window', 'download', 'submit', 'history', 'replace', 'traverse', 'close', 'dialog', 'print'].includes(kind)) harm();
+    if (state.recording || kind === 'dialog' || kind === 'window' || kind === 'download' || kind === 'print') state.log.push({ kind, url: typeof url === 'string' ? url : (url && typeof url.href === 'string' ? url.href : '') });
+  };
   const blocked = (name) => new DOMException('Stopped while a11y-vision probes a copy of the page (' + name + ').', 'SecurityError');
   const patch = (target, name, make) => {
     if (!target) return;
@@ -940,47 +945,80 @@ export const GUARD_SCRIPT = `(() => {
   // Where a timer was set, and to what: the same call in a script, with the same delay, is the same timer.
   const signature = (handler, delay) => {
     let frame = '';
-    try { frame = String(new Error().stack || '').split('\\n').slice(3, 4).join('').trim(); } catch {}
+    // The line of the page that called setTimeout: past this function, tokenOf and the patched setTimeout.
+    try { frame = String(new Error().stack || '').split('\\n').slice(4, 5).join('').trim(); } catch {}
     let source = '';
     try { source = Function.prototype.toString.call(handler).slice(0, 160); } catch {}
     return (Math.max(0, Number(delay) || 0)) + '|' + frame + '|' + source;
   };
-  patch(view, 'setTimeout', (original) => function (handler, delay, ...rest) {
-    if (!state.recording || typeof handler !== 'function') return original.call(this, handler, delay, ...rest);
+  const nativeClearTimeout = view.clearTimeout;
+  // What runs in a timer of an activation: the timer it runs for is the parent of the timers it sets, and, in the
+  // neutral activation, what changes in the page from then until the next task is its doing (see harm).
+  const runIn = (token, run) => {
+    // A timer of an earlier activation (or of the neutral one) that runs now is not this activation's.
+    if (token.activation && state.recording && token.epoch === state.epoch) ownTask();
+    const before = state.running;
+    state.running = token;
+    state.open.add(token);
+    try { return run(); } finally {
+      state.running = before;
+      if (state.baseline && token.epoch === state.epoch) state.ran.add(token.sig);
+      try { nativeTimeout.call(view, () => state.open.delete(token), 0); } catch { state.open.delete(token); }
+    }
+  };
+  const tokenOf = (handler, delay, interval) => {
     const parent = state.running;
-    const sig = signature(handler, delay);
-    const token = {
+    const sig = (interval ? 'interval|' : '') + signature(handler, delay);
+    if (state.baseline) state.seen.add(sig);
+    return {
+      interval,
       activation: state.activating > 0,
       due: Date.now() + Math.max(0, Number(delay) || 0),
+      delay: Math.max(0, Number(delay) || 0),
       epoch: state.epoch,
       sig,
       // Set by what listens to every click (a neutral spot armed it too), or by such a timer: the page's, not the control's.
       pageWide: state.baseline || state.pageWide.has(sig) || (parent ? parent.pageWide : false),
-      // How many times in a row this timer set itself again from its own callback (a poll).
-      chain: parent && parent.sig === sig ? parent.chain + 1 : 1,
     };
+  };
+  patch(view, 'setTimeout', (original) => function (handler, delay, ...rest) {
+    if (!state.recording || typeof handler !== 'function') return original.call(this, handler, delay, ...rest);
+    const token = tokenOf(handler, delay, false);
     timers.add(token);
-    const id = original.call(this, function () {
+    const fire = function () {
       timers.delete(token);
-      // A timer of an earlier activation (or of the neutral one) that runs now is not this activation's.
-      if (token.activation && state.recording && token.epoch === state.epoch) ownTask();
-      const before = state.running;
-      state.running = token;
-      try { return handler.apply(this, arguments); } finally { state.running = before; }
-    }, delay, ...rest);
+      return runIn(token, () => handler.apply(this, arguments));
+    };
+    const id = original.call(this, fire, delay, ...rest);
     token.id = id;
+    // Run ahead of its time (see runAhead): once, as it would have run.
+    token.fire = () => { nativeClearTimeout.call(view, id); return fire.apply(view, rest); };
     return id;
   });
+  // Timeouts and intervals share their ids: either call clears either.
   patch(view, 'clearTimeout', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
-  patch(view, 'setInterval', (original) => function (handler, ...rest) {
-    const id = original.call(this, handler, ...rest);
-    if (state.recording) {
-      const sig = signature(handler, rest[0]);
-      timers.add({ id, interval: true, activation: state.activating > 0, sig, pageWide: state.baseline || state.pageWide.has(sig) || (state.running ? state.running.pageWide : false) });
-    }
+  patch(view, 'setInterval', (original) => function (handler, delay, ...rest) {
+    if (!state.recording || typeof handler !== 'function') return original.call(this, handler, delay, ...rest);
+    const token = tokenOf(handler, delay, true);
+    timers.add(token);
+    const tick = function () {
+      token.due = Date.now() + token.delay;
+      return runIn(token, () => handler.apply(this, arguments));
+    };
+    const id = original.call(this, tick, delay, ...rest);
+    token.id = id;
+    // One tick ahead of its time; the interval goes on as it was set, until it is cleared.
+    token.fire = () => tick.apply(view, rest);
     return id;
   });
   patch(view, 'clearInterval', (original) => function (id) { for (const token of timers) if (token.id === id) timers.delete(token); return original.call(this, id); });
+  // What the page does while a timer of the neutral activation runs: a change of its elements, a navigation.
+  try {
+    const watch = new MutationObserver(() => harm());
+    watch.observe(doc, { subtree: true, childList: true, attributes: true, characterData: true });
+  } catch {}
+  try { if (view.navigation && typeof view.navigation.addEventListener === 'function') view.navigation.addEventListener('navigate', () => harm(), true); } catch {}
+  view.addEventListener('beforeunload', () => harm(), true);
   patch(P('Element'), 'requestFullscreen', () => function () { record('fullscreen'); return Promise.reject(blocked('fullscreen')); });
   patch(P('Geolocation'), 'getCurrentPosition', () => function (ok, fail) { record('permission'); if (typeof fail === 'function') fail({ code: 1, message: 'denied' }); });
   patch(P('Geolocation'), 'watchPosition', () => function (ok, fail) { record('permission'); if (typeof fail === 'function') fail({ code: 1, message: 'denied' }); return 0; });
@@ -1011,6 +1049,8 @@ export const GUARD_SCRIPT = `(() => {
   const onSubmit = (event) => { record('submit', event.target && event.target.action); event.preventDefault(); };
   view.addEventListener('click', onClick, true);
   view.addEventListener('submit', onSubmit, true);
+  // A timer of the page (what listens to every click) that the neutral activation was seen to run harmlessly.
+  const runnable = (token) => token.pageWide && state.harmless.has(token.sig) && !state.harmful.has(token.sig);
   globalThis.${GUARD_GLOBAL} = {
     state,
     begin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.epoch++; state.baseline = false; state.recording = true; return true; },
@@ -1022,43 +1062,56 @@ export const GUARD_SCRIPT = `(() => {
       return out;
     },
     // Before the first probe of a copy: an activation of a neutral spot shows what listens to every click; the timers it sets are the page's.
-    baselineBegin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.epoch++; state.baseline = true; state.recording = true; return true; },
+    baselineBegin() { state.log.length = 0; state.timers.clear(); state.activating = 0; state.epoch++; state.baseline = true; state.recording = true; state.seen.clear(); state.ran.clear(); return true; },
+    // The timers the neutral activation set are the page's. Those seen to run, and to change nothing while they ran
+    // (no element, no navigation, no window), are harmless: in a probe, they are run ahead of their time (runAhead).
     baselineEnd() {
-      let found = 0;
-      for (const token of state.timers) if (token.activation) { state.pageWide.add(token.sig); found++; }
+      for (const sig of state.seen) state.pageWide.add(sig);
+      let harmless = 0;
+      for (const sig of state.ran) if (!state.harmful.has(sig)) { state.harmless.add(sig); harmless++; }
+      for (const sig of state.harmful) state.harmless.delete(sig);
       state.recording = false;
       state.baseline = false;
       state.log.length = 0;
       state.timers.clear();
-      return found;
+      return { seen: state.seen.size, harmless, harmful: state.harmful.size };
     },
-    // The activation's timers that have not run. Its own: how many, and in how many ms the next one is due (-1: intervals only);
-    // polls among them (set again from their own callback more than chainMax times); the page's (what listens to every click): when the next is due.
-    pending(chainMax) {
+    // The activation's timers that have not run: those that may be run ahead of their time (the page's, seen
+    // harmless), and the others: how many, how many are intervals, and in how many ms the next one is due (-1: none).
+    pending() {
       const now = Date.now();
       let count = 0;
+      let intervals = 0;
       let next = -1;
-      let polls = 0;
-      let pollNext = -1;
-      let pageNext = -1;
-      const sooner = (current, left) => (current < 0 || left < current ? left : current);
+      let ahead = 0;
       for (const token of state.timers) {
-        if (!token.activation) continue;
-        const left = Math.max(0, (token.due || 0) - now);
-        if (!token.interval && token.chain > chainMax) {
-          if (!token.pageWide) polls++;
-          pollNext = sooner(pollNext, left);
-          continue;
-        }
-        if (token.pageWide) {
-          if (!token.interval) pageNext = sooner(pageNext, left);
-          continue;
-        }
+        if (!token.activation || token.epoch !== state.epoch) continue;
+        if (runnable(token)) { ahead++; continue; }
         count++;
-        if (token.interval) continue;
-        next = sooner(next, left);
+        if (token.interval) { intervals++; continue; }
+        const left = Math.max(0, (token.due || 0) - now);
+        if (next < 0 || left < next) next = left;
       }
-      return { count, next, polls, pollNext, pageNext };
+      return { count, intervals, next, ahead };
+    },
+    // Runs the timers that may be run ahead (the page's, seen harmless; in the neutral activation, all of its own),
+    // soonest first, each as it would have run, and what they set in turn, \`max\` runs at most. Returns how many ran.
+    async runAhead(max) {
+      let runs = 0;
+      while (runs < max) {
+        let soonest = null;
+        for (const token of state.timers) {
+          if (!token.activation || token.epoch !== state.epoch || typeof token.fire !== 'function') continue;
+          if (!state.baseline && !runnable(token)) continue;
+          if (!soonest || token.due < soonest.due) soonest = token;
+        }
+        if (!soonest) break;
+        runs++;
+        try { soonest.fire(); } catch {}
+        // Its microtasks, and what the page does next, before the next one; its window closes (see runIn).
+        await new Promise((resolve) => { try { nativeTimeout.call(view, resolve, 0); } catch { resolve(); } });
+      }
+      return runs;
     },
   };
   return true;

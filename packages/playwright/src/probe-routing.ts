@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { withoutUserInfo } from '@a11y-vision/collector-cdp';
 
 /**
  * Where the requests of the page under test go, read from its browser, so that the reads the
@@ -49,6 +50,14 @@ export interface ProbeRouting {
   /** `--host-rules`: where a connection to a host goes, applied before `hostRules`. */
   connectionRules?: HostRule[];
   ignoreHTTPSErrors: boolean;
+  /** `--explicitly-allowed-ports` of the browser of the page: ports it does not refuse although Chromium restricts them. */
+  allowedPorts?: number[];
+  /**
+   * The browser of the page finds its proxy by itself on the network (the system's automatic
+   * detection, WPAD), which cannot be known here: only addresses of this machine by name or by
+   * address, which Chromium never sends to a proxy, are read; the reason, for the others.
+   */
+  proxyUnknown?: string;
   /** How the reads are sent, in a few words, for the survey. */
   description: string;
 }
@@ -61,11 +70,28 @@ export class RoutingRefusal extends Error {
 }
 
 /**
- * Text with the user information of every address in it removed: `http://user:pass@host` and
- * `user:pass@host` (an `http_proxy` written without a scheme) become `http://host` and `host`.
+ * Text with the user information of every address in it removed, whatever a password holds:
+ * `http://user:p=ss@host` and `user:p;ss@host` (an `http_proxy` written without a scheme) become
+ * `http://host` and `host` (see `withoutUserInfo`). For free text; what says where a proxy is is
+ * built from its parsed host and port (`shownProxy`).
  */
 export function redactCredentials(text: string): string {
-  return text.replace(/((?:[a-z][a-z0-9+.-]*:\/\/)?)[^\s@/;,=()"'[\]]+@/gi, '$1');
+  return withoutUserInfo(text);
+}
+
+/**
+ * An address of a proxy as it can be shown: its scheme, host and port, from what follows the last
+ * `@` (credentials never), without a path. Null when no host and port can be read there: then
+ * nothing of it is shown.
+ */
+export function shownProxy(text: string): string | null {
+  const trimmed = text.trim();
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(trimmed)?.[1]?.toLowerCase();
+  const rest = trimmed.slice(trimmed.lastIndexOf('@') + 1).replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '');
+  const address = hostPort(rest, -1);
+  if (!address) return null;
+  const host = address.host.includes(':') ? `[${address.host}]` : address.host;
+  return `${scheme ? `${scheme}://` : ''}${host}${address.port > 0 ? `:${address.port}` : ''}`;
 }
 
 /** Splits a command line as Chromium writes it (`SystemInfo.getInfo`): quoted on Windows, joined with spaces elsewhere. */
@@ -173,15 +199,27 @@ function proxyOf(text: string, credentials?: { username?: string; password?: str
   const trimmed = text.trim();
   const scheme = /^([a-z0-9]+):\/\//i.exec(trimmed)?.[1]?.toLowerCase() ?? 'http';
   if (scheme === 'direct') return 'direct';
-  if (scheme !== 'http') throw new RoutingRefusal(`the browser of the page uses a ${scheme} proxy (${trimmed.replace(/\/\/[^@/]*@/, '//')}), which the reads of the copies cannot follow`);
-  const rest = trimmed.replace(/^[a-z0-9]+:\/\//i, '').replace(/\/.*$/, '');
+  // What is said of a proxy is its parsed host and port, never the text it was given in.
+  const shown = shownProxy(trimmed);
+  if (scheme !== 'http') throw new RoutingRefusal(`the browser of the page uses a ${scheme} proxy${shown ? ` (${shown})` : ''}, which the reads of the copies cannot follow`);
+  const rest = trimmed.replace(/^[a-z0-9]+:\/\//i, '');
+  // The credentials end at the last `@`, whatever they hold (`:`, `/`, `?`, `@`); a path comes after the host only.
   const at = rest.lastIndexOf('@');
   const user = at >= 0 ? rest.slice(0, at) : '';
-  const address = hostPort(at >= 0 ? rest.slice(at + 1) : rest, 80);
-  if (!address) throw new RoutingRefusal(`the proxy of the browser of the page could not be read (${trimmed.replace(/\/\/[^@/]*@/, '//')})`);
-  const [name, password] = user ? user.split(':') : [];
-  const username = credentials?.username ?? (name ? decodeURIComponent(name) : undefined);
-  const secret = credentials?.password ?? (password ? decodeURIComponent(password) : undefined);
+  const address = hostPort((at >= 0 ? rest.slice(at + 1) : rest).replace(/[/?#].*$/, ''), 80);
+  if (!address) throw new RoutingRefusal(`the proxy of the browser of the page could not be read${shown ? ` (${shown})` : ''}`);
+  const colon = user.indexOf(':');
+  const name = colon >= 0 ? user.slice(0, colon) : user;
+  const password = colon >= 0 ? user.slice(colon + 1) : '';
+  const decode = (part: string): string => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      return part;
+    }
+  };
+  const username = credentials?.username ?? (name ? decode(name) : undefined);
+  const secret = credentials?.password ?? (colon >= 0 ? decode(password) : undefined);
   return { host: address.host, port: address.port, ...(username !== undefined ? { username } : {}), ...(secret !== undefined ? { password: secret } : {}) };
 }
 
@@ -195,7 +233,8 @@ export function parseProxyServer(server: string, bypass: string, credentials?: {
   const entries = server.split(';').map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 0) throw new RoutingRefusal('the proxy of the browser of the page is empty');
   const first = (list: string): HttpProxy | 'direct' => proxyOf(list.split(',')[0] ?? '', credentials);
-  if (entries.length === 1 && !entries[0]!.includes('=')) {
+  // One proxy for every scheme, or `scheme=` lists: told apart by how the entry starts, not by an `=` a password may hold.
+  if (entries.length === 1 && !/^[a-z0-9-]+\s*=/i.test(entries[0]!)) {
     const proxy = first(entries[0]!);
     if (proxy !== 'direct') {
       rules.http = proxy;
@@ -205,9 +244,10 @@ export function parseProxyServer(server: string, bypass: string, credentials?: {
   }
   let fallback: HttpProxy | 'direct' | undefined;
   for (const entry of entries) {
-    const [scheme, list] = entry.split('=', 2) as [string, string | undefined];
-    const name = scheme.trim().toLowerCase();
-    if (list === undefined) throw new RoutingRefusal(`the proxy of the browser of the page could not be read (${entry})`);
+    const equals = /^[a-z0-9-]+\s*=/i.exec(entry);
+    if (!equals) throw new RoutingRefusal(`the proxy of the browser of the page could not be read${shownProxy(entry) ? ` (${shownProxy(entry)})` : ''}`);
+    const name = equals[0].replace('=', '').trim().toLowerCase();
+    const list = entry.slice(equals[0].length);
     if (name === 'socks') {
       fallback = first(list.includes('://') ? list : `socks4://${list}`);
       continue;
@@ -393,7 +433,12 @@ export interface StatedRouting {
   proxy?: { server: string; bypass?: string; username?: string; password?: string } | null;
   hostResolverRules?: string;
   ignoreHTTPSErrors?: boolean;
+  /** How the caller enables probing where the proxy of the system cannot be followed (the CLI names its `--proxy`); by default `DEFAULT_ADVICE`. */
+  advice?: string;
 }
+
+/** How probing is enabled where the proxy of the system cannot be followed, said to a caller of the Playwright API. */
+export const DEFAULT_ADVICE = 'to probe, say how the page reaches the network: probeContext.proxy (null when this machine reaches the site directly), or launch its browser with --no-proxy-server or a proxy';
 
 /** What was read of the browser and the context of the page. */
 export interface ReadRouting {
@@ -406,6 +451,8 @@ export interface ReadRouting {
   contextIgnoresHTTPSErrors: boolean;
   /** The proxy of the system, when the browser runs on this machine and uses it; null: none. Undefined: not read (the browser is elsewhere). */
   systemProxy: string | null | undefined;
+  /** Read with `systemProxy`: the system detects a proxy on the network (WPAD), in a few words; absent when it does not, or was not read. */
+  systemAutoDetect?: string;
   /**
    * The browser of the page was launched by this process (`launch`, `launchPersistentContext`), as
    * Playwright's objects in this process show. False for a browser it connected to
@@ -429,6 +476,7 @@ function playwrightBypass(bypass: string | undefined): string {
  * cannot be read or followed.
  */
 export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeRouting {
+  const advice = stated.advice ?? DEFAULT_ADVICE;
   // A browser this process did not launch may be on another machine, behind another network: its command line
   // and its context say how it is set up, not where its requests go from there. Only what the caller says is followed.
   if (!read.launchedHere && (stated.proxy === undefined || stated.hostResolverRules === undefined)) {
@@ -438,6 +486,7 @@ export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeR
   }
   const switches = read.commandLine !== null ? switchesOf(commandLineArgs(read.commandLine)).switches : null;
   let proxy: ProxyRules | null;
+  let proxyUnknown: string | undefined;
   if (stated.proxy !== undefined) {
     proxy = stated.proxy === null ? null : parseProxyServer(stated.proxy.server, playwrightBypass(stated.proxy.bypass), stated.proxy);
   } else if (read.contextProxy === undefined) {
@@ -456,15 +505,33 @@ export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeR
   } else if (read.systemProxy === undefined) {
     throw new RoutingRefusal('the browser of the page is not on this machine, so the proxy of its system cannot be read; say it with probeContext.proxy (null for none)');
   } else if (read.systemProxy !== null) {
-    throw new RoutingRefusal(`the browser of the page uses the proxy of the system (${read.systemProxy}), which the reads of the copies do not follow; say it with probeContext.proxy`);
+    throw new RoutingRefusal(`the browser of the page uses the proxy of the system (${read.systemProxy}), which the reads of its copies do not follow, so no control was activated and what controls do was not examined; ${advice}`);
   } else {
     proxy = null;
+    // The system's settings, with automatic detection on: on a network that offers a proxy (WPAD), the page's requests go there.
+    if (read.systemAutoDetect) proxyUnknown = `the browser of the page uses the settings of the system, which detect a proxy on the network automatically (${read.systemAutoDetect}), so where the reads of its copies would go cannot be known, no control was activated and what controls do was not examined; ${advice}`;
   }
   let hostRules: HostRule[];
   let connectionRules: HostRule[] = [];
   let rulesText: string;
-  if (stated.hostResolverRules !== undefined) {
-    // What the caller says is all there is: the command line is not read for rules.
+  const sameRules = (a: string, b: string): boolean => {
+    const normal = (text: string): string => text.split(',').map((rule) => rule.trim().split(/\s+/).filter(Boolean).join(' ').toLowerCase()).filter(Boolean).join(',');
+    return normal(a) === normal(b);
+  };
+  if (stated.hostResolverRules !== undefined && switches !== null) {
+    // The command line is read: its rules are where the page's requests go, whatever the caller says. What it says is
+    // taken only when it says the same, or the command line has none; otherwise nothing is sent.
+    const resolver = switches.get('host-resolver-rules') ?? '';
+    const connection = switches.get('host-rules') ?? '';
+    const agrees = (resolver === '' && connection === '') || (connection === '' && sameRules(stated.hostResolverRules, resolver));
+    if (!agrees) {
+      throw new RoutingRefusal(
+        `probeContext.hostResolverRules (${stated.hostResolverRules === '' ? 'none' : `"${stated.hostResolverRules}"`}) is not what the browser of the page has (${[...(connection ? [`--host-rules=${connection}`] : []), ...(resolver ? [`--host-resolver-rules=${resolver}`] : [])].join(' ')}), and its command line says where its requests go: leave the option out, or say the same rules`,
+      );
+    }
+  }
+  if (stated.hostResolverRules !== undefined && (switches === null || (switches.get('host-resolver-rules') ?? '') === '')) {
+    // Said by the caller where the command line cannot be read, or has none.
     rulesText = stated.hostResolverRules;
     hostRules = parseHostRules(rulesText);
   } else if (switches !== null) {
@@ -479,8 +546,25 @@ export function resolveRouting(stated: StatedRouting, read: ReadRouting): ProbeR
     throw new RoutingRefusal('the command line of the browser of the page could not be read, so neither can its host rules; say them with probeContext.hostResolverRules ("" for none)');
   }
   const ignoreHTTPSErrors = stated.ignoreHTTPSErrors ?? (read.contextIgnoresHTTPSErrors || (switches?.has('ignore-certificate-errors') ?? false));
-  const description = [proxy ? describeProxy(proxy) : 'direct', ...(rulesText ? [`host rules: ${rulesText}`] : []), ...(ignoreHTTPSErrors ? ['certificate errors ignored'] : [])].join('; ');
-  return { proxy, hostRules, ...(connectionRules.length > 0 ? { connectionRules } : {}), ignoreHTTPSErrors, description: redactCredentials(description) };
+  // Ports Chromium restricts that this browser lets through (`--explicitly-allowed-ports`): the others stay refused.
+  const allowedPorts = (switches?.get('explicitly-allowed-ports') ?? '')
+    .split(',')
+    .map((entry) => Number(entry.trim()))
+    .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+  const description = [
+    proxy ? describeProxy(proxy) : proxyUnknown ? 'direct to this machine only (a proxy of the system detected automatically, WPAD)' : 'direct',
+    ...(rulesText ? [`host rules: ${rulesText}`] : []),
+    ...(ignoreHTTPSErrors ? ['certificate errors ignored'] : []),
+  ].join('; ');
+  return {
+    proxy,
+    hostRules,
+    ...(connectionRules.length > 0 ? { connectionRules } : {}),
+    ignoreHTTPSErrors,
+    ...(allowedPorts.length > 0 ? { allowedPorts } : {}),
+    ...(proxyUnknown ? { proxyUnknown } : {}),
+    description: redactCredentials(description),
+  };
 }
 
 function run(file: string, args: string[]): Promise<string | null> {
@@ -498,7 +582,7 @@ export interface SystemReaders {
   home: string;
 }
 
-const systemReaders: SystemReaders = {
+const nativeReaders: SystemReaders = {
   run,
   readFile: (path) => readFile(path, 'utf8').catch(() => null),
   home: homedir(),
@@ -527,15 +611,29 @@ export function linuxDesktop(env: NodeJS.ProcessEnv): 'gnome' | 'kde' | 'other' 
  * `~/.config/kioslaverc`; on another desktop it cannot be ruled out; without a desktop, and on the
  * other systems, the environment (`http_proxy`, `https_proxy`, `all_proxy`, `auto_proxy`). What
  * cannot be read counts as a proxy: probing then does not start unless `probeContext.proxy` says
- * it. Automatic detection (WPAD) is not looked for.
+ * it. Automatic detection (WPAD) is read apart (`systemAutoDetect`).
  */
-export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, readers: SystemReaders = systemReaders): Promise<string | null> {
+let systemReaders: SystemReaders = nativeReaders;
+let systemEnv: NodeJS.ProcessEnv | null = null;
+
+/** Tests only: what the system is read with, in place of the system itself (`null`: the system again), and the environment then read. */
+export function setSystemReaders(readers: SystemReaders | null, env: NodeJS.ProcessEnv = {}): void {
+  systemReaders = readers ?? nativeReaders;
+  systemEnv = readers ? env : null;
+}
+
+export async function systemProxy(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = systemEnv ?? process.env, readers: SystemReaders = systemReaders): Promise<string | null> {
   if (platform === 'win32') {
     const out = (await readers.run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'])) ?? '';
     const value = (name: string): string | undefined => new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.*)$`, 'im').exec(out)?.[1]?.trim();
     const script = value('AutoConfigURL');
-    if (script) return redactCredentials(`a proxy script, ${script.replace(/\?.*$/, '')}`);
-    if (/^0x0*1$/i.test(value('ProxyEnable') ?? '') && value('ProxyServer')) return redactCredentials(`${value('ProxyServer')}`);
+    if (script) return `a proxy script${shownProxy(script.replace(/[?#].*$/, '')) ? `, ${shownProxy(script.replace(/[?#].*$/, ''))}` : ''}`;
+    const server = value('ProxyServer');
+    // Several proxies (`http=host:port;https=…`) whose credentials may hold anything: only what follows the last `@` is shown.
+    if (/^0x0*1$/i.test(value('ProxyEnable') ?? '') && server) {
+      const last = shownProxy((server.slice(server.lastIndexOf('@') + 1).split(';')[0] ?? '').replace(/^[a-z]+=/i, ''));
+      return `the proxy server of Windows' Internet Settings${last ? ` (${last})` : ''}`;
+    }
     return null;
   }
   if (platform === 'darwin') {
@@ -563,7 +661,26 @@ export async function systemProxy(platform: NodeJS.Platform = process.platform, 
   }
   for (const name of ['http_proxy', 'https_proxy', 'all_proxy', 'auto_proxy']) {
     const value = env[name] ?? env[name.toUpperCase()];
-    if (value) return redactCredentials(`${name}=${value}`);
+    if (value) return `${name}=${shownProxy(value) ?? '(not shown)'}`;
   }
   return null;
+}
+
+/**
+ * Whether the system has browsers detect a proxy on the network by themselves (WPAD), in a few
+ * words; null when it does not. Windows: the flag of automatic detection in the settings of the
+ * user's connections (`Connections\DefaultConnectionSettings`, "Automatically detect settings", on
+ * by default), as Chromium reads them there. What cannot be read there counts as on. Elsewhere,
+ * `systemProxy` covers it (macOS: auto-discovery is a proxy script there) or the system has none.
+ */
+export async function systemAutoDetect(platform: NodeJS.Platform = process.platform, readers: SystemReaders = systemReaders): Promise<string | null> {
+  if (platform !== 'win32') return null;
+  const out = await readers.run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Connections', '/v', 'DefaultConnectionSettings']);
+  if (out === null) return 'Windows: the settings of the connections could not be read';
+  const hex = /DefaultConnectionSettings\s+REG_BINARY\s+([0-9a-f]*)/i.exec(out)?.[1];
+  // No settings saved yet: Windows' default, detection on.
+  if (!hex || hex.length < 18) return 'Windows: "Automatically detect settings", the default';
+  // The ninth byte holds the flags: 0x08, detect automatically.
+  const flags = parseInt(hex.slice(16, 18), 16);
+  return (flags & 0x08) !== 0 ? 'Windows: "Automatically detect settings"' : null;
 }

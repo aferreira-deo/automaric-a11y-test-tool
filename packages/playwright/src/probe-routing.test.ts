@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RoutingRefusal, addressClass, commandLineArgs, linuxDesktop, mapHost, parseHostRules, parseProxyServer, proxyFor, redactCredentials, resolveRouting, switchesOf, systemProxy } from './probe-routing.js';
+import { RoutingRefusal, addressClass, commandLineArgs, linuxDesktop, mapHost, parseHostRules, parseProxyServer, proxyFor, redactCredentials, resolveRouting, switchesOf, systemAutoDetect, systemProxy } from './probe-routing.js';
 import type { ReadRouting, SystemReaders } from './probe-routing.js';
 
 const local: ReadRouting = { commandLine: '"C:\\chrome\\chrome.exe" --headless --no-sandbox', contextProxy: null, contextIgnoresHTTPSErrors: false, systemProxy: null, launchedHere: true };
@@ -128,7 +128,62 @@ describe('a browser this process did not launch', () => {
     expect(refusal(() => resolveRouting({}, elsewhere))).toContain('not launched by this process');
     expect(refusal(() => resolveRouting({ proxy: null }, elsewhere))).toContain('probeContext.hostResolverRules');
     expect(refusal(() => resolveRouting({ hostResolverRules: '' }, elsewhere))).toContain('probeContext.proxy');
-    expect(resolveRouting({ proxy: null, hostResolverRules: '' }, { ...elsewhere, commandLine: '/c --host-resolver-rules=MAP * 10.0.0.1' })).toMatchObject({ proxy: null, hostRules: [], description: 'direct' });
+    expect(resolveRouting({ proxy: null, hostResolverRules: '' }, { ...elsewhere, commandLine: '/c --headless' })).toMatchObject({ proxy: null, hostRules: [], description: 'direct' });
+    expect(resolveRouting({ proxy: null, hostResolverRules: '' }, { ...elsewhere, commandLine: null })).toMatchObject({ proxy: null, hostRules: [], description: 'direct' });
+  });
+});
+
+describe('host rules the caller states', () => {
+  it('never replace those of a command line that is read: taken when they say the same or it has none, else nothing is sent', () => {
+    const mapped = { ...local, commandLine: '/c --host-resolver-rules="MAP shop.test 127.0.0.1:4173"' };
+    // The command line maps shop.test to a server of this machine: "none" would read the real shop.test with the page's cookies.
+    expect(refusal(() => resolveRouting({ hostResolverRules: '' }, mapped))).toContain('not what the browser of the page has');
+    expect(refusal(() => resolveRouting({ hostResolverRules: 'MAP shop.test 10.0.0.9' }, mapped))).toContain('--host-resolver-rules=MAP shop.test 127.0.0.1:4173');
+    expect(refusal(() => resolveRouting({ hostResolverRules: '' }, { ...local, commandLine: '/c --host-rules=MAP shop.test 127.0.0.1' }))).toContain('--host-rules=MAP shop.test 127.0.0.1');
+    // The same rules, written otherwise: taken, as the command line says them.
+    expect(mapHost(resolveRouting({ hostResolverRules: ' map  shop.test   127.0.0.1:4173 ' }, mapped).hostRules, 'shop.test', 80)).toEqual({ host: '127.0.0.1', port: 4173 });
+    // A command line without rules: what is stated is taken.
+    expect(mapHost(resolveRouting({ hostResolverRules: 'MAP a.test 127.0.0.1' }, local).hostRules, 'a.test', 80)).toEqual({ host: '127.0.0.1', port: 80 });
+    // A browser this process did not launch, whose command line is read all the same: its rules count too.
+    expect(refusal(() => resolveRouting({ proxy: null, hostResolverRules: '' }, { ...mapped, launchedHere: false }))).toContain('not what the browser of the page has');
+    // A command line that cannot be read: what is stated is all there is.
+    expect(resolveRouting({ proxy: null, hostResolverRules: '' }, { ...local, commandLine: null }).hostRules).toEqual([]);
+  });
+});
+
+describe('ports', () => {
+  it('that the browser of the page lets through although Chromium restricts them are read from its command line', () => {
+    expect(resolveRouting({}, { ...local, commandLine: '/c --explicitly-allowed-ports=6667,10080, 99999,x' }).allowedPorts).toEqual([6667, 10080]);
+    expect(resolveRouting({}, local).allowedPorts).toBeUndefined();
+  });
+});
+
+describe('automatic detection of a proxy (WPAD)', () => {
+  const reg = (out: string | null): SystemReaders => ({ run: () => Promise.resolve(out), readFile: () => Promise.resolve(null), home: '' });
+  const settings = (flags: string) => `HKEY_CURRENT_USER\\...\\Connections\n    DefaultConnectionSettings    REG_BINARY    4600000002000000${flags}000000000000000000000000\n`;
+
+  it('is read from the settings of the connections on Windows, on by default', async () => {
+    expect(await systemAutoDetect('win32', reg(settings('09')))).toContain('Automatically detect settings');
+    expect(await systemAutoDetect('win32', reg(settings('01')))).toBeNull();
+    expect(await systemAutoDetect('win32', reg(settings('0b')))).toContain('Automatically detect settings');
+    expect(await systemAutoDetect('win32', reg('HKEY_CURRENT_USER\\...\\Connections\n'))).toContain('the default');
+    expect(await systemAutoDetect('win32', reg(null))).toContain('could not be read');
+    expect(await systemAutoDetect('linux', reg(null))).toBeNull();
+  });
+
+  it('where the browser of the page takes its proxy from the system: reads go to this machine only, and the survey says why', () => {
+    const routing = resolveRouting({}, { ...local, systemAutoDetect: 'Windows: "Automatically detect settings"' });
+    expect(routing.proxy).toBeNull();
+    expect(routing.proxyUnknown).toContain('detect a proxy on the network automatically');
+    expect(routing.description).toContain('this machine only');
+    // The reason says what was not examined, and how to probe: the caller's way (the CLI's --proxy), or the API's.
+    expect(routing.proxyUnknown).toContain('no control was activated and what controls do was not examined; to probe, say how the page reaches the network: probeContext.proxy');
+    expect(resolveRouting({ advice: 'run with --proxy none' }, { ...local, systemAutoDetect: 'x' }).proxyUnknown).toMatch(/not examined; run with --proxy none$/);
+    expect(refusal(() => resolveRouting({ advice: 'run with --proxy none' }, { ...local, systemProxy: 'proxy.corp:8080' }))).toMatch(/proxy of the system \(proxy\.corp:8080\).*not examined; run with --proxy none$/);
+    // A proxy said, or none: followed.
+    expect(resolveRouting({ proxy: null }, { ...local, systemAutoDetect: 'x' }).proxyUnknown).toBeUndefined();
+    // A browser whose command line says its proxy does not use the system's.
+    expect(resolveRouting({}, { ...local, commandLine: '/c --no-proxy-server', systemAutoDetect: 'x' }).proxyUnknown).toBeUndefined();
   });
 });
 
@@ -144,7 +199,8 @@ describe('--host-rules', () => {
 describe('credentials', () => {
   it('are never in what is said of a proxy: with a scheme or without, in the environment, the command line or a context', async () => {
     expect(redactCredentials('http_proxy=user:pass@proxy.corp:3128')).toBe('http_proxy=proxy.corp:3128');
-    expect(redactCredentials('http=u:p@a.test:1;https=http://v:q@b.test:2')).toBe('http=a.test:1;https=http://b.test:2');
+    // Up to the last `@`: what came before it may have been a password.
+    expect(redactCredentials('http=u:p@a.test:1;https=http://v:q@b.test:2')).toBe('http=b.test:2');
     expect(redactCredentials('socks5://u:p@ss@s.test:1080')).toBe('socks5://s.test:1080');
     // http_proxy without "//": the credentials are not left in the reason probing did not start.
     const system = await systemProxy('linux', { http_proxy: 'user:hunter2@proxy.corp:3128' });
@@ -162,6 +218,54 @@ describe('credentials', () => {
       expect(message).not.toContain('user:');
     }
     expect(resolveRouting({ proxy: { server: 'http://user:hunter2@p.test:1' } }, local).description).not.toContain('hunter2');
+  });
+
+  // Passwords hold what an address uses to separate its parts: none of it is left in a message.
+  const secrets = ['p=ss', 'p;ss', 'p,ss', 'p@ss', 'p:ss', 'p/ss', 'p?ss', 'p%40s%3Ds', 'a(b)c', 'x"y\'z', 'p[1]', 'h:u=n;t,e@r/2?'];
+
+  it('are dropped up to the last @ of what an address holds, whatever the password holds', () => {
+    for (const secret of secrets) {
+      for (const text of [`http://user:${secret}@proxy.corp:3128`, `http_proxy=user:${secret}@proxy.corp:3128`, `the proxy (socks5://user:${secret}@s.test:1080), which`, `https=http://v:q@b.test:2;http=user:${secret}@proxy.corp:3128`]) {
+        const shown = redactCredentials(text);
+        expect(shown, text).not.toContain(secret);
+        expect(shown, text).not.toContain('user');
+        expect(shown, text).toMatch(/(proxy\.corp:3128|s\.test:1080)/);
+      }
+    }
+    expect(redactCredentials('http://user:p=ss@proxy:3128')).toBe('http://proxy:3128');
+    expect(redactCredentials('http_proxy=user:p;ss@proxy.corp:3128 and more')).toBe('http_proxy=proxy.corp:3128 and more');
+  });
+
+  it('are read whole from a proxy address, and never in a message built of it', () => {
+    for (const secret of secrets) {
+      const encoded = encodeURIComponent(secret);
+      const rules = parseProxyServer(`http://user:${encoded}@proxy.corp:3128`, '');
+      expect(rules.http).toMatchObject({ host: 'proxy.corp', port: 3128, username: 'user', password: secret });
+      // Written as it is: `;` and `,` separate proxies in Chromium's grammar, so only the others.
+      if (!/[;,]/.test(secret)) expect(parseProxyServer(`http://user:${secret}@proxy.corp:3128`, '').http).toMatchObject({ host: 'proxy.corp', port: 3128, username: 'user' });
+      else expect(refusal(() => parseProxyServer(`http://user:${secret}@proxy.corp:3128`, ''))).not.toMatch(/user|ss@|ss\b/);
+      for (const message of [
+        refusal(() => resolveRouting({}, { ...local, commandLine: `/c --proxy-server=socks5://user:${secret}@s.test:1080` })),
+        refusal(() => resolveRouting({}, { ...local, contextProxy: { server: `https://user:${secret}@secure.test:443` } })),
+        refusal(() => resolveRouting({}, { ...local, commandLine: `/c --proxy-server=http://user:${secret}@a.test:99999` })),
+        refusal(() => resolveRouting({}, { ...local, systemProxy: `user:${secret}@proxy.corp:3128` })),
+      ]) {
+        expect(message).not.toBe('');
+        expect(message).not.toContain(secret);
+        expect(message).not.toContain('user');
+      }
+    }
+  });
+
+  it('of the system are never in what is said of it, whatever the password holds', async () => {
+    for (const secret of secrets) {
+      const shown = await systemProxy('linux', { http_proxy: `http://user:${secret}@proxy.corp:3128` });
+      expect(shown).not.toContain(secret);
+      expect(shown).toContain('proxy.corp:3128');
+      const windows = await systemProxy('win32', {}, { run: () => Promise.resolve(`    ProxyEnable    REG_DWORD    0x1\n    ProxyServer    REG_SZ    http=user:${secret}@proxy.corp:3128;https=user:${secret}@proxy.corp:3129\n`), readFile: () => Promise.resolve(null), home: '' });
+      expect(windows).not.toContain(secret);
+      expect(windows).not.toContain('user');
+    }
   });
 });
 

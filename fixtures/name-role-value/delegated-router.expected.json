@@ -1,0 +1,19 @@
+{
+  "description": "A delegated listener sets the same 3 s timer for every click, and navigates when it runs only for links of the app (a.later); an analytics listener sets a harmless 3 s timer for every click. The neutral activation of each copy runs both timers ahead of their time and sees them change nothing for a neutral spot; in each probe they are run ahead of their time again, for the element: the two a.later links navigate (they are links: no link-acts-as-button, never likely), and the link that only shows a panel acts as a button, likely, without waiting 3 s.",
+  "checks": [
+    "name-role-value"
+  ],
+  "expected": [
+    {
+      "selector": "#opens",
+      "check": "name-role-value",
+      "status": "likely",
+      "wcag": "4.1.2",
+      "rule": "name-role-value/link-acts-as-button",
+      "flags": [
+        "measured",
+        "showsOrHides"
+      ]
+    }
+  ]
+}

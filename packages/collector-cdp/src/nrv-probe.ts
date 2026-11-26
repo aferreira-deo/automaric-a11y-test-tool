@@ -4,7 +4,7 @@ import { GUARD_GLOBAL, GUARD_SCRIPT, PROBE_AGENT_GLOBAL, PROBE_WORLD_NAME, clone
 import type { CloneSourceRead, ProbeAgentOptions, ProbeObserved, ProbePrepared, ProbeStorage } from './nrv-probe-agent.js';
 import { captureScale, decodeBase64 } from './page.js';
 import type { Capture, StablePage } from './page.js';
-import { isProbeRoutingError } from './probe-host.js';
+import { isProbeRoutingError, withoutUserInfo } from './probe-host.js';
 import type { CloneSettings, ProbeBrowser, ProbeHost, ProbePage } from './probe-host.js';
 import { ProbeNetwork, pathOf, shownUrl } from './probe-network.js';
 import type { ActivationNetwork } from './probe-network.js';
@@ -67,13 +67,21 @@ class ProbeTimeout extends Error {
 
 class CopyFailed extends Error {}
 
-/** Text with the user information of addresses removed (`http://user:pass@host`, `user:pass@host`). */
-export function withoutUserInfo(text: string): string {
-  return text.replace(/((?:[a-z][a-z0-9+.-]*:\/\/)?)[^\s@/;,=()"'[\]]+@/gi, '$1');
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+/**
+ * Waits for `promise`, `ms` at most, whichever way it settles; its timer is cleared as soon as it
+ * does, so that nothing of the probing keeps the process alive once it is over.
+ */
+export async function bounded(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([promise.then(() => undefined, () => undefined), new Promise<void>((resolve) => (timer = setTimeout(resolve, Math.max(0, ms))))]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A value of the accessibility tree as text: strings, numbers and booleans as they are, anything else as JSON. */
@@ -257,6 +265,11 @@ export async function probeNameRoleValue(
     return notStarted('browserFailed', `the probing browser did not start: ${message}`);
   }
   log.route = probe.route;
+  // A probing browser that is gone (crashed, killed) answers nothing more: nothing of it is waited for.
+  let browserGone = false;
+  const ended = (probe.ended ?? new Promise<void>(() => undefined)).then(() => {
+    browserGone = true;
+  });
   const network = new ProbeNetwork(probe, settings, log, options.testUnblock);
   let copy: Copy | null = null;
 
@@ -271,7 +284,7 @@ export async function probeNameRoleValue(
   const agent = async <T>(target: Copy, call: string): Promise<T> => (await evaluateIn<T>(target, `globalThis.${PROBE_AGENT_GLOBAL}.${call}`)).value as T;
   /** The guard lives in the main world of the copy. */
   const guard = async <T>(target: Copy, call: string): Promise<T | undefined> => {
-    const response = (await target.cdp.send('Runtime.evaluate', { expression: `globalThis.${GUARD_GLOBAL} ? globalThis.${GUARD_GLOBAL}.${call} : undefined`, returnByValue: true })) as { result?: { value?: T } };
+    const response = (await target.cdp.send('Runtime.evaluate', { expression: `globalThis.${GUARD_GLOBAL} ? globalThis.${GUARD_GLOBAL}.${call} : undefined`, returnByValue: true, awaitPromise: true })) as { result?: { value?: T } };
     return response.result?.value;
   };
 
@@ -332,10 +345,16 @@ export async function probeNameRoleValue(
     // From here its requests are no copy's: everything of it is stopped, as it goes and after.
     network.setCurrent(null);
     network.closeLoad();
+    // One bound for the close and the end of its target together. A close that fails (the probing browser is gone)
+    // ends the wait at once: no event will come.
     const gone = network.destroyedOf(target.page.targetId, settings.probeStepTimeoutMs);
-    await Promise.race([target.page.close(), sleep(settings.probeStepTimeoutMs)]).catch(() => undefined);
-    await gone;
-    if (grace) await sleep(settings.probeUnloadGraceMs);
+    const closed = target.page.close().then(
+      () => gone.done,
+      () => gone.stop(),
+    );
+    await bounded(Promise.race([closed, ended]), settings.probeStepTimeoutMs);
+    gone.stop();
+    if (grace && !browserGone) await sleep(settings.probeUnloadGraceMs);
   };
 
   const openCopy = async (): Promise<Copy> => {
@@ -466,43 +485,56 @@ export async function probeNameRoleValue(
   /**
    * Before the first probe of a copy, the same activation on a neutral spot (a throwaway element at
    * the end of the body): the timers it sets are set by what listens to every click (analytics, a
-   * delegated poll), and those set by the same call later are the page's, not a control's.
+   * delegated router, a poll), and those set by the same call later are the page's, not a control's.
+   * They are run once, to their end, ahead of their time (`activationTimerChainMax` runs at most):
+   * those seen to change nothing while they ran (no element, no navigation, no window) are harmless,
+   * and only those are run ahead in a probe (see `waitTimers`). One whose run was never seen to end
+   * harmlessly is waited for as any other.
    */
   const baseline = async (target: Copy): Promise<void> => {
     await guard(target, 'baselineBegin()');
     try {
       await agent(target, 'activateNeutral()');
+      await pause(settings.probeSettleMs);
+      await within(guard(target, `runAhead(${settings.activationTimerChainMax})`));
+      await waitQuiet(target);
     } finally {
       await guard(target, 'baselineEnd()');
     }
   };
 
   /**
-   * Then the timers the activation set are waited for, as long as one is due within
-   * `activationTimerMaxMs` of the activation (a link that shows a spinner and navigates 450 ms
-   * later), and what each did is waited for as above. Nothing is waited for when the activation set
-   * none. Returns whether one of its own is still pending (due later, or an interval): something
-   * still to happen. Not counted as pending: the page's timers (set by what listens to every click,
-   * see `baseline`), which are waited for only when due within the bound; and a poll, a timer that
-   * set itself again more than `activationTimerChainMax` times while the copy stayed quiet, which is
-   * no longer waited for. A poll whose runs change the copy is waited for like any other.
+   * Then the timers the activation set (its own, and those its handlers set in what listens to every
+   * click) are waited for, as long as one is due within `activationTimerMaxMs` of the activation (a
+   * link that shows a spinner and navigates 450 ms later, a poll that navigates after 1.5 s), and
+   * what each did is waited for as above. The page's timers that the neutral activation ran
+   * harmlessly (see `baseline`) are not waited for: they are run at once, ahead of their time, as
+   * they would have run for this element (`activationTimerChainMax` runs at most), and what they do
+   * is the element's evidence (a router that navigates for some links only). Nothing is waited for
+   * when the activation set none. Returns whether anything is still pending when waiting stops (one
+   * due later, an interval, a chain of the page's that does not end): something still to happen, so
+   * what the element was seen to do is not concluded on (`timerPending`).
    */
-  const waitTimers = async (target: Copy, activatedAt: number, quietAfter: boolean): Promise<boolean> => {
+  const waitTimers = async (target: Copy, activatedAt: number): Promise<boolean> => {
     const bound = activatedAt + settings.activationTimerMaxMs;
-    let quiet = quietAfter;
+    let ranAhead = 0;
     for (;;) {
-      const pending = await guard<{ count: number; next: number; polls?: number; pollNext?: number; pageNext?: number }>(target, `pending(${settings.activationTimerChainMax})`);
+      const pending = await guard<{ count: number; intervals: number; next: number; ahead: number }>(target, 'pending()');
       if (!pending) return false;
-      const polls = pending.polls ?? 0;
-      const within = (left: number | undefined): boolean => left !== undefined && left >= 0 && Date.now() + left <= bound;
-      if (pending.count > 0 && (pending.next < 0 || !within(pending.next))) return true;
-      // A poll (the control's or the page's) that changes nothing is a loop, not something still to happen.
-      const pollNext = pending.pollNext ?? -1;
-      const waitPoll = pollNext >= 0 && !quiet;
-      const due = [pending.count > 0 ? pending.next : -1, waitPoll ? pollNext : -1, pending.pageNext ?? -1].filter((left) => within(left));
-      if (due.length === 0) return pending.count > 0 || (polls > 0 && !quiet);
-      await pause(Math.min(...due) + 25);
-      quiet = await waitQuiet(target);
+      if (pending.ahead > 0) {
+        const left = settings.activationTimerChainMax - ranAhead;
+        const runs = left > 0 ? ((await within(guard<number>(target, `runAhead(${left})`))) ?? 0) : 0;
+        // A chain of the page's that does not end within its runs: still something to happen.
+        if (runs === 0) return true;
+        ranAhead += runs;
+        await waitQuiet(target);
+        continue;
+      }
+      if (pending.count === 0) return false;
+      // An interval does not end by itself; a timer due after the bound is not waited for.
+      if (pending.intervals > 0 || pending.next < 0 || Date.now() + pending.next > bound) return true;
+      await pause(pending.next + 25);
+      await waitQuiet(target);
     }
   };
 
@@ -627,8 +659,8 @@ export async function probeNameRoleValue(
     await guard(target, 'begin()');
     const activatedAt = Date.now();
     await agent(target, `activate(${key})`);
-    const quietAfter = await waitQuiet(target);
-    const timerPending = await waitTimers(target, activatedAt, quietAfter);
+    await waitQuiet(target);
+    const timerPending = await waitTimers(target, activatedAt);
     let observed = await agent<ProbeObserved>(target, `observe(${key})`);
     const after = await capture(target, ids.after, prepared.clip);
     const interval = Date.now() - activatedAt;
@@ -669,8 +701,8 @@ export async function probeNameRoleValue(
       await guard(target, 'begin()');
       const againAt = Date.now();
       await agent(target, `activate(${key})`);
-      const quietAgain = await waitQuiet(target);
-      const againPending = await waitTimers(target, againAt, quietAgain);
+      await waitQuiet(target);
+      const againPending = await waitTimers(target, againAt);
       observed = await agent<ProbeObserved>(target, `observe(${key})`);
       const reverted = await agent<boolean>(target, 'revealReverted()');
       const third = await capture(target, ids.again, prepared.clip);
@@ -761,6 +793,13 @@ export async function probeNameRoleValue(
         }
         if (!clean) copy.dirty = true;
       } catch (error) {
+        if (browserGone) {
+          // Whatever failed, it failed because the probing browser is gone: nothing more can be probed.
+          entry.outcome = 'crash';
+          log.stopped = 'crash';
+          log.stoppedDetail = 'the probing browser went away in the middle of the scan';
+          break;
+        }
         const crashed = copy?.crashed === true;
         if (error instanceof ProbeTimeout) {
           entry.outcome = error.budget ? 'budget' : crashed ? 'crash' : 'timeout';
@@ -789,7 +828,7 @@ export async function probeNameRoleValue(
     network.disable();
     log.escapes = probe.refusedConnections();
     // Every request still held goes with the browser.
-    await Promise.race([probe.close(), sleep(settings.probeStepTimeoutMs)]).catch(() => undefined);
+    await bounded(Promise.race([probe.close(), ended]), settings.probeStepTimeoutMs);
   }
   return { log };
 }

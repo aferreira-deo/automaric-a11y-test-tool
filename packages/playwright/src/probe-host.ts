@@ -1,13 +1,13 @@
 import { existsSync, readdirSync, rmdirSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createServer, isIP } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProbeRoutingError } from '@a11y-vision/collector-cdp';
 import type { CdpSession, CloneSettings, ProbeBrowser, ProbeFetchRequest, ProbeFetchResponse, ProbeHost, ProbePage } from '@a11y-vision/collector-cdp';
 import type { Browser, BrowserContext, BrowserContextOptions, BrowserType, CDPSession, LaunchOptions, Page } from 'playwright-core';
-import { pageIsPrivate, sendRead } from './probe-fetch.js';
-import { RoutingRefusal, commandLineArgs, resolveRouting, switchesOf, systemProxy } from './probe-routing.js';
+import { pageIsLoopback, pageIsPrivate, sendRead } from './probe-fetch.js';
+import { RoutingRefusal, addressClass, commandLineArgs, loopbackName, resolveRouting, switchesOf, systemAutoDetect, systemProxy } from './probe-routing.js';
 import type { ProbeRouting, ReadRouting } from './probe-routing.js';
 
 /** What the copies of a page are given beyond what the collector reads from the page itself, and how their reads are sent. */
@@ -30,10 +30,22 @@ export interface ProbeContextOptions {
   hostResolverRules?: string;
   /** Certificate errors are ignored for the reads of the copies. By default, as the page's context (`ignoreHTTPSErrors`) and browser (`--ignore-certificate-errors`) do. */
   ignoreHTTPSErrors?: boolean;
+  /**
+   * How the caller enables probing when the proxy of the system cannot be followed (a proxy the system
+   * sets, or one it detects on the network, WPAD), as the end of the reason the survey gives; by
+   * default it names `probeContext.proxy` and the launch options. The CLI names its `--proxy`.
+   */
+  routingAdvice?: string;
   /** The Chromium to probe in. By default, the executable of the page's browser when it is on this machine; else Playwright's own. */
   executablePath?: string;
   /** A Chromium channel to probe in (`chrome`, `msedge`), when no `executablePath` is given. */
   channel?: string;
+}
+
+/** An address of this machine by name or by address (`localhost`, `127.0.0.1`, `[::1]`): what Chromium never sends to a proxy. */
+function onThisMachineByName(url: string): boolean {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return loopbackName(host) || (isIP(host) !== 0 && addressClass(host) === 'loopback');
 }
 
 function cdpOf(session: CDPSession): CdpSession {
@@ -173,11 +185,15 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
   let persistent: boolean;
   try {
     const impl = typeof toImpl === 'function' ? toImpl.call(internals._connection, context) : undefined;
-    // No server object, or one without options: not known, which is not the same as none.
-    contextProxy = impl?._options ? (impl._options.proxy ?? null) : undefined;
+    // No server object, or one without options: not known, which is not the same as none. What the context was
+    // created with on this side (its options as the test gave them) counts too: a proxy either side names is followed.
+    contextProxy = impl?._options ? (impl._options.proxy ?? internals._options?.proxy ?? null) : undefined;
     launched = launchedHere(impl);
     // The default context of a browser launched with a profile (launchPersistentContext): its settings are not read.
-    persistent = impl?._browser?._defaultContext !== undefined && impl._browser._defaultContext !== null && impl._browser._defaultContext === impl;
+    // Not a profile only when Playwright's browser has that field and it holds no context: a field renamed, or
+    // anything else in it, counts as a profile.
+    const owner = impl?._browser as Record<string, unknown> | undefined;
+    persistent = !(owner !== undefined && Object.prototype.hasOwnProperty.call(owner, '_defaultContext') && owner['_defaultContext'] === null);
   } catch {
     contextProxy = undefined;
     launched = false;
@@ -187,7 +203,10 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
   const program = commandLine !== null ? switchesOf(commandLineArgs(commandLine)).program : '';
   const routingSwitch = commandLine !== null && /(^|\s)"?--(no-proxy-server|proxy-server|proxy-pac-url|proxy-auto-detect)\b/.test(commandLine);
   // The system's proxy is read only when it is what the browser of the page uses, and that browser is on this machine.
-  const system = stated.proxy !== undefined || contextProxy !== null || routingSwitch ? null : program !== '' && existsSync(program) ? await systemProxy() : undefined;
+  const usesSystem = !(stated.proxy !== undefined || contextProxy !== null || routingSwitch);
+  const system = !usesSystem ? null : program !== '' && existsSync(program) ? await systemProxy() : undefined;
+  // Automatic detection matters only where the browser of the page takes its proxy from the system.
+  const autoDetect = usesSystem && system === null ? await systemAutoDetect() : null;
   const launch = (browser as unknown as Internals | null)?._options?.proxy;
   return {
     commandLine,
@@ -195,6 +214,7 @@ async function readRouting(page: Page, stated: ProbeContextOptions): Promise<Rea
     ...(launch ? { launchProxy: launch } : {}),
     contextIgnoresHTTPSErrors: internals._options?.ignoreHTTPSErrors === true,
     systemProxy: system,
+    ...(autoDetect ? { systemAutoDetect: autoDetect } : {}),
     launchedHere: launched,
     persistent,
     program,
@@ -263,12 +283,15 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
       const read = await readRouting(page, options);
       let routing: ProbeRouting;
       try {
-        routing = resolveRouting({ ...(options.proxy !== undefined ? { proxy: options.proxy } : {}), ...(options.hostResolverRules !== undefined ? { hostResolverRules: options.hostResolverRules } : {}), ...(options.ignoreHTTPSErrors !== undefined ? { ignoreHTTPSErrors: options.ignoreHTTPSErrors } : {}) }, read);
+        routing = resolveRouting({ ...(options.proxy !== undefined ? { proxy: options.proxy } : {}), ...(options.hostResolverRules !== undefined ? { hostResolverRules: options.hostResolverRules } : {}), ...(options.ignoreHTTPSErrors !== undefined ? { ignoreHTTPSErrors: options.ignoreHTTPSErrors } : {}), ...(options.routingAdvice !== undefined ? { advice: options.routingAdvice } : {}) }, read);
       } catch (error) {
         if (error instanceof RoutingRefusal) throw new ProbeRoutingError(error.message);
         throw error;
       }
+      // A proxy the system detects by itself: only this machine is read, so a page elsewhere has no copy to probe in.
+      if (routing.proxyUnknown && !onThisMachineByName(pageUrl)) throw new ProbeRoutingError(routing.proxyUnknown);
       const privateAllowed = await pageIsPrivate(routing, pageUrl);
+      const loopbackAllowed = await pageIsLoopback(routing, pageUrl);
 
       let refused = 0;
       const sockets = new Set<Socket>();
@@ -316,6 +339,10 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
         dead.close();
         throw error;
       }
+      const ended = new Promise<void>((resolve) => {
+        if (!browser.isConnected()) resolve();
+        else browser.once('disconnected', () => resolve());
+      });
       let browserSession: CDPSession;
       let probeLine: string | null;
       try {
@@ -359,6 +386,7 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
         routing,
         pageUrl,
         privateAllowed,
+        loopbackAllowed,
         routed: (url: string) => routes.routed(url),
         signal: reads.signal,
       };
@@ -411,6 +439,7 @@ export function playwrightProbeHost(page: Page, options: ProbeContextOptions = {
           return sendRead(request, limits, withHeaders((url) => (ours(url) ? { authorization } : {})));
         },
         refusedConnections: () => refused,
+        ended,
         async close() {
           reads.abort();
           for (const context of contexts) await context.close().catch(() => undefined);

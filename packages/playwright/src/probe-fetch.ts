@@ -16,8 +16,10 @@ import type { AddressClass, HttpProxy, ProbeRouting } from './probe-routing.js';
  * Sends one read for a copy of the page, where the page under test's own request would go: through
  * its proxy, under its host rules, with its handling of certificates. A read the page routes itself
  * (`page.route`), a read of an address of this machine, of a private network or of a link when the
- * page under test is on none of those, and a plain-HTTP read the page's browser might have upgraded
- * (see `plainHttpRefusal`) are refused (`ProbeReadRefused`), never sent.
+ * page under test is on none of those (of this machine, when it is on a private network), a read of a
+ * port Chromium restricts (`RESTRICTED_PORTS`), a read of another machine when the page's browser
+ * detects its proxy by itself (`proxyUnknown`), and a plain-HTTP read the page's browser might have
+ * upgraded (see `plainHttpRefusal`) are refused (`ProbeReadRefused`), never sent.
  *
  * Where the bytes go is checked, not assumed: every connection is opened here, to the address that
  * was checked (a name is resolved once: one that resolves elsewhere the next time, DNS rebinding,
@@ -40,6 +42,13 @@ export interface ReadPolicy {
   pageUrl: string;
   /** Addresses that are not of the internet may be read: the page under test is on one. */
   privateAllowed: boolean;
+  /**
+   * Addresses of this machine may be read: the page under test is on this machine itself. For a
+   * page on a private network they are refused: Chromium's Local Network Access may hold a request
+   * to a more private address space than the page's for a permission, which cannot be read here.
+   * By default, as `privateAllowed`.
+   */
+  loopbackAllowed?: boolean;
   /** The page under test routes this address itself (`page.route`, `context.route`): it is never sent. */
   routed(url: string): boolean;
   /** Headers added to every read (`probeContext.extraHTTPHeaders`, credentials). */
@@ -109,6 +118,22 @@ export async function pageIsPrivate(routing: ProbeRouting, pageUrl: string, reso
   }
 }
 
+/** Whether the page under test is on this machine itself (a name of it, a loopback address, a name the rules or the resolver send there). */
+export async function pageIsLoopback(routing: ProbeRouting, pageUrl: string, resolve = resolveName): Promise<boolean> {
+  const url = new URL(pageUrl);
+  const host = bare(url.hostname);
+  if (loopbackName(host) || (isIP(host) !== 0 && addressClass(host) === 'loopback')) return true;
+  if (proxyFor(routing.proxy, url)) return false;
+  try {
+    const target = await resolveTarget(routing, host, Number(url.port || (url.protocol === 'https:' ? 443 : 80)), resolve);
+    return target.kind === 'loopback' || loopbackName(target.host);
+  } catch {
+    return false;
+  }
+}
+
+const LOOPBACK_FROM_LAN = 'an address of this machine, and the page under test is on a private network, not on this machine: Chromium may hold such a read for a permission (Local Network Access), which cannot be known here';
+
 /**
  * Why a plain-HTTP read is not sent, or null. The browser of the page upgrades plain HTTP to HTTPS
  * for the hosts its profile holds as HSTS (and blocks or upgrades plain HTTP in an HTTPS page),
@@ -134,9 +159,50 @@ export function plainHttpRefusal(url: URL, pageUrl: string, proxied: boolean): s
   return 'a plain-HTTP address of another host than the page under test: its browser may upgrade it to HTTPS (HSTS), which cannot be read here';
 }
 
+/**
+ * The ports Chromium refuses to connect to whatever the page asks (`net::ERR_UNSAFE_PORT`, its
+ * `kRestrictedPorts` in `net/base/port_util.cc`): it refuses them after `Fetch.requestPaused`, so a
+ * read the collector was handed for one would go where the page's own request never goes. The 80
+ * ports Playwright's Chromium (159) refuses, checked port by port from 1 to 65535 against that
+ * browser; `e2e/name-role-value-routing.spec.ts` checks each again against the browser it runs.
+ */
+export const RESTRICTED_PORTS: readonly number[] = [
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513,
+  514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080,
+];
+
+/** Whether Chromium refuses the port: one it restricts, unless the browser of the page lets it through (`--explicitly-allowed-ports`); port 0, and what is not a port, always. */
+export function isRestrictedPort(port: number, allowed: readonly number[] = []): boolean {
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return true;
+  return RESTRICTED_PORTS.includes(port) && !allowed.includes(port);
+}
+
+/** Headers that belong to a connection or to the body, never a read's: the read sets what it needs of them itself. */
+const CONNECTION_HEADERS = new Set(['host', 'content-length', 'transfer-encoding', 'expect', 'connection', 'keep-alive', 'upgrade', 'te', 'trailer', 'accept-encoding']);
+
+function readHeaders(...sets: (Record<string, string> | undefined)[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const set of sets) {
+    for (const [name, value] of Object.entries(set ?? {})) {
+      const lower = name.toLowerCase().trim();
+      if (lower === '' || lower.startsWith(':') || CONNECTION_HEADERS.has(lower) || lower.startsWith('proxy-')) continue;
+      out[lower] = value;
+    }
+  }
+  return out;
+}
+
+/** Proxies that asked for their credentials (407, Basic): Chromium keeps the answer for the proxy and sends them from then on. */
+const challenged = new WeakSet<HttpProxy>();
+
 function proxyAuthorization(proxy: HttpProxy): string {
   if (proxy.username === undefined) return '';
-  return `Proxy-Authorization: Basic ${Buffer.from(`${proxy.username}:${proxy.password ?? ''}`).toString('base64')}\r\n`;
+  return `Basic ${Buffer.from(`${proxy.username}:${proxy.password ?? ''}`).toString('base64')}`;
+}
+
+/** The proxy asked for credentials it can be given: 407 with a Basic challenge, and credentials there are. */
+function basicChallenge(proxy: HttpProxy, status: number, headers: { name: string; value: string }[]): boolean {
+  return status === 407 && proxy.username !== undefined && headers.some((header) => header.name === 'proxy-authenticate' && /(^|,)\s*basic\b/i.test(header.value));
 }
 
 /**
@@ -262,7 +328,7 @@ async function tlsOver(read: Read, socket: Socket, name: string, rejectUnauthori
 }
 
 /** The status line and headers of the proxy's answer to `CONNECT`, read from the socket and no further. */
-function connectAnswer(socket: Socket): Promise<{ status: number; rest: Buffer }> {
+function connectAnswer(socket: Socket): Promise<{ status: number; headers: { name: string; value: string }[]; rest: Buffer }> {
   return new Promise((resolve, reject) => {
     let buffered = Buffer.alloc(0);
     const onData = (chunk: Buffer): void => {
@@ -273,12 +339,15 @@ function connectAnswer(socket: Socket): Promise<{ status: number; rest: Buffer }
         return;
       }
       socket.pause();
-      const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(buffered.subarray(0, end).toString('latin1'))?.[1] ?? 0);
-      done(null, { status, rest: buffered.subarray(end + 4) });
+      const [line = '', ...fields] = buffered.subarray(0, end).toString('latin1').split('\r\n');
+      // The status line whole: three digits, then a space or its end (`HTTP/1.1 2000` is no 200).
+      const status = Number(/^HTTP\/1\.[01] (\d{3})(?: |$)/.exec(line)?.[1] ?? 0);
+      const headers = fields.map((field) => ({ name: field.slice(0, Math.max(0, field.indexOf(':'))).trim().toLowerCase(), value: field.slice(field.indexOf(':') + 1).trim() })).filter((header) => header.name !== '');
+      done(null, { status, headers, rest: buffered.subarray(end + 4) });
     };
     const onClose = (): void => done(new Error('the proxy closed the connection before it answered CONNECT'));
     const onError = (error: Error): void => done(error);
-    const done = (error: Error | null, answer?: { status: number; rest: Buffer }): void => {
+    const done = (error: Error | null, answer?: { status: number; headers: { name: string; value: string }[]; rest: Buffer }): void => {
       socket.off('data', onData);
       socket.off('close', onClose);
       socket.off('error', onError);
@@ -291,13 +360,27 @@ function connectAnswer(socket: Socket): Promise<{ status: number; rest: Buffer }
   });
 }
 
-/** A tunnel through an HTTP proxy to `authority`, then TLS over it, checked against `host`. */
-async function tunnel(read: Read, proxy: Peer, proxyCredentials: string, host: string, authority: string, rejectUnauthorized: boolean): Promise<{ socket: TLSSocket; label: string }> {
+/**
+ * A tunnel through an HTTP proxy to `authority`, then TLS over it, checked against `host`. The
+ * proxy is sent its credentials once it asked for them (407 with a Basic challenge), as Chromium
+ * answers that challenge with the credentials Playwright holds, and from then on.
+ */
+async function tunnel(read: Read, proxy: Peer, settings: HttpProxy, host: string, authority: string, rejectUnauthorized: boolean): Promise<{ socket: TLSSocket; label: string }> {
   const proxyLabel = `proxy ${peerLabel(proxy)}`;
-  const socket = await connectTcp(read, proxy, proxyLabel);
-  const answer = connectAnswer(socket);
-  socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n${proxyCredentials}\r\n`);
-  const { status, rest } = await read.race(answer);
+  const open = async (credentials: boolean): Promise<{ socket: Socket; status: number; headers: { name: string; value: string }[]; rest: Buffer }> => {
+    const socket = await connectTcp(read, proxy, proxyLabel);
+    const answer = connectAnswer(socket);
+    socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n${credentials ? `Proxy-Authorization: ${proxyAuthorization(settings)}\r\n` : ''}\r\n`);
+    return { socket, ...(await read.race(answer)) };
+  };
+  const sent = challenged.has(settings) && settings.username !== undefined;
+  let opened = await open(sent);
+  if (!sent && basicChallenge(settings, opened.status, opened.headers)) {
+    challenged.add(settings);
+    opened.socket.destroy();
+    opened = await open(true);
+  }
+  const { socket, status, rest } = opened;
   if (status !== 200) throw new Error(`the proxy refused the tunnel (${status})`);
   if (rest.byteLength > 0) throw new Error('the proxy sent data before the TLS handshake');
   const label = `tunnel ${peerLabel(proxy)} to ${authority}`;
@@ -350,7 +433,7 @@ function readResponse(response: IncomingMessage, method: string, limits: ProbeRe
       const body = Buffer.concat(chunks);
       const lines: { name: string; value: string }[] = [];
       for (let index = 0; index + 1 < response.rawHeaders.length; index += 2) lines.push({ name: response.rawHeaders[index]!.toLowerCase(), value: response.rawHeaders[index + 1]! });
-      resolve({ status: response.statusCode ?? 0, headers: lines, body: body.toString('base64'), size: body.byteLength });
+      resolve({ status: response.statusCode ?? 0, headers: lines, body, size: body.byteLength });
     };
     const startDecoder = (first: Buffer): Transform => {
       const made = encoding === 'br' ? createBrotliDecompress() : encoding === 'deflate' ? deflateDecoder(first) : createGunzip();
@@ -411,12 +494,20 @@ export async function sendRead(request: ProbeFetchRequest, limits: ProbeReadLimi
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new ProbeReadRefused(`${url.protocol} is not fetched`);
   if (policy.routed(url.href)) throw new ProbeReadRefused('the page under test routes this address itself (page.route, context.route)');
   const routing = policy.routing;
-  const proxy = proxyFor(routing.proxy, url);
   const secure = url.protocol === 'https:';
   const port = Number(url.port || (secure ? 443 : 80));
   const hostname = bare(url.hostname);
+  // What Chromium refuses after the request was paused, refused here as well: a port it restricts, before anything else.
+  if (isRestrictedPort(port, routing.allowedPorts)) throw new ProbeReadRefused(`port ${port}, which Chromium restricts (net::ERR_UNSAFE_PORT): the page's own request is never sent there`);
+  // A proxy the browser of the page detects by itself: only what it never sends to a proxy, this machine by name or by address.
+  if (routing.proxyUnknown) {
+    const literal = isIP(hostname) !== 0 ? addressClass(hostname) : null;
+    if (!loopbackName(hostname) && literal !== 'loopback' && literal !== 'link-local') throw new ProbeReadRefused(routing.proxyUnknown);
+  }
+  const proxy = proxyFor(routing.proxy, url);
   const path = `${url.pathname}${url.search}`;
-  const headers: Record<string, string> = { ...request.headers, ...(policy.extraHeaders?.(url) ?? {}), host: url.host, 'accept-encoding': 'gzip, deflate, br' };
+  // The headers of the connection are this read's own, whatever it is given (extraHTTPHeaders can hold any).
+  const headers: Record<string, string> = { ...readHeaders(request.headers, policy.extraHeaders?.(url)), host: url.host, 'accept-encoding': 'gzip, deflate, br' };
   const rejectUnauthorized = !routing.ignoreHTTPSErrors;
   const resolver = policy.resolve ?? resolveName;
 
@@ -427,23 +518,33 @@ export async function sendRead(request: ProbeFetchRequest, limits: ProbeReadLimi
       // The proxy resolves the name: what can be checked here is an address in the URL, or localhost.
       const literal = isIP(hostname) !== 0 ? addressClass(hostname) : loopbackName(hostname) ? 'loopback' : 'public';
       if (literal !== 'public' && !policy.privateAllowed) throw new ProbeReadRefused(`${hostname} is ${PUBLIC_ONLY}`);
+      if (literal === 'loopback' && !(policy.loopbackAllowed ?? policy.privateAllowed)) throw new ProbeReadRefused(`${hostname} is ${LOOPBACK_FROM_LAN}`);
       const plain = plainHttpRefusal(url, policy.pageUrl, true);
       if (plain) throw new ProbeReadRefused(plain);
       const through = await resolveTarget(routing, proxy.host, proxy.port, resolve);
-      const credentials = proxyAuthorization(proxy);
       if (!secure) {
         const label = `proxy ${peerLabel(through)}`;
-        const socket = await connectTcp(read, through, label);
-        const auth = credentials ? { 'proxy-authorization': credentials.slice('Proxy-Authorization: '.length, -2) } : {};
-        return await exchange(read, socket, label, request.method, `${url.origin}${path}`, { ...headers, ...auth }, limits);
+        // Credentials once the proxy asked for them (407, Basic), as Chromium under Playwright answers it; then from then on.
+        const ask = async (credentials: boolean): Promise<ProbeFetchResponse> => {
+          const socket = await connectTcp(read, through, label);
+          return exchange(read, socket, label, request.method, `${url.origin}${path}`, { ...headers, ...(credentials ? { 'proxy-authorization': proxyAuthorization(proxy) } : {}) }, limits);
+        };
+        const sent = challenged.has(proxy) && proxy.username !== undefined;
+        const first = await ask(sent);
+        if (sent || !basicChallenge(proxy, first.status, first.headers)) return first;
+        challenged.add(proxy);
+        return await ask(true);
       }
       const authority = `${hostname.includes(':') ? `[${hostname}]` : hostname}:${port}`;
-      const { socket, label } = await tunnel(read, through, credentials, hostname, authority, rejectUnauthorized);
+      const { socket, label } = await tunnel(read, through, proxy, hostname, authority, rejectUnauthorized);
       return await exchange(read, socket, label, request.method, path, headers, limits);
     }
 
     const target = await resolveTarget(routing, hostname, port, resolve);
+    // Where host rules send the connection is checked too: refusing more than Chromium is safe, less is not.
+    if (isRestrictedPort(target.port, routing.allowedPorts)) throw new ProbeReadRefused(`port ${target.port}, which Chromium restricts (net::ERR_UNSAFE_PORT), where the host rules send ${hostname}`);
     if (target.kind !== 'public' && !policy.privateAllowed) throw new ProbeReadRefused(`${hostname} is ${PUBLIC_ONLY} (${target.address})`);
+    if ((target.kind === 'loopback' || loopbackName(target.host)) && !(policy.loopbackAllowed ?? policy.privateAllowed)) throw new ProbeReadRefused(`${hostname} is ${LOOPBACK_FROM_LAN} (${target.address})`);
     const plain = plainHttpRefusal(url, policy.pageUrl, false);
     if (plain) throw new ProbeReadRefused(plain);
     // Under `--host-rules` Chromium checks the certificate against the host it was sent to, which is not followed here.

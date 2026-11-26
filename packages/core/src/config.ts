@@ -36,7 +36,7 @@ export const defaultConfig: Config = {
     activationQuietMs: 150,
     activationQuietMaxMs: 2000,
     activationTimerMaxMs: 2000,
-    activationTimerChainMax: 5,
+    activationTimerChainMax: 250,
     probeExcludeSelector: '[data-a11y-vision-no-probe]',
     probeReads: 'cache',
     probeAllowedResourceTypes: ['Stylesheet', 'Image', 'Font', 'Media', 'Script', 'TextTrack', 'Manifest'],
@@ -445,6 +445,7 @@ export const defaultConfig: Config = {
     // Names that say what they hold. Short on purpose: a parameter that is dropped from the key
     // of a page makes two addresses one page.
     redactQueryParams: ['access_token', 'api_key', 'apikey', 'auth', 'code', 'id_token', 'key', 'password', 'refresh_token', 'secret', 'sig', 'signature', 'token'],
+    proxy: 'system',
   },
   selector: {
     // React useId (:r1:, «r1», _r_1_), react-aria, Headless UI, Radix, MUI, Ember, a UUID, and
@@ -851,5 +852,7 @@ function resolveRun(input: Partial<RunConfig> = {}): RunConfig {
     sitemapMaxDepth: count(input.sitemapMaxDepth, base.sitemapMaxDepth, 3),
     minSecretChars: count(input.minSecretChars, base.minSecretChars),
     redactQueryParams: [...new Set(names(input.redactQueryParams, base.redactQueryParams).map((name) => name.toLowerCase()))],
+    // Checked by the CLI, which refuses a value it cannot use rather than reaching the pages otherwise.
+    proxy: typeof input.proxy === 'string' && input.proxy.trim() !== '' ? input.proxy.trim() : base.proxy,
   };
 }

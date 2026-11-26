@@ -18,6 +18,7 @@ import {
 } from '@a11y-vision/core';
 import type { AdjudicationInput, Baseline, BaselineSummary, CheckId, ConfigInput, Png, RunConfig, ScanResult } from '@a11y-vision/core';
 import { A11yVision } from '@a11y-vision/playwright';
+import type { ProbeContextOptions } from '@a11y-vision/playwright';
 import { countRun, toHtmlReport, toHtmlRunReport, toJsonReport, toJsonRunReport, toSarifReport } from '@a11y-vision/reporters';
 import type { Run, RunCounts } from '@a11y-vision/reporters';
 import { chromium } from 'playwright';
@@ -35,6 +36,40 @@ export const EXIT_ERROR = 2;
 
 /** Prefix of the environment variables the CLI reads, from the tool name: A11Y_VISION_. */
 const ENV_PREFIX = `${TOOL_NAME.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_`;
+export const ENV_PROXY_USERNAME = `${ENV_PREFIX}PROXY_USERNAME`;
+export const ENV_PROXY_PASSWORD = `${ENV_PREFIX}PROXY_PASSWORD`;
+
+/** The end of the reason the survey gives when the proxy of the system cannot be followed: how to probe with the CLI. */
+export const ROUTING_ADVICE = 'to probe, run with --proxy none when this machine reaches the site directly, or with --proxy http://host:port for the proxy it goes through';
+
+/** How the browser of the CLI reaches the pages (`--proxy`, `run.proxy`). */
+export type ProxyChoice = { kind: 'system' } | { kind: 'none' } | { kind: 'http'; option: { server: string; username?: string; password?: string }; password?: string };
+
+/**
+ * `system`, `none`, or the address of an HTTP proxy (`http://host[:port]`, nothing after it), its
+ * credentials from the environment only. A value with credentials in it is refused without being
+ * repeated: it would be on the command line, in the config file, and in the message.
+ */
+export function proxyChoice(value: string, env: Readonly<Record<string, string | undefined>>, from: string): ProxyChoice {
+  const text = value.trim();
+  if (text === 'system') return { kind: 'system' };
+  if (text === 'none') return { kind: 'none' };
+  const usage = `${from} takes system, none, or the address of an HTTP proxy (http://host:port)`;
+  if (text.includes('@')) throw new InputError(`${usage}, without credentials: set ${ENV_PROXY_USERNAME} and ${ENV_PROXY_PASSWORD} for them. The value given is not repeated here.`);
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new InputError(`${usage}: ${text}`);
+  }
+  if (url.protocol !== 'http:') throw new InputError(`${usage}: ${text} (only HTTP proxies are followed by the copies the name-role-value check probes in)`);
+  if ((url.pathname !== '/' && url.pathname !== '') || url.search !== '' || url.hash !== '') throw new InputError(`${usage}, with nothing after the port: ${text}`);
+  const username = env[ENV_PROXY_USERNAME]?.length ? env[ENV_PROXY_USERNAME] : undefined;
+  const password = env[ENV_PROXY_PASSWORD]?.length ? env[ENV_PROXY_PASSWORD] : undefined;
+  const server = `http://${url.host}`;
+  return { kind: 'http', option: { server, ...(username !== undefined ? { username, password: password ?? '' } : {}) }, ...(password !== undefined ? { password } : {}) };
+}
+
 export const ENV_BASE_URL = `${ENV_PREFIX}AI_BASE_URL`;
 export const ENV_MODEL = `${ENV_PREFIX}AI_MODEL`;
 export const ENV_KEY_ENV = `${ENV_PREFIX}AI_KEY_ENV`;
@@ -119,6 +154,15 @@ Checks
                         buttons and expose their state, in copies of the
                         page in a browser of their own without network; each
                         copy's load is a page view (GET) on the site
+      --proxy <how>     How the browser reaches the pages, and the copies probed
+                        in read them: system (default: as the system says), none
+                        (directly: the browser gets --no-proxy-server), or the
+                        address of an HTTP proxy, http://host:port. Credentials
+                        of the proxy come from ${ENV_PREFIX}PROXY_USERNAME and
+                        ${ENV_PREFIX}PROXY_PASSWORD, never from the address.
+                        Where the system detects a proxy by itself (Windows'
+                        "Automatically detect settings", on by default) or sets
+                        one, controls are activated only with none or a proxy
       --no-axe-overlap  name-role-value: leave out what axe-core also reports
                         (empty names of buttons, links and fields, required
                         states and context, focusable content under
@@ -381,6 +425,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
         'no-ai': { type: 'boolean' },
         'no-probe': { type: 'boolean' },
         'no-axe-overlap': { type: 'boolean' },
+        proxy: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -491,6 +536,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   if (maxUrls !== undefined) run.maxUrls = maxUrls;
   if (values['any-origin']) run.sameOrigin = false;
   if (values['allow-http-errors']) run.httpErrorIsFailure = false;
+  if (values.proxy !== undefined) run.proxy = values.proxy;
 
   const nameRoleValue = { ...fromFile.nameRoleValue };
   if (values['no-probe']) nameRoleValue.probe = 'off';
@@ -500,6 +546,14 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   const config = resolveConfig(input);
   const settings = config.adjudication;
   const limits = config.run;
+  let proxy: ProxyChoice;
+  try {
+    proxy = proxyChoice(limits.proxy, env, values.proxy !== undefined ? '--proxy' : 'run.proxy of the config file');
+  } catch (error) {
+    if (!(error instanceof InputError)) throw error;
+    io.stderr(`${error.message}\n`);
+    return EXIT_ERROR;
+  }
 
   // The files a run depends on are read before anything is scanned: a baseline that cannot be
   // used, or a storage state that is not one, stops here and not after minutes of scanning.
@@ -526,7 +580,7 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   // this: addresses lose their credentials and secret query values, and the values of the model
   // key and of the stored session are replaced. It is applied to texts, before a report is made
   // of them, and never to a serialised report.
-  const secrets = [...secretsOf(settings, env), ...storageSecrets];
+  const secrets = [...secretsOf(settings, env), ...storageSecrets, ...(proxy.kind === 'http' && proxy.password ? [proxy.password] : [])];
   const shown = (url: string): string => publicUrl(url, limits.redactQueryParams);
   const safe = (text: string): string => redactText(scrubAddresses(text, limits.redactQueryParams), secrets);
   const withModel = settings.provider !== 'none';
@@ -612,7 +666,12 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
       }
       heldToOrigin(page.url());
       // The copies the name-role-value check probes in get the credentials of the address too, for its origin only.
-      const probeContext = target.credentials ? { httpCredentials: { ...target.credentials, origin: new URL(target.address).origin } } : {};
+      // They are told how the browser reaches the network when --proxy says it, and how to say it when the system's cannot be followed.
+      const probeContext: ProbeContextOptions = {
+        ...(target.credentials ? { httpCredentials: { ...target.credentials, origin: new URL(target.address).origin } } : {}),
+        ...(proxy.kind === 'none' ? { proxy: null } : proxy.kind === 'http' ? { proxy: proxy.option } : {}),
+        routingAdvice: ROUTING_ADVICE,
+      };
       const scanner = new A11yVision({ page, probeContext }).options(input);
       if (withModel) {
         scanner.withAdjudication({}, { env, ...(values['no-ai-cache'] ? {} : { cacheFile: values['ai-cache'] ?? DEFAULT_CACHE_FILE }) });
@@ -623,6 +682,11 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
       // From here on, the texts that came from the page hold no session value and no credentials.
       const result = cleanResult(read, safe, shown);
       if (stats) io.stderr(`${safe(describeStats(stats))}\n`);
+      // Probing that did not start because of how the page reaches the network: said where it is seen, with how to change it.
+      const probed = result.findings.find((finding) => finding.rule === 'name-role-value/survey')?.evidence.values;
+      if (probed?.['probeStopped'] === 'routing' && typeof probed['probeStoppedDetail'] === 'string') {
+        io.stderr(`name-role-value did not probe ${safe(result.url)}: ${probed['probeStoppedDetail']}.\n`);
+      }
       if (result.environment.navigatedFrom !== undefined) {
         io.stderr(`The page went from ${safe(result.environment.navigatedFrom)} to ${safe(result.url)} while it was being read. The findings are those of ${safe(result.url)}.\n`);
       }
@@ -637,7 +701,8 @@ export async function main(argv: string[], io: Io = processIo, env: Readonly<Rec
   if (!single) report.input = { otherOrigin: targets.otherOrigin, overLimit: targets.overLimit, duplicates: targets.duplicates };
   const crops: Record<string, Png>[] = [];
 
-  const browser = await chromium.launch();
+  // How the pages are reached is the owner's to say: by default, as the system says.
+  const browser = await chromium.launch(proxy.kind === 'none' ? { args: ['--no-proxy-server'] } : proxy.kind === 'http' ? { proxy: proxy.option } : {});
   try {
     for (const [index, target] of targets.pages.entries()) {
       // The address as it may be written: the one that is opened stays in `target`.

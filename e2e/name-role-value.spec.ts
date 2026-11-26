@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
@@ -343,7 +343,7 @@ test.describe('the reads of the copies go where the page under test reads, or no
     // The name of the page is localhost; the browser of the page sends it to the fixture server (a staging server).
     const staging = new URL(baseURL!).host;
     const rules = `MAP localhost:${real.port} ${staging}`;
-    const browser = await playwright.chromium.launch({ args: [`--host-resolver-rules=${rules}`] });
+    const browser = await playwright.chromium.launch({ args: ['--no-proxy-server', `--host-resolver-rules=${rules}`] });
     try {
       const page = await browser.newPage();
       await page.goto(`http://localhost:${real.port}/name-role-value/link-button.html`);
@@ -490,6 +490,103 @@ test.describe('the reads of the copies go where the page under test reads, or no
   });
 });
 
+test.describe("the CLI's --proxy", () => {
+  test.slow();
+  type CliModule = { main(argv: string[], io: { stdout(text: string): void; stderr(text: string): void }, env?: Record<string, string | undefined>): Promise<number> };
+  type RoutingModule = { setSystemReaders(readers: { run(file: string, args: string[]): Promise<string | null>; readFile(path: string): Promise<string | null>; home: string } | null, env?: Record<string, string>): void };
+  const modules = async () => ({
+    cli: (await import(new URL('../packages/cli/dist/main.js', import.meta.url).href)) as CliModule,
+    routing: (await import(new URL('../packages/playwright/dist/probe-routing.js', import.meta.url).href)) as RoutingModule,
+  });
+  /** The CLI in this process, its output kept. */
+  const inProcess = async (cli: CliModule, args: string[], env: Record<string, string | undefined> = {}) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await cli.main(args, { stdout: (text) => void (stdout += text), stderr: (text) => void (stderr += text) }, env);
+    return { code, stdout, stderr };
+  };
+  /** A system whose settings set a proxy, on every platform: Windows' Internet Settings, macOS's scutil, the environment elsewhere. */
+  const systemWithProxy = {
+    run: (file: string) => Promise.resolve(file === 'reg' ? '    ProxyEnable    REG_DWORD    0x1\n    ProxyServer    REG_SZ    corp-proxy.test:8080\n' : file === 'scutil' ? 'HTTPEnable : 1\nHTTPProxy : corp-proxy.test\n' : null),
+    readFile: () => Promise.resolve(null),
+    home: '',
+  };
+
+  test('where the system sets a proxy: no control is activated, and the report and the output say why and how to probe; with --proxy none, controls are activated', async ({ baseURL }) => {
+    const { cli, routing } = await modules();
+    routing.setSystemReaders(systemWithProxy, { http_proxy: 'http://corp-proxy.test:8080' });
+    try {
+      const url = `${baseURL}/name-role-value/link-button.html`;
+      const stopped = await inProcess(cli, ['scan', url, '--checks', 'name-role-value']);
+      const values = survey((JSON.parse(stopped.stdout) as { a11yVision: { findings: Finding[] } }).a11yVision.findings);
+      expect(values['probeStopped']).toBe('routing');
+      const detail = String(values['probeStoppedDetail']);
+      expect(detail).toContain('uses the proxy of the system');
+      expect(detail).toContain('no control was activated and what controls do was not examined');
+      expect(detail).toContain('run with --proxy none when this machine reaches the site directly, or with --proxy http://host:port');
+      expect(stopped.stderr).toContain(`name-role-value did not probe ${url}: ${detail}.`);
+      const direct = await inProcess(cli, ['scan', url, '--checks', 'name-role-value', '--proxy', 'none']);
+      const probed = survey((JSON.parse(direct.stdout) as { a11yVision: { findings: Finding[] } }).a11yVision.findings);
+      expect(probed['probeStopped']).toBeUndefined();
+      expect(Number(probed['probesDone'])).toBeGreaterThan(0);
+      expect(String(probed['copyReadsRoute'])).toBe('direct');
+      expect(direct.stderr).not.toContain('did not probe');
+    } finally {
+      routing.setSystemReaders(null);
+    }
+  });
+
+  test('--proxy http://127.0.0.1:<port>: the page and the reads of its copies go through that proxy, with the credentials of the environment, which are written nowhere', async ({ baseURL }) => {
+    const { cli } = await modules();
+    const fixtures = new URL(baseURL!);
+    const asked: string[] = [];
+    const proxy = createServer((request, response) => {
+      asked.push(`${request.method} ${request.url} auth=${request.headers['proxy-authorization'] ? 'yes' : 'no'}`);
+      if (!request.headers['proxy-authorization']) {
+        response.writeHead(407, { 'proxy-authenticate': 'Basic realm="test"' }).end();
+        return;
+      }
+      const target = new URL(request.url ?? '/');
+      const headers = { ...request.headers };
+      delete headers['proxy-authorization'];
+      const forward = httpRequest({ host: fixtures.hostname, port: fixtures.port, method: request.method, path: target.pathname + target.search, headers }, (answer) => {
+        response.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(response);
+      });
+      forward.on('error', () => response.destroy());
+      request.pipe(forward);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const server = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    try {
+      const url = `${baseURL}/name-role-value/link-button.html`;
+      const { code, stdout, stderr } = await inProcess(cli, ['scan', url, '--checks', 'name-role-value', '--proxy', server], { A11Y_VISION_PROXY_USERNAME: 'scanner', A11Y_VISION_PROXY_PASSWORD: 'proxy-secret-123' });
+      expect(code).not.toBe(2);
+      const values = survey((JSON.parse(stdout) as { a11yVision: { findings: Finding[] } }).a11yVision.findings);
+      expect(values['probeStopped']).toBeUndefined();
+      expect(Number(values['probesDone'])).toBeGreaterThan(0);
+      expect(String(values['copyReadsRoute'])).toBe(`proxy ${server}`);
+      // The page, then its copy: each asked of the proxy, with its credentials once it asked for them.
+      const documents = asked.filter((entry) => entry.startsWith(`GET ${url} auth=yes`));
+      expect(documents.length).toBeGreaterThanOrEqual(2);
+      expect(`${stdout}${stderr}`).not.toContain('proxy-secret-123');
+    } finally {
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  });
+
+  test('a value it cannot use is a usage error (exit code 2), and credentials written in it are not repeated', async () => {
+    const { cli } = await modules();
+    for (const value of ['bogus', 'socks5://127.0.0.1:1080', 'https://proxy.test:443', 'http://proxy.test:8080/path', 'http://user:hunter2@proxy.test:8080']) {
+      const { code, stdout, stderr } = await inProcess(cli, ['scan', 'http://127.0.0.1:9/', '--proxy', value]);
+      expect(code, value).toBe(2);
+      expect(stdout).toBe('');
+      expect(stderr, value).toContain('--proxy takes system, none, or the address of an HTTP proxy');
+      expect(stderr).not.toContain('hunter2');
+    }
+  });
+});
+
 test.describe('the copy must be the page', () => {
   test.slow();
 
@@ -548,6 +645,64 @@ test.describe('probing is bounded and spends its probes on open questions', () =
     expect(withProbing - withoutProbing).toBeLessThan(4000 + 8000);
     // The 100 toggle buttons; never the 100 checkboxes (native fields) nor the 100 links with an address and no handler.
     expect(Number(values['probesPlanned'])).toBe(100);
+  });
+
+  test('a CLI scan that probes exits as soon as it has printed its report: nothing of the probing keeps it alive', async ({ baseURL }) => {
+    const child = spawn(process.execPath, [bin, 'scan', `${baseURL}/name-role-value/link-button.html`, '--checks', 'name-role-value'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    let printed = 0;
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += String(chunk);
+      printed = Date.now();
+    });
+    child.stderr.resume();
+    const exited = await new Promise<number>((resolve) => child.once('exit', () => resolve(Date.now())));
+    const report = JSON.parse(output) as { a11yVision: { findings: Finding[] } };
+    expect(Number(survey(report.a11yVision.findings)['probesDone'])).toBeGreaterThan(0);
+    // It was 10 s (a timer of the closing of the probing browser that was never cleared).
+    expect(exited - printed).toBeLessThan(3000);
+  });
+
+  test('a probing browser killed in the middle of a scan: the scan ends within its budget, and says so', async ({ page }) => {
+    await page.goto('/name-role-value/legit-patterns.html');
+    const { collectSnapshot } = (await import(new URL('../packages/collector-cdp/dist/index.js', import.meta.url).href)) as typeof CollectorModule;
+    const cdpSession = await page.context().newCDPSession(page);
+    const host = playwrightProbeHost(page);
+    let started = 0;
+    let killed = false;
+    const killing = {
+      start: async () => {
+        const probe = await host.start();
+        started = Date.now();
+        const { processInfo } = (await probe.browser.send('SystemInfo.getProcessInfo')) as { processInfo: { type: string; id: number }[] };
+        const pid = processInfo.find((entry) => entry.type === 'browser')!.id;
+        // Once the first copy is loading or probed.
+        setTimeout(() => {
+          killed = true;
+          process.kill(pid);
+        }, 2500);
+        return probe;
+      },
+    };
+    try {
+      const budget = 8000;
+      const snapshot = await collectSnapshot(
+        {
+          send: (method, params) => cdpSession.send(method as never, params as never),
+          on: (event, handler) => void cdpSession.on(event as never, handler as never),
+          off: (event, handler) => void cdpSession.off(event as never, handler as never),
+        },
+        resolveConfig({ checks: ['name-role-value'], nameRoleValue: { probeBudgetMs: budget } }),
+        { probeHost: killing },
+      );
+      const ended = Date.now();
+      expect(killed).toBe(true);
+      expect(snapshot.nameRoleValue!.probe.stopped).toBe('crash');
+      // The budget, and the close of what is left of the browser: not two waits of 10 s for events that never come.
+      expect(ended - started).toBeLessThan(budget + 2500);
+    } finally {
+      await cdpSession.detach().catch(() => undefined);
+    }
   });
 
   test('a probe that demonstrably changed nothing leaves its copy to the next probe', async ({ page }) => {

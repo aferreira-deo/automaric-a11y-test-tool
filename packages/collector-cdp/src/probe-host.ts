@@ -97,9 +97,37 @@ export interface ProbeFetchResponse {
   status: number;
   /** Header lines as received, `set-cookie` once per cookie; without the content encoding (the body is decoded). */
   headers: { name: string; value: string }[];
-  body: string;
+  /** The body, decoded, as bytes: kept so, and encoded only as it is given to a copy (base64 would hold a third more, for every read kept). */
+  body: Uint8Array;
   /** Size of the body in bytes. */
   size: number;
+}
+
+/**
+ * Text with the user information of every address in it removed, whatever a password holds
+ * (`= ; , ( [ " : / ? @`, escapes): in each run of text without spaces that holds an `@`,
+ * everything up to its last `@` goes, but for what is known to hold no credentials before it (a
+ * bracket or quote, a `name=` of a variable, a `scheme://`). `http://user:p=ss@proxy:3128` becomes
+ * `http://proxy:3128`, `http_proxy=user:p@ss@proxy:3128` becomes `http_proxy=proxy:3128`. It may
+ * take more than the credentials (an `@` in a path): never less. Messages that say where a proxy is
+ * are built from its parsed host and port; this is for free text.
+ */
+export function withoutUserInfo(text: string): string {
+  return text.replace(/\S+/g, (run) => {
+    const at = run.lastIndexOf('@');
+    if (at < 0) return run;
+    const kept = /^[("'<[]*(?:[A-Za-z_][A-Za-z0-9_]*=)?(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/)?/.exec(run)?.[0] ?? '';
+    return `${kept}${run.slice(at + 1)}`;
+  });
+}
+
+/** Bytes as base64, here and in a browser alike. */
+export function base64Of(bytes: Uint8Array): string {
+  const buffer = (globalThis as { Buffer?: { from(data: ArrayBufferLike, offset: number, length: number): { toString(encoding: string): string } } }).Buffer;
+  if (buffer) return buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
+  let binary = '';
+  for (let index = 0; index < bytes.byteLength; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
 }
 
 export interface ProbeBrowser {
@@ -117,7 +145,7 @@ export interface ProbeBrowser {
    */
   firstPartyCookiesOnly?: string;
   /**
-   * Sends a read to a server on behalf of a copy, and returns the response, the body as base64.
+   * Sends a read to a server on behalf of a copy, and returns the response, the body as bytes.
    * GET and HEAD only: anything else is refused here as well as by the collector. Redirects are
    * returned, not followed. The read goes where the page under test's own request would go (its
    * proxy, its host rules), or nowhere: a read the page routes itself, or one to a private address
@@ -128,6 +156,8 @@ export interface ProbeBrowser {
   fetch(request: ProbeFetchRequest, limits: ProbeReadLimits): Promise<ProbeFetchResponse>;
   /** Connections the probing browser opened by itself, all refused: what the interception did not see. */
   refusedConnections(): number;
+  /** Settles when the probing browser is gone (closed, crashed, killed): nothing it would report is waited for after that. */
+  ended?: Promise<void>;
   /** Closes the browser: every copy, and every request still held, goes with it; every read still under way is stopped and its connections closed. */
   close(): Promise<void>;
 }

@@ -1285,6 +1285,13 @@ export interface RunConfig {
    * gets the address as it was given.
    */
   redactQueryParams: string[];
+  /**
+   * How the CLI's browser reaches the pages (`--proxy`): `system` (as the system says, the
+   * default), `none` (directly, `--no-proxy-server`), or the address of an HTTP proxy
+   * (`http://host:port`, without credentials: they come from the environment). The copies the
+   * name-role-value check probes in are told the same.
+   */
+  proxy: string;
 }
 
 /** How an element is named in a finding: its selector and its signature. Read by the collector. */
@@ -2330,13 +2337,14 @@ export interface NameRoleValueConfig {
    */
   activationTimerMaxMs: number;
   /**
-   * A timer that sets itself again from its own callback (a poll every 100 ms) is a loop, not
-   * something still to happen, once it has done so more than this many times while the copy stayed
-   * quiet (no element or attribute changed): it is no longer waited for, and not `timerPending`.
-   * One whose runs change the page (an animation by script) is waited for as any other. Timers armed
-   * by what listens to every click (analytics, a delegated poll), told apart by an activation of a
-   * neutral spot of each copy before its first probe, are waited for only when due within
-   * `activationTimerMaxMs`, and never `timerPending`.
+   * Timers armed by what listens to every click (analytics, a delegated router, a poll) are told
+   * apart by an activation of a neutral spot of each copy before its first probe, and run there once,
+   * to their end, ahead of their time: those seen to change nothing while they ran are run ahead of
+   * their time in each probe too, at once, so that what they do for that element is seen without
+   * waiting (a router that navigates for some links only). This many runs at most, each time: a
+   * chain that goes on longer (a poll that never ends) is still pending (`timerPending`). Every
+   * other timer, polls of the control's own included, is waited for while due within
+   * `activationTimerMaxMs`.
    */
   activationTimerChainMax: number;
   /** A CSS selector; elements that match it, or are inside an element that does, are never activated. */
