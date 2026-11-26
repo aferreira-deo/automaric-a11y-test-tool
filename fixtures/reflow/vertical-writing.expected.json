@@ -1,0 +1,8 @@
+{
+  "description": "A document in a vertical writing mode (vertical-rl) grows to the left: what lies left of the viewport is reached by scrolling left, so nothing is lost or parked.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

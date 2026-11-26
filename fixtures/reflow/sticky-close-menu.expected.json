@@ -1,0 +1,9 @@
+{
+  "description": "A button to close the menu, in a sticky header, closes the menu, not the header: the header is not dismissible, and sticky-obscures is likely.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": [] }
+  ]
+}

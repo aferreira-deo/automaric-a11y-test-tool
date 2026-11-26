@@ -1,4 +1,4 @@
-import { beyondAxisOf, fnv1a64, reflowPassReport, reflowPixelPlan } from '@a11y-vision/core';
+import { beyondAxisOf, fnv1a64, reflowPassReport, reflowPixelPlan, reflowPixelRoles } from '@a11y-vision/core';
 import type { Config, ReflowLayer, ReflowLayout, ReflowPassName, ReflowPixelTest, ReflowRect, ReflowSurvey } from '@a11y-vision/core';
 import type { StablePage } from './page.js';
 import { REFLOW_AGENT_GLOBAL, reflowAgentFactory } from './reflow-agent.js';
@@ -26,8 +26,12 @@ export function reflowAgentOptions(config: Config): AgentReflowOptions {
     settleMotionMs: settings.settleMotionMs,
     settleBudgetMs: settings.settleBudgetMs,
     dismissWords: settings.dismissWords,
-    carouselControlLevels: settings.carouselControlLevels,
+    dismissMaxNameWords: settings.dismissMaxNameWords,
+    menuWords: settings.menuWords,
     carouselControlWords: settings.carouselControlWords,
+    carouselRoleWords: settings.carouselRoleWords,
+    iconFontFamilyPattern: config.icon.iconFontFamilyPattern,
+    coverMinHitShare: settings.coverMinHitShare,
   };
 }
 
@@ -124,7 +128,7 @@ export async function collectReflow(page: StablePage, config: Config, original: 
     const seen = new Set<number>();
     // A document that does not scroll, with a scroll container that holds the page (an application shell):
     // that container is scrolled to look at what sticks in it.
-    const shell = read.maxScroll.y <= settings.scrollToleranceCssPx ? await reflow<{ key: number; max: number } | null>(`mainScroller(${settings.mainScrollerMinShare})`) : null;
+    const shell = read.maxScroll.y <= settings.scrollToleranceCssPx ? await reflow<{ key: number; max: number } | null>(`mainScroller(${settings.mainScrollerMinTextShare})`) : null;
     const max = shell ? shell.max : read.maxScroll.y;
     for (const share of settings.stickyScrollPositions) {
       const y = Math.round(max * share);
@@ -136,8 +140,29 @@ export async function collectReflow(page: StablePage, config: Config, original: 
     // Back to where the layout was read: the scroll positions of the layout are those of the read.
     if (shell) await reflow(`scrollElement(${shell.key}, ${Math.round(read.clips.find((clip) => clip.key === shell.key)?.scroll[3] ?? 0)})`);
     await reflow('scrollTo(0, 0)');
-    const waits = await reflow<{ motion: number; budgetSpent: boolean }>('waits()');
-    return { pass, requested, settled, ...read, scrolls, pixels: {}, captures: {}, ...(waits.motion > 0 ? { motion: waits.motion } : {}), ...(waits.budgetSpent ? { budgetSpent: true } : {}) };
+    const waits = await reflow<{ motion: number; budgetSpent: boolean; boxes: ReflowRect[] }>('waits()');
+    return {
+      pass,
+      requested,
+      settled,
+      ...read,
+      scrolls,
+      pixels: {},
+      captures: {},
+      ...(waits.motion > 0 ? { motion: waits.motion } : {}),
+      ...(waits.budgetSpent ? { budgetSpent: true } : {}),
+      ...(waits.boxes.length > 0 ? { motionBoxes: waits.boxes } : {}),
+    };
+  };
+
+  /** What is known to move by itself, from the waits so far: added to what the layout already holds. */
+  const moreMotion = async (layout: ReflowLayout): Promise<void> => {
+    const waits = await reflow<{ motion: number; budgetSpent: boolean; boxes: ReflowRect[] }>('waits()');
+    if (waits.motion > 0) layout.motion = Math.max(layout.motion ?? 0, waits.motion);
+    if (waits.budgetSpent) layout.budgetSpent = true;
+    const known = new Set((layout.motionBoxes ?? []).map((box) => box.join(',')));
+    const added = waits.boxes.filter((box) => !known.has(box.join(',')));
+    if (added.length > 0) layout.motionBoxes = [...(layout.motionBoxes ?? []), ...added];
   };
 
   /** Captures the overlaps core asks to test by pixels: the region as it is, then with one text transparent, the other hidden, and so on. */
@@ -159,10 +184,10 @@ export async function collectReflow(page: StablePage, config: Config, original: 
         continue;
       }
       test.top = top === 'a' || top === 'b' ? top : 'unknown';
-      // The text is painted over the box (or over decoration): nothing of it is covered, and there is nothing to capture.
-      if ((candidate.kind === 'box' || candidate.coverOnly) && top === 'a') continue;
-      const victim = candidate.kind === 'text' && !candidate.coverOnly && top === 'a' ? candidate.b : candidate.a;
-      const cover = victim === candidate.a ? candidate.b : candidate.a;
+      // The text is painted over the box (or over decoration laid out behind it): nothing of it is covered, and there is nothing to capture.
+      const roles = reflowPixelRoles(candidate, test.top);
+      if (!roles) continue;
+      const { victim, cover } = roles;
       const base = `reflow/${fnv1a64(JSON.stringify([layout.pass, 'overlap', selectorOf(victim), selectorOf(cover)]))}`;
       const shot = async (suffix: string, clear: number[], hide: number[]): Promise<string | null> => {
         if (clear.length + hide.length > 0 && !(await reflow<boolean>(`paint(${JSON.stringify(clear)}, ${JSON.stringify(hide)})`))) {
@@ -189,6 +214,8 @@ export async function collectReflow(page: StablePage, config: Config, original: 
       }
       test.crops = { normal, victimClear, coverClear, bothClear, coverHidden, coverHiddenVictimClear };
     }
+    // What moved while the tests were captured: it decides whether a confirmed overlap may be a passing moment.
+    await moreMotion(layout);
   };
 
   /** Names what the findings of a pass are about and captures their evidence, at the viewport of the pass. */
@@ -226,9 +253,7 @@ export async function collectReflow(page: StablePage, config: Config, original: 
     }
     await reflow('scrollTo(0, 0)');
     // The waits of the captures count too.
-    const waits = await reflow<{ motion: number; budgetSpent: boolean }>('waits()');
-    if (waits.motion > 0) layout.motion = Math.max(layout.motion ?? 0, waits.motion);
-    if (waits.budgetSpent) layout.budgetSpent = true;
+    await moreMotion(layout);
   };
 
   try {

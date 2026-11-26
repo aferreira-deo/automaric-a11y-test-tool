@@ -1,0 +1,9 @@
+{
+  "description": "The document of a same-origin frame clips horizontally (overflow-x: hidden on its own body): its viewport is no scroller on that axis, and the text it cuts is lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "An aria-roledescription that does not say carousel, on an ancestor, makes nothing a carousel: the text the card cuts is lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

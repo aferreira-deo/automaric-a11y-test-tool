@@ -1,0 +1,9 @@
+{
+  "description": "In an application shell the readable part is the box of the scroller that holds the page: the bars around it, sticky or not, are not read in. At 256 px it shows less than half of the viewport: likely.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div > div:nth-of-type(2)", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["mainScroller", "scrollerBox"] }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "description": "A spinner that a script keeps moving far from an overlap does not lower it: the overlap the pixels confirm is a failure.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div:nth-of-type(1) > h1", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/text-overlap", "flags": ["glyphsOverlap", "pixelConfirmed", "textOnText"] }
+  ]
+}

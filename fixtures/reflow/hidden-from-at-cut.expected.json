@@ -1,0 +1,10 @@
+{
+  "description": "Visible text hidden from assistive technology is measured as what is seen: the aria-hidden promotion that is cut is advisory (hiddenFromAT); the other one fails.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div:nth-of-type(1)", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor", "hiddenFromAT"] },
+    { "selector": "html > body > main > div:nth-of-type(2)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

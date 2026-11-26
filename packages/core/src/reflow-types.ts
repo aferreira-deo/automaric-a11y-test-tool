@@ -39,11 +39,19 @@ export interface ReflowViewport {
   /** The overflow of the viewport: that of the root element, or that of `body` when the root leaves it `visible` (propagation). */
   overflowX: ReflowOverflow;
   overflowY: ReflowOverflow;
-  /** The root is laid out right to left: horizontal overflow goes to the left. */
+  /**
+   * The horizontal axis of the root starts at the right: its overflow, and the reach of scrolling, go to the left.
+   * Text laid out right to left, or lines laid out from the right (`writing-mode: vertical-rl`).
+   */
   rtl: boolean;
   /** The root has a vertical writing mode: its lines run top to bottom and the page grows sideways. */
   vertical?: boolean;
+  /** The root (or body) lays its children out as one horizontal track: it snaps horizontally (`snap`), or is a flex row that does not wrap (`flex`). */
+  track?: 'snap' | 'flex';
 }
+
+/** Out of the flow: positioned `absolute` or `fixed` (to the viewport), or `moved` off its place as a block by a translation or a negative margin of half its size or more; it or an ancestor. */
+export type ReflowPlaced = 'absolute' | 'fixed' | 'moved';
 
 /**
  * An element that clips what it holds on at least one axis: overflow other than `visible`,
@@ -66,10 +74,11 @@ export interface ReflowClipBox {
   /** It, or its parent, holds a control that may show what it hides: a button, a `summary`, an element with `aria-expanded`. */
   revealControl?: boolean;
   /**
-   * The viewport of a carousel: scroll snapping; `aria-roledescription` on it or around it; it or the track it
-   * holds is named in `aria-controls` of a control; previous, next or pagination controls in the region it
-   * shares with them (`carouselControlLevels` ancestors up); or a track wider than it, moved by a translation
-   * or with a declared transition of its position.
+   * The viewport of a carousel, on evidence tied to it: a visible control names it or its track in `aria-controls`;
+   * it is inside a carousel root (the nearest `aria-roledescription` of `carouselRoleWords`, or a region or group
+   * labelled so) that holds a visible control outside of it; it snaps, or its track moves (a script keeps moving
+   * it, an animation repeats for ever, a transition of its position runs, or it snaps); or buttons named previous
+   * or next (`carouselControlWords`) are beside it in a wrapper that holds nothing else. Links never count.
    */
   carousel?: boolean;
   /** Its content is moved through it by an animation (a ticker, a marquee): see `ReflowText.moving`. */
@@ -82,6 +91,8 @@ export interface ReflowClipBox {
   frame?: boolean;
   /** Inside a fixed or sticky layer: the key of the layer. */
   layer?: number;
+  /** In the document of a frame: its body is not the viewport of the page. */
+  inFrame?: boolean;
 }
 
 /** The visible text of one element: what its own text nodes lay out. */
@@ -105,14 +116,28 @@ export interface ReflowText {
   ruby?: number;
   /** In a dialog, a menu, a list box or a tooltip. */
   popup?: boolean;
-  /** Under `aria-hidden="true"` or `inert`: decoration. Never the victim of a rule nor the cause of a failure. */
+  /**
+   * Under `aria-hidden="true"` or `inert`, and no more than a glyph (no letter and no digit, a single character, a
+   * character of private use, an icon font): decoration, left out of every rule.
+   */
   decorative?: boolean;
+  /**
+   * Under `aria-hidden="true"` or `inert`, and text: what is seen is measured as other text is, but what is found
+   * about it alone is `advisory` at most (`hiddenFromAT`), and it is never the one made unreadable by real text
+   * painted over it, nor by anything when it is placed out of the flow under real text (decoration behind it).
+   */
+  hiddenFromAT?: boolean;
+  /** Out of the flow (`ReflowPlaced`). */
+  placed?: ReflowPlaced;
   /**
    * It, or an element it is in, moves by itself: a CSS animation is declared on it, an animation or a transition
    * was running when the scan began, or a script kept changing its style while the layout was waited for.
    */
   moving?: boolean;
-  /** It is, or is inside, an element that a visible control names in `aria-controls`: what such a control may show. */
+  /**
+   * Shown on demand: it is, or is inside, an element a visible control names (`aria-controls`, `popovertarget`,
+   * `commandfor`), a `dialog`, a `popover`, or `hidden="until-found"`.
+   */
   controlled?: boolean;
   /** The start of its text, white space collapsed. */
   sample: string;
@@ -135,6 +160,9 @@ export interface ReflowBox {
   inline?: boolean;
   /** Under `aria-hidden="true"` or `inert`. */
   decorative?: boolean;
+  /** As `ReflowText.controlled` and `ReflowText.placed`. */
+  controlled?: boolean;
+  placed?: ReflowPlaced;
   tag: string;
 }
 
@@ -155,9 +183,20 @@ export interface ReflowLayer {
   painted: ReflowRect[];
   /** A dialog: the element itself has the role `dialog` or `alertdialog`, `aria-modal`, or is an open `dialog`. What it holds, hidden or not, does not count. */
   dialog?: boolean;
-  /** Modal: `aria-modal="true"` on it or on a visible dialog it holds, or a `dialog` opened modally (`:modal`). */
+  /**
+   * Modal: `aria-modal="true"` on it or on a dialog it holds, a `dialog` opened modally (`:modal`), or an open
+   * popover; shown, and in the viewport.
+   */
   modal?: boolean;
-  /** It holds a visible control whose accessible name contains one of `dismissWords` (close, accept, refuse...). */
+  /** Over the page: the browser's hit test finds it on top at `coverMinHitShare` of points of the viewport it covers at least. */
+  covers?: boolean;
+  /** Under the page: the hit test finds it at none of those points (a background with a negative z-index). It hides nothing. */
+  behind?: boolean;
+  /**
+   * It holds a button shown in the viewport and in it whose accessible name is, or starts with, one of
+   * `dismissWords` (close, accept, refuse...), in `dismissMaxNameWords` words at most, naming no menu or
+   * navigation (`menuWords`); never in a header or a navigation unless it is a dialog itself.
+   */
   dismissControl?: boolean;
   /** A landmark: `header`, `footer`, `nav`, `aside` or their roles. */
   landmark?: boolean;
@@ -214,6 +253,8 @@ export interface ReflowLayout {
   settled: boolean;
   /** Elements that kept moving by script after `settleMotionMs`: their changes were no longer waited for (`unsettled`). */
   motion?: number;
+  /** Where what is known to move by itself is (a script kept changing it, an animation repeats for ever), page coordinates. */
+  motionBoxes?: ReflowRect[];
   /** The waits of this pass used up `settleBudgetMs`: the later ones were cut short. */
   budgetSpent?: boolean;
   texts: ReflowText[];
@@ -228,7 +269,7 @@ export interface ReflowLayout {
   disclosures: number[];
   /**
    * Fixed and sticky elements at each scroll position of `stickyScrollPositions`; the first is the top. When the
-   * document does not scroll and one scroll container covers most of the viewport (`mainScrollerMinShare`), the
+   * document does not scroll and one scroll container holds most of its text (`mainScrollerMinTextShare`), the
    * positions are those of that container (`ReflowScrollState.scroller`).
    */
   scrolls: ReflowScrollState[];
@@ -342,29 +383,33 @@ export interface ReflowConfig {
   /** Elements looked at inside a fixed or sticky element that paints nothing itself. */
   layerMaxDescendants: number;
   /**
-   * A layer counts as one a user can dismiss when it is itself a visible, open dialog, or when it holds a
-   * visible control whose accessible name contains one of `dismissWords` (whole words, any case) and at most
-   * `maxDismissControls` controls in all (a cookie banner). Hidden descendants never count.
+   * A layer counts as one a user can dismiss when it is itself a visible, open dialog, or when it holds a button
+   * shown in the viewport whose accessible name is, or starts with, one of `dismissWords` (whole words, any case),
+   * in at most `dismissMaxNameWords` words, naming none of `menuWords`, and at most `maxDismissControls` controls in
+   * all (a cookie banner). Never a layer in a header or a navigation, unless it is a dialog. Hidden descendants
+   * and links never count.
    */
   maxDismissControls: number;
   dismissWords: string[];
-  /**
-   * A clipping element is the viewport of a carousel when an ancestor at most `carouselControlLevels` up holds,
-   * outside it, a visible control whose accessible name contains one of `carouselControlWords` (previous, next,
-   * slide...), or a tab list: the arrows and dots of a slider.
-   */
-  carouselControlLevels: number;
+  dismissMaxNameWords: number;
+  menuWords: string[];
+  /** Names of the buttons beside a clip that make it a carousel (previous, next...): see `ReflowClipBox.carousel`. */
   carouselControlWords: string[];
-  /** A document that does not scroll, with a scroll container this share of the viewport or more: that container is the page (an application shell). */
-  mainScrollerMinShare: number;
+  /** Values of `aria-roledescription` (whole value, any case), and words of the label of a region or group, that make an element the root of a carousel. */
+  carouselRoleWords: string[];
+  /** A document that does not scroll, with a scroll container that holds this share of its text or more: that container is the page (an application shell). */
+  mainScrollerMinTextShare: number;
   /**
    * A page counts as laid out horizontally (positive evidence only) when its root has a vertical writing mode, or
-   * when at the baseline it scrolls horizontally and fits vertically and at least this share of its running text
-   * is laid out in lines wholly beyond the inline end, where that scrolling reaches them (a panel, a column).
+   * when at the baseline it scrolls horizontally and does not scroll vertically, and either its root (or body) is a
+   * horizontal track (`ReflowViewport.track`) or at least this share of its running text in the flow (neither
+   * positioned nor moved) is laid out in lines wholly beyond the inline end.
    */
   horizontalMinTextShare: number;
-  /** A layer that covers this share of the viewport is a full-screen layer. */
+  /** A layer that covers this share of the viewport is a full-screen layer, when the hit test finds it over the page (`ReflowLayer.covers`). */
   fullScreenLayerMinShare: number;
+  /** Share of the points of the viewport a layer covers where the hit test has to find it on top for it to be over the page. */
+  coverMinHitShare: number;
   /** Below this, `scrollHeight - clientHeight` is not something to scroll. */
   scrollToleranceCssPx: number;
   /** A nested scroller on the axis of the page counts as a second scroll bar for the main content from this share of the viewport on that axis, holding this much text. */

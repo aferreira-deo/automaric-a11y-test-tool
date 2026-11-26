@@ -1,5 +1,5 @@
 {
-  "description": "A large decorative year (aria-hidden) behind the heading of a hero. At 320 px it lies under the heading and the paragraph: decoration is never the victim of an overlap, and only ink of the real text that it hides would count; the heading is painted over it. Nothing is reported.",
+  "description": "A large year hidden from assistive technology (aria-hidden), positioned behind the heading of a hero. Visible aria-hidden text is measured as other text is, but text placed out of the flow underneath real text is decoration laid out behind it: never the covered one. At 320 px the heading and the paragraph are painted over it and stay legible, and the hero cuts less than 1 em of it. Nothing is reported.",
   "checks": ["reflow"],
   "exact": true,
   "expected": [

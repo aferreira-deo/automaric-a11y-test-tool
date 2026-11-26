@@ -1,0 +1,9 @@
+{
+  "description": "A transition declared on the child of a clip (transform among others) is no evidence of a track that slides: the text the card cuts is lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

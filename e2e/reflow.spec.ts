@@ -79,9 +79,18 @@ for (const [name, options] of Object.entries(contexts)) {
       );
 
       expect(page.viewportSize()).toEqual(viewport);
-      expect(await pageState(page)).toEqual(before);
+      expect(await pageState(page)).toEqual(asPlaywrightSends(before, viewport));
     });
   });
+}
+
+/**
+ * What the page is once Playwright has sent its emulation again: as it was, but for `screen`, which Playwright's
+ * `setViewportSize` makes the size of the viewport. Only a context created with a `screen` of its own (a device
+ * descriptor) sees a difference.
+ */
+function asPlaywrightSends<T extends { screen: number[] }>(state: T, viewport: { width: number; height: number } | null): T {
+  return viewport ? { ...state, screen: [viewport.width, viewport.height] } : state;
 }
 
 /**
@@ -106,10 +115,75 @@ for (const [name, options, setup] of emulations) {
       await new A11yVision({ page }).options({ nameRoleValue: { probe: 'off' } }).analyze();
       expect(page.viewportSize()).toEqual(viewport);
       // The focus walk ends where it started; everything else is as it was.
-      expect(await pageState(page)).toEqual(before);
+      expect(await pageState(page)).toEqual(asPlaywrightSends(before, viewport));
       // A second scan finds the same page again.
       await new A11yVision({ page }).options({ checks: ['reflow'] }).analyze();
-      expect(await pageState(page)).toEqual(before);
+      expect(await pageState(page)).toEqual(asPlaywrightSends(before, viewport));
+    });
+  });
+}
+
+/** What a page shows of its emulation. */
+function metrics(page: Page) {
+  return page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio,
+    screen: [screen.width, screen.height],
+    visual: [Math.round(window.visualViewport!.width), Math.round(window.visualViewport!.height), Math.round(window.visualViewport!.scale * 1000) / 1000],
+    mobile: typeof (window as { orientation?: unknown }).orientation === 'number',
+    touch: [navigator.maxTouchPoints, matchMedia('(pointer: coarse)').matches],
+    narrow: matchMedia('(max-width: 600px)').matches,
+  }));
+}
+
+/**
+ * After a scan nothing of the scanner's emulation is left: the page shows the emulation it had, and Playwright's
+ * own stays in charge of it, through reloads, a navigation to another site (another renderer process), and a
+ * later `setViewportSize` of the caller; a page without a viewport of Playwright's still follows its window.
+ */
+const later: [string, object, ((page: Page) => Promise<void>) | null][] = [
+  ['the default context', {}, null],
+  ['no viewport (viewport: null)', { viewport: null, deviceScaleFactor: undefined, isMobile: undefined, hasTouch: undefined }, null],
+  ['a viewport set with page.setViewportSize', {}, (page) => page.setViewportSize({ width: 900, height: 600 })],
+  ['a device scale factor of 1.5', { viewport: { width: 1000, height: 700 }, deviceScaleFactor: 1.5 }, null],
+  ['a mobile context', devices['Pixel 5'], null],
+];
+for (const [name, options, setup] of later) {
+  test(`after a scan Playwright's emulation is in charge again: ${name}`, async ({ browser, baseURL }) => {
+    test.slow();
+    // Another site: 127.0.0.1 and localhost are two sites, so going there takes another renderer process.
+    const elsewhere = `${baseURL!.replace('127.0.0.1', 'localhost')}/reflow/clean-responsive.html`;
+    await inContext(browser, baseURL, options, async (page) => {
+      if (setup) await setup(page);
+      await page.goto('/reflow/clean-responsive.html');
+      const viewport = page.viewportSize();
+      const before = await metrics(page);
+      await reflow(page).analyze();
+      const expected = asPlaywrightSends(before, viewport);
+      expect(await metrics(page)).toEqual(expected);
+      await page.reload();
+      expect(await metrics(page)).toEqual(expected);
+      await page.goto(elsewhere);
+      expect(await metrics(page)).toEqual(expected);
+      await page.goto('/reflow/clean-responsive.html');
+      if (!viewport) {
+        // The page follows its window, as it did before the scan.
+        const session = await page.context().newCDPSession(page);
+        const { windowId } = (await session.send('Browser.getWindowForTarget')) as { windowId: number };
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { width: 700, height: 500 } });
+        await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(700);
+        await session.detach();
+        return;
+      }
+      // The caller's own size holds through a reload and a navigation to another site.
+      await page.setViewportSize({ width: 600, height: 500 });
+      const set = await metrics(page);
+      expect(set).toMatchObject({ width: 600, height: 500 });
+      await page.reload();
+      expect(await metrics(page)).toEqual(set);
+      await page.goto(elsewhere);
+      expect(await metrics(page)).toEqual(set);
     });
   });
 }
@@ -179,9 +253,12 @@ async function stoppedScan(page: Page, when: string): Promise<void> {
   expect(await outcome).toBe('stopped by the test');
   await session.detach();
   // What the Playwright API does after any scan: Chrome holds one emulation per page, and the
-  // collector can only clear it; Playwright sends its own again.
+  // collector can only clear it; Playwright sends its own again, which it does for a size other than its last.
   const viewport = page.viewportSize();
-  if (viewport) await page.setViewportSize(viewport);
+  if (viewport) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height + 1 });
+    await page.setViewportSize(viewport);
+  }
 }
 
 for (const [moment, when] of [

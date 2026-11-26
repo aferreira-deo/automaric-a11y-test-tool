@@ -52,13 +52,18 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
   const v = candidate.values;
   const flags = new Set(candidate.flags);
   const where = at(candidate);
-  const tail = flags.has('viewportNotApplied')
-    ? ' Recorded as info because the viewport measured is not the one asked for.'
-    : flags.has('notSettled')
-      ? ' The layout was still changing when it was measured, so nothing is reported above likely.'
-      : flags.has('unsettled')
-        ? ' Something on the page kept moving by script while it was measured, so this is likely rather than a failure.'
-        : '';
+  const hidden = flags.has('hiddenFromAT')
+    ? ' Advisory at most: the text concerned is hidden from assistive technology (aria-hidden or inert), so it may be decoration; it is seen all the same.'
+    : '';
+  const tail =
+    hidden +
+    (flags.has('viewportNotApplied')
+      ? ' Recorded as info because the viewport measured is not the one asked for.'
+      : flags.has('notSettled')
+        ? ' The layout was still changing when it was measured, so nothing is reported above likely.'
+        : flags.has('unsettled')
+          ? ' Something that moves by itself (a script, an animation that repeats) is where the two meet, so this is likely rather than a failure.'
+          : '');
   switch (candidate.rule) {
     case REFLOW_RULES.twoDimensional: {
       if (flags.has('innerScroller')) {
@@ -85,7 +90,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.lost: {
       if (flags.has('notDisplayed')) {
         return {
-          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed${flags.has('offScreen') ? ` or parked wholly off screen (${String(v['textsMovedOffScreen'])}), where no scrolling reaches and no control names them in aria-controls` : ''}, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
+          message: `${where}, ${String(v['textsNotDisplayed'])} element(s) with text (${String(v['charsNotDisplayed'])} characters) shown at the baseline viewport are not displayed, and no control that discloses content (a menu button, a summary) appeared. The first is this element.${quote(candidate.sample)}`,
           help: HELP.notDisplayed,
         };
       }
@@ -106,6 +111,12 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
       if (flags.has('moving')) return { message: `${base} Recorded as info because what is cut moves through this element by itself (an animation, a ticker, a script), so it is shown in turn.${tail}`, help: HELP.lost };
       if (flags.has('carousel')) return { message: `${base} Recorded as info because this element is the viewport of a carousel (scroll snapping, aria-roledescription, controls that name it or previous and next controls beside it, a track that slides).${tail}`, help: HELP.lost };
       if (flags.has('revealControl')) return { message: `${base} Advisory rather than a failure because a control inside it or beside it (a button, a summary, an element with aria-expanded) may show what is hidden.${tail}`, help: HELP.lost };
+      if (flags.has('outOfFlow')) {
+        return {
+          message: `${base} Likely rather than a failure: what is cut is positioned out of the flow (absolute or fixed, or moved off its place as a block) wholly beyond the edge, as a closed panel can be, but nothing names it as content shown on demand (aria-controls, popovertarget, a dialog, a popover) and it is not hidden from assistive technology.${tail}`,
+          help: HELP.lost,
+        };
+      }
       return { message: `${base}${tail}`, help: HELP.lost };
     }
     case REFLOW_RULES.overlap: {
@@ -126,7 +137,8 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
     case REFLOW_RULES.sticky: {
       const share = Math.round(Number(v['readableShare']) * 100);
       const scrolled = flags.has('mainScroller') ? 'the scroll container that holds the page' : 'the page';
-      const base = `${where}, fixed and stuck elements leave ${share}% of the viewport to read${flags.has('afterScroll') ? ` once ${scrolled} is scrolled (${String(v['scrollY'])} px)` : flags.has('mainScroller') ? ' (the document does not scroll; the scroll container that holds the page was scrolled to look)' : ''}, under the ${Math.round(Number(v['threshold']) * 100)}% this tool asks for. ${String(v['layers'])} element(s) take part; this one takes the most room.`;
+      const leave = flags.has('scrollerBox') ? 'the scroll container that holds the page shows' : flags.has('mainScroller') ? 'the scroll container that holds the page, less the fixed and stuck elements over it, shows' : 'fixed and stuck elements leave';
+      const base = `${where}, ${leave} ${share}% of the viewport to read${flags.has('afterScroll') ? ` once ${scrolled} is scrolled (${String(v['scrollY'])} px)` : flags.has('mainScroller') ? ' (the document does not scroll; the scroll container that holds the page was scrolled to look)' : ''}, under the ${Math.round(Number(v['threshold']) * 100)}% this tool asks for. ${flags.has('scrollerBox') ? 'What lies around it (bars of the application) is not read in.' : `${String(v['layers'])} element(s) take part; this one takes the most room.`}`;
       if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the baseline viewport has the same problem (${Math.round(Number(v['readableShareAtBaseline']) * 100)}%).${tail}`, help: HELP.sticky };
       if (flags.has('loweredDismissible')) {
         return {
@@ -142,6 +154,7 @@ function messageOf(candidate: ReflowCandidate, related: (role: string) => string
       if (flags.has('modalOpen')) return { message: `${base} Recorded as info because an open modal layer (a dialog, or a layer over the whole viewport) stops the page from scrolling while it is open: what lies behind it is not lost. Its own content is measured on its own (content-lost).${tail}`, help: HELP.locked };
       if (flags.has('atBaseline')) return { message: `${base} Recorded as info because the document locks content out of reach at the baseline viewport as well (a dialog or a consent wall that stops scrolling while it is open does that at every size).${tail}`, help: HELP.locked };
       if (candidate.status === 'likely') return { message: `${base} Likely: what is out of reach is no text and no control.${tail}`, help: HELP.locked };
+      if (flags.has('hiddenFromAT')) return { message: `${base}${tail}`, help: HELP.locked };
       return { message: `${base}${tail}`, help: HELP.locked };
     }
     case REFLOW_RULES.double:

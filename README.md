@@ -1604,8 +1604,12 @@ Each pass is set with `Emulation.setDeviceMetricsOverride`, `mobile: false`, at 
   transitions and animations is in effect (see "What a scan does to the page").
 - **Motion that never settles is not waited for.** An element whose `style` or `class` a script changed three times
   is known to move; after `settleMotionMs` (600) its changes no longer count as change, and the layout records it
-  (`motion`; `narrowUnsettled`, `shortUnsettled` in the survey). Then a text-overlap confirmed by pixels is
-  `likely`, not `fail` (`unsettled`): the captures may show a passing moment. All waits of one layout (settling,
+  (`motion`; `narrowUnsettled`, `shortUnsettled` in the survey). A text-overlap confirmed by pixels is `likely`,
+  not `fail` (`unsettled`), only when something that moves by itself is where the two meet: the box of an element a
+  script kept changing, or of one with an animation that repeats for ever (read before the stabilising style sheet
+  ends them), meets one of the two or the region of the overlap; or one of the two moves itself. That is decided
+  from where the motion is, not from whether it happened to move while the region was captured: a spinner in a
+  corner or a caret that blinks elsewhere changes nothing, every time. All waits of one layout (settling,
   scrolling to the sample positions, captures) share `settleBudgetMs` (6000); once it is spent each wait is one frame
   (`…SettleBudgetSpent`). A page moved by script every frame took 23 seconds before these bounds, 5 now.
 - **A pass whose viewport is not the one asked for** (`innerWidth`, `innerHeight` measured again) reports nothing
@@ -1617,17 +1621,24 @@ clamps their ranges), same-origin frames. This happens before the other collecto
 collection fails, and after a stop: the step is registered with the page (`StablePage.onRestore`) and runs once
 the session lets commands through again.
 
-Through the Playwright API and the CLI the metrics are the page's own, read before anything was overridden: the
-size of the visual viewport at a page scale of 1, `devicePixelRatio`, mobile emulation (Chrome gives
-`window.orientation` to mobile pages only), `screen.width` and `screen.height`, and the page scale. They are set
-again through the CDP session the scan ran in, which the wrapper keeps attached to the page for as long as it
-lives: Chrome holds one device-metrics override per page and drops the one a session set when that session
-detaches, leaving the page at the size of its window and a ratio of 1. So after a scan `innerWidth`,
-`innerHeight`, `devicePixelRatio`, `screen` and every scroll position are what they were, for the default
-context, a context with `deviceScaleFactor` or `screen`, a mobile context (`isMobile`, `hasTouch`), and a page
-whose size was set with `page.setViewportSize`; `page.viewportSize()` is unchanged and true
-(`e2e/reflow.spec.ts`). A bare CDP session (`collectSnapshot` without `emulation: 'reapply'`, as the extension
-uses it) clears the override at the end instead, which is right for a tab with no emulation of its own.
+Through the Playwright API and the CLI nothing of the scan's emulation is left afterwards. Each scan opens a CDP
+session of its own and detaches it at the end. Chrome holds one device-metrics override per page, not per session:
+clearing the scan's override also drops the one Playwright had set, and Playwright sends its own again only for a
+viewport that differs from the last one it sent. So, before the scroll positions are put back, the scan's override
+is cleared and the wrapper has Playwright send its viewport again (a size one pixel taller, then its own, through
+`page.setViewportSize`): the size, device scale factor, mobile emulation and orientation of the context come back
+from Playwright's own session, which keeps them for later reloads and navigations. Then the scroll positions are put
+back in that layout. After a scan `innerWidth`, `innerHeight`, `devicePixelRatio`, the visual viewport, mobile and
+touch emulation, media queries and every scroll position are what they were, for the default context, a context
+with `deviceScaleFactor`, a mobile context (`isMobile`, `hasTouch`) and a page whose size was set with
+`page.setViewportSize`; they stay Playwright's through a reload, a navigation to another site (another renderer
+process), and a later `page.setViewportSize` of the caller, which holds through reloads; a page with
+`viewport: null` follows its window again (`e2e/reflow.spec.ts`). One thing Playwright cannot send again: a
+context created with a `screen` of its own (a device descriptor such as `Desktop Chrome` or `Pixel 5`) has `screen`
+equal to the viewport after a scan, as after any call of `page.setViewportSize`. A bare CDP session
+(`collectSnapshot`, as the extension uses it) clears the override at the end, which is right for a tab with no
+emulation of its own; `emulation: 'reapply'` sets the metrics read before the scan again through that session and
+leaves them, for a caller that keeps the session attached.
 
 **A page that reloads or navigates when the viewport changes** (`onresize=location.reload()`) stops the survey,
 not the scan: what the other collectors read before the passes stands, the survey says why it stopped
@@ -1639,11 +1650,11 @@ viewport is put back all the same.
 
 | Rule | What is measured | `fail` | lower |
 |---|---|---|---|
-| `two-dimensional-scroll` | At `narrow`, always: the document scrolls horizontally and lines of text or controls lie beyond the right edge (the left edge of a page laid out right to left), by at least `beyondMinEm` (0.5 em) for a line, `controlBeyondMinShare` (25%) of a control's width. At `short`, for a page laid out to scroll horizontally only: the same below the bottom edge. A page counts as laid out horizontally on positive evidence only (`horizontalMinTextShare`): its root has a vertical writing mode, or at the baseline it scrolls horizontally and fits vertically and running text is laid out in lines wholly beyond the inline end, at the baseline or at the narrow pass (which a vertical page answers by growing downwards); a page that is a little too wide (a ribbon) is not one, and for one that is, nothing is reported on the horizontal axis at `narrow`. Named on the outermost element beyond the edge that holds them: what pushes them out. Decorative text (`aria-hidden`, `inert`) does not count | text or a control (not excepted) beyond the edge, reached by scrolling the document, that was not beyond the edge at the baseline | `info`: only excepted content beyond (`exceptedOnly`, with `exceptedKinds`), or the same text beyond at the baseline (`atBaseline`). `likely` (`innerScroller`): a scroll container, not excepted, whose lines of text are wider than it shows |
-| `content-lost` | Lines of text and controls shown in full at the baseline that the pass leaves out of reach whatever is scrolled: outside what a clipping ancestor shows (`overflow: hidden` or `clip`, `contain: paint`, `clip`), beyond an edge of a viewport that does not scroll on that axis (`overflow-x: hidden` or `clip` on the root, or a `body` that clips), before the start edge, or outside the viewport in a fixed element (a dialog whose fields and buttons lie below a short viewport). Reachability is worked out scroll container by scroll container from the inside out (below). Decorative text is never counted | measured cut: a line loses at least `lostMinEm` (1 em) of its width or `lostMinLineShare` (half) of its height; a control `controlLostMinShare` (half) of its area. The message names the physical side measured (`side` in its values) | `advisory`: truncated with an ellipsis or a line clamp (`ellipsis`, `lineClamp`); a control inside or beside the clipping element that may reveal (`revealControl`). `info`: the element already cut content at the baseline (`clipsAtBaseline`), the viewport of a carousel (`carousel`, below), content that moves through it by itself (`moving`: a ticker, a marquee); text not displayed or parked off screen (below) |
-| `text-overlap` | Lines of two elements, neither holding the other, whose middle bands (`overlapCoreInset`, 20% cut at top and bottom) meet by `overlapMinShare` (15%) of the smaller band, or a line under a box that paints (a background, a picture), where they did not meet at the baseline. Decorative text is never the one covered; when it lies over real text, the real text is tested, and only its ink that the decoration hides counts (`decorativeCover`) | confirmed by pixels (below), and nothing on the page kept moving by script | `likely`: two texts meet and the region could not be captured; confirmed by pixels while something kept moving (`unsettled`). `info`: beyond `maxPixelChecks`, or a text under a box (or decoration) that was not tested. Nothing when the pixels show both readable |
-| `sticky-obscures` | At the scroll positions `stickyScrollPositions` (top, middle, bottom) of the window, or, when the document does not scroll, of the scroll container that holds the page (`mainScrollerMinShare`, 80% of the viewport: an application shell; flag `mainScroller`), the union of what fixed elements, and sticky elements that are stuck, paint inside the viewport; readable share = 1 − that area / viewport area, at the worst position | never by default | `stickyObscuresStatus` (`likely`) under `minReadableViewportShare` (0.5); one level lower when what can be dismissed makes the difference (`dismissible`, `loweredDismissible`); `info` when the baseline has the same problem |
-| `scroll-locked` | The root (or a `body` that clips) does not scroll vertically, and text, controls or other content lie below the viewport where no scroll container around them brings them | text or a control no scrolling reaches, reached at the baseline | `likely`: only pictures or other content out of reach. `info`: the document locks content out at the baseline as well (`atBaseline`: a consent wall); an open modal layer locks the page (`modalOpen`: a dialog with `aria-modal` or opened modally, or a layer over the whole viewport): what lies behind it is not lost while it is open, and its own content is `content-lost`'s to measure |
+| `two-dimensional-scroll` | At `narrow`, always: the document scrolls horizontally and lines of text or controls lie beyond the right edge (the left edge of a page laid out from the right), by at least `beyondMinEm` (0.5 em) for a line, `controlBeyondMinShare` (25%) of a control's width. At `short`, for a page laid out to scroll horizontally only: the same below the bottom edge, and only when running text in the flow still needs horizontal scrolling at that pass (a page that grows downwards there scrolls in one direction). A page counts as laid out horizontally on positive evidence of the reference layout only: its root has a vertical writing mode; or it scrolls horizontally and not vertically, and either its root (or body) is a horizontal track (it snaps horizontally, or is a flex row that does not wrap) or most of its running text in the flow (`horizontalMinTextShare`, 0.5; neither positioned nor moved off its place) lies in lines wholly beyond the inline end. Content out of the flow (a navigation parked at `right: -320px`) is no evidence, nor a page a little too wide. For a page laid out horizontally nothing is reported on the horizontal axis at `narrow` unless the document scrolls vertically there as well. Named on the outermost element beyond the edge that holds them: what pushes them out | text or a control (not excepted) beyond the edge, reached by scrolling the document, that was not beyond the edge at the baseline | `advisory` (`hiddenFromAT`): only text hidden from assistive technology beyond. `info`: only excepted content beyond (`exceptedOnly`, with `exceptedKinds`), or the same text beyond at the baseline (`atBaseline`). `likely` (`innerScroller`): a scroll container, not excepted, whose lines of text are wider than it shows |
+| `content-lost` | Lines of text and controls shown in full at the baseline that the pass leaves out of reach whatever is scrolled: outside what a clipping ancestor shows (`overflow: hidden` or `clip`, `contain: paint`, `clip`, `clip-path: inset()`), beyond an edge of a viewport that does not scroll on that axis (`overflow-x: hidden` or `clip` on the root, or a `body` that clips), before the start edge, or outside the viewport in a fixed element (a dialog whose fields and buttons lie below a short viewport). Reachability is worked out through every scroll container (below) | measured cut: a line loses at least `lostMinEm` (1 em) of its width or `lostMinLineShare` (half) of its height; a control `controlLostMinShare` (half) of its area. Content in the flow (a column, a cell, an item of a flex or grid row, a block) wholly beyond the edge is lost, whatever its ancestors do. The message names the physical side measured (`side` in its values) | `likely` (`outOfFlow`): content out of the flow wholly beyond the reach of the root that nothing names (below). `advisory`: truncated with an ellipsis or a line clamp (`ellipsis`, `lineClamp`); a control inside or beside the clipping element that may reveal (`revealControl`); only text hidden from assistive technology cut (`hiddenFromAT`). `info`: the element already cut content at the baseline (`clipsAtBaseline`), the viewport of a carousel (`carousel`, below), content that moves through it by itself (`moving`: a ticker, a marquee); text not displayed (below). Nothing: content parked off screen (below) |
+| `text-overlap` | Lines of two elements, neither holding the other, whose middle bands (`overlapCoreInset`, 20% cut at top and bottom) meet by `overlapMinShare` (15%) of the smaller band, or a line under a box that paints (a background, a picture), where they did not meet at the baseline. Text hidden from assistive technology is decided by paint order: when it lies over real text, the real text is tested and only its ink that the other hides counts (`decorativeCover`); when real text lies over it, it is the one tested if it is in the flow (advisory at most, `hiddenFromAT`), and nothing is reported if it is placed out of the flow (decorative letters laid out behind a heading) | confirmed by pixels (below), and nothing that moves by itself where the two meet | `likely`: two texts meet and the region could not be captured; confirmed by pixels while something that moves by itself is where they meet (`unsettled`). `advisory`: the covered one is hidden from assistive technology. `info`: beyond `maxPixelChecks`, or a text under a box (or decoration) that was not tested. Nothing when the pixels show both readable |
+| `sticky-obscures` | At the scroll positions `stickyScrollPositions` (top, middle, bottom) of the window, or, when the document does not scroll, of the scroll container that holds the page (an application shell, flag `mainScroller`: the one that holds `mainScrollerMinTextShare`, half, of the text of a document that fills the viewport or clips), the union of what fixed elements, and sticky elements that are stuck, paint inside the viewport; readable share = 1 − that area / viewport area, at the worst position. In an application shell the readable part is the box of that scroll container less what sticks over it: bars around it, sticky or not, are not read in (`scrollerBox` when it is that box alone). Always a share of the whole viewport. A layer the hit test finds under the page (a background with a negative `z-index`) hides nothing | never by default | `stickyObscuresStatus` (`likely`) under `minReadableViewportShare` (0.5); one level lower when what can be dismissed makes the difference (`dismissible`, `loweredDismissible`); `info` when the baseline has the same problem |
+| `scroll-locked` | The root (or a `body` that clips) does not scroll vertically, and text, controls or other content lie below the viewport where no scroll container around them brings them | text or a control no scrolling reaches, reached at the baseline | `likely`: only pictures or other content out of reach. `advisory` (`hiddenFromAT`): only text hidden from assistive technology. `info`: the document locks content out at the baseline as well (`atBaseline`: a consent wall); an open modal layer locks the page (`modalOpen`): a dialog opened modally, `aria-modal`, an open popover, shown and in the viewport (a drawer parked off screen is none), or a layer over `fullScreenLayerMinShare` (90%) of the viewport that the hit test finds over the page at `coverMinHitShare` (60%) of points (`fullScreenLayer`; a background behind the page is none). What lies behind a modal is not lost while it is open, and its own content is `content-lost`'s to measure |
 | `double-scrollbar` | A scroll container on the axis the page scrolls on (vertical; horizontal for a page laid out horizontally) that scrolls by more than `scrollToleranceCssPx` (4), is at least `nestedScrollerMinShare` (half) of the viewport on that axis, and holds `nestedScrollerMinTextChars` (200) characters of text | never | `likely`. The baseline has it as well: `doubleScrollbarAtBaselineStatus` (`likely`, or `info`) with `atBaseline: true` in its values when it takes `nestedScrollerAtBaselineMinShare` (90%) of the viewport or more (a shell `height: 100vh; overflow: auto` in a page that scrolls), `info` when smaller. Not: `textarea`, `select`, `pre`, `code`, frames, the roles `log`, `listbox`, `grid`, `treegrid`, `table`, `menu`, `tree`, `application`, `combobox`, a scroller that holds a table, a carousel, a scroller inside a fixed or sticky element |
 | `survey` | Per layout: viewport, size of the document, texts, boxes and elements read, readable share; overlap candidates and how many the pixels cleared; what was left out at the limits | | `info` |
 
@@ -1657,12 +1668,15 @@ Where the brief and this table differ, and why:
   `html` or `body`. So the lock is what is measured, and a full-screen layer is a flag (`fullScreenLayer`).
 - **A control that may reveal** lowers clipped content to `advisory`, not `likely`: on real pages (a news site's
   header) it was the menu button that shows the same links.
-- **Content parked wholly off screen** (beyond the reach of the root, nothing of it cut in part, as a closed
-  off-canvas drawer is, whatever the side and whether it is fixed or absolutely positioned) is counted as not
-  displayed, never as lost: `info` only when no control could reveal it (no visible control names it in
-  `aria-controls`, no disclosure control appeared in the pass), nothing otherwise. Two exceptions keep it lost: the
-  end of a block too wide for the viewport (the outermost element beyond the edge that holds it is partly in view),
-  and what lies below the viewport in a fixed layer of which something is shown (a dialog too tall for the window).
+- **Content parked wholly off screen** is narrow: only content out of the flow (positioned `absolute` or `fixed`, or
+  moved off its place as a block by a translation or a negative margin of half its size or more) that is wholly
+  beyond the reach of the root, and that is named as content shown on demand (it is, or is inside, what a visible
+  control names in `aria-controls`, `popovertarget` or `commandfor`, a `dialog`, a `popover`, `hidden="until-found"`)
+  or hidden from assistive technology while it is off screen (`aria-hidden`, `inert`: a closed drawer done right).
+  That is not reported at all. Out of the flow without any of that evidence: `likely` (`outOfFlow`). In the flow, or
+  cut in part: lost. A disclosure control that appears somewhere parks nothing it does not name, and whether an
+  ancestor straddles the edge changes nothing. What lies below the viewport in a fixed layer of which something is
+  shown (a dialog too tall for the window) is lost.
 - **An open modal that locks the page** was a failure on a short page and `info` on a long one, by whether the
   baseline already locked something out. It is now decided by what is out of reach: the page behind the modal is
   not lost (`modalOpen`), the modal's own content has to be reachable (`content-lost`), and such a modal is not
@@ -1677,26 +1691,42 @@ for each layout, with the window scrolled to the start:
   `maxTextItems`, `maxLinesPerText`), its font size, and the start of its text. Text that paints nothing is left
   out: under `opacity: 0`, a `clip-path`, `content-visibility: hidden` (which still answers with the boxes of its
   last layout: collapsed navigation boxes of an encyclopedia gave 381 false candidates before this), `visibility`
-  other than `visible`, a transparent colour or fill. Text under `aria-hidden="true"` or `inert` is kept as
-  **decorative** (`role="presentation"` wrappers do not make it so): it can cover real text, and is never the
-  victim of a rule nor the cause of a failure. Text that **moves by itself** is marked too: a CSS animation is
-  declared on it or an element it is in, an animation or a transition was running when the scan began (read with
-  `getAnimations()` before the stabilising style sheet ends them all), or a script kept changing its style.
+  other than `visible`, a transparent colour or fill, a `clip-path` that hides all (a clip to nothing or to a pixel:
+  the visually hidden pattern) or that this cannot follow (a shape other than `inset()`). A `clip-path: inset()` is
+  measured as the clip of the border box it is. Text under `aria-hidden="true"` or `inert` (`role="presentation"`
+  wrappers do not make it so) is **hidden from assistive technology** (`hiddenFromAT`): 1.4.10 is about what is
+  seen, and a visible price with a copy for screen readers is common, so it is measured as other text is, but what
+  is found about it alone is `advisory` at most. Only a glyph of decoration under `aria-hidden` or `inert` (no letter
+  and no digit, a single character, a character of private use, an icon font, `icon.iconFontFamilyPattern`) is left
+  out of every rule. Text that **moves by itself** is marked too: an animation that repeats for ever runs on it or an
+  element it is in (read with `getAnimations()` before the stabilising style sheet ends them all, and now), or a
+  script kept changing its style. An animation that runs once (a fade-in) moves nothing for good. Each text and
+  control also says whether it is **out of the flow** (positioned, or moved as a block) and whether it is **shown on
+  demand** (named by a control, in a dialog or a popover).
 - **The clipping chain** of each element along its containing blocks, not its ancestors: an absolutely
   positioned element escapes the clipping of ancestors that are not its containing block, a fixed one of all but
-  a transformed or contained ancestor. Each clipping element gives its padding box (or the rectangle of `clip`),
-  its overflow on each axis, its direction and its scroll range. From this, in core, what of a line can be brought
-  on screen, axis by axis and from the inside out: through an element that clips (`hidden`, `clip`) only what
-  lies inside its box; through a scroll container (`auto`, `scroll`) whatever lies in what it can scroll to (not
-  before its start), after which the line is read through the container's own box, and that box, not the line's
-  raw position, is what the next clipping ancestor, the edges of the root and the viewport around a fixed element
-  are tested against. A row of cards that scrolls inside a card or a body that clips is reachable; a scroller pushed
-  beyond an edge that does not scroll is not. A clipping element is the **viewport of a carousel** when it scroll
-  snaps, has `aria-roledescription` on it or around it, is (or its track is) named in `aria-controls` of a visible
-  control, shares a region (`carouselControlLevels`, 3 ancestors up) with a visible tab list or a control whose
-  name contains one of `carouselControlWords` (previous, next, slide, précédent, suivant, ‹, ›...), or holds a
-  track wider than itself moved by a translation or with a declared transition of its position; it is **moving**
-  when the track it holds does.
+  a transformed or contained ancestor. Each clipping element gives its padding box (or the rectangle of `clip`, or
+  of a `clip-path: inset()`), its overflow on each axis, its direction and its scroll range and position. The
+  viewport of a same-origin frame is a clip whose overflow is that of the frame's own root (or body, by
+  propagation): a frame whose body has `overflow-x: hidden` does not scroll horizontally, and its body is no viewport
+  of the page. From this, in core, what of a line can be brought on screen, axis by axis and from the inside out: the
+  positions the line can take are carried as an interval, each scroll container adding what scrolling it moves its
+  content by from where it is (`[pos − (max − scroll), pos + scroll]`), and the boxes that clip it (clipping
+  ancestors, the scroller's own box, which does not move with it, the edges of the root, the viewport around a fixed
+  element) keep the positions where it is shown, wholly or with less than the thresholds above hidden. A line longer
+  than the box of a scroller it is in is read across that box by scrolling (`two-dimensional-scroll` says so); what
+  has to be shown at once is then as long as that box. A row of cards that scrolls inside a card or a body that clips
+  is reachable; a scroller pushed beyond an edge that does not scroll is not, nor the cards a scroller cut by an outer
+  `overflow: hidden` can never bring into the part of it that is shown, nor content of a scroller that has nothing to
+  scroll (a clearfix) beyond what its box shows. A clipping element is the **viewport of a carousel** on evidence tied
+  to it only: a visible control names it or its track in `aria-controls`; it is inside a carousel root (the nearest
+  `aria-roledescription` that is one of `carouselRoleWords`, carousel, carrousel, slider…, or a region or group
+  labelled so) that holds a visible control outside of it; it scroll snaps, or its track moves (a script keeps
+  moving it, an animation repeats for ever, a transition of its position runs, it snaps); or buttons, not links,
+  named with one of `carouselControlWords` (previous, next, slide, précédent, suivant, ‹, ›...) are beside it in a
+  wrapper that holds nothing else. A tab list nearby, a pagination of links, a "Read more →" link, a declared list
+  of transitions, an `aria-roledescription` of another kind on an ancestor, are none. It is **moving** when the track
+  it holds moves by itself.
 - **Boxes**: controls (links, buttons, fields, control roles, `tabindex` ≥ 0), the outermost element of excepted
   content, and elements that paint (a background colour that is not transparent, a background image, replaced
   content); `display: inline` boxes are kept for controls but never cover text (their rectangle spans the lines
@@ -1708,9 +1738,11 @@ for each layout, with the window scrolled to the start:
   fixed element under a transformed or contained ancestor scrolls with it and is no layer. A sticky element counts
   once it is stuck: its page position differs from the one at the top, it became sticky after scrolling, or it
   kept its place in the viewport between two scroll positions (so a footer stuck to the bottom from the start counts
-  at the top as well). When the document does not scroll, the positions are those of the largest scroll container
-  that covers `mainScrollerMinShare` (80%) of the viewport, scrolled for the purpose; the share is still of the
-  viewport.
+  at the top as well). When the document does not scroll and fills the viewport (or clips), the positions are those
+  of the scroll container that holds the most text, `mainScrollerMinTextShare` (half) of the text of the document at
+  least, scrolled for the purpose; the share is still of the viewport. Each layer is also hit-tested at nine points
+  of the viewport it covers: over the page (`covers`: it, a dialog, the top layer or a backdrop is on top at
+  `coverMinHitShare` of them) or under it (`behind`: at none, as a background with a negative `z-index`).
 - **Disclosure controls** (`aria-expanded`, `aria-haspopup`, `aria-controls` on a button, `summary`), and what
   visible controls name in `aria-controls`.
 
@@ -1724,13 +1756,11 @@ boxes) where the reader cannot get it on screen: outside what an element that do
 edge the viewport does not scroll to, or below a viewport that does not scroll vertically (that one is
 `scroll-locked`). Not lost: what scrolls into view in a scroll container or with the document (that is
 `two-dimensional-scroll` when it takes the second direction), what a pass does not lay out at all
-(`display: none`), and what is **parked** wholly off screen (beyond the reach of the root, nothing of it cut in
-part, what pushes it out wholly beyond the edge as well; in a fixed layer, beyond its sides or above it, or the
-whole layer out of view). Those two are reported together as **text not displayed** (`content-lost`, flag
-`notDisplayed`, with `offScreen` for what is parked, `info`), from `hiddenTextMinChars` (200) characters; parked
-text that a visible control names in `aria-controls` is not counted, and nothing is reported when a disclosure
-control appeared in the pass that the baseline did not show: a menu button is how a responsive page is expected to
-hide its navigation.
+(`display: none`), and what is **parked**: out of the flow, wholly beyond the reach of the root, and shown on demand
+or hidden from assistive technology (above). Text a pass does not display is reported as **text not displayed**
+(`content-lost`, flag `notDisplayed`, `info`) from `hiddenTextMinChars` (200) characters, and not at all when a
+disclosure control appeared in the pass that the baseline did not show: a menu button is how a responsive page is
+expected to hide its navigation.
 
 **The test by pixels** (`text-overlap`). For each candidate, up to `maxPixelChecks` (20) per pass, the region where
 the two meet is scrolled into view and the browser's hit test, with pointer events forced on everywhere for one
@@ -1758,13 +1788,19 @@ label in its field, a heading set with tight lines).
 
 **Readable share.** Every fixed or stuck element counts, opaque or not: text under a translucent header is not
 readable either, and an element that paints nothing (a transparent container of toasts) is replaced by what it
-holds that paints. **Dismissible**: a layer that is itself a visible, open dialog (the role `dialog` or
-`alertdialog`, `aria-modal`, `dialog[open]`), or one that holds a visible control whose accessible name contains
-one of `dismissWords` (whole words, any case: close, dismiss, accept, refuse, reject, decline, consent, agree, OK,
-got it, no thanks... and fermer, accepter, refuser, tout refuser, continuer sans accepter, j'accepte, non merci...)
-among at most `maxDismissControls` (6) controls. Buttons alone (Menu, Search) do not make a bar dismissible, nor
-does a hidden dialog inside a header; a layer whose own content the pass leaves out of reach is never dismissible.
-The status is lowered one level when the share without the dismissible ones reaches the threshold.
+holds that paints. A layer under the page (`behind`) does not count. In an application shell only the box of the
+scroll container that holds the page is read in (above). **Dismissible**: a layer that is itself a visible, open
+dialog (the role `dialog` or `alertdialog`, `aria-modal`, `dialog[open]`), or one that holds a button (`button`,
+the role `button`, an input button or submit; never a link) shown in the viewport and in the layer, whose
+accessible name is, or starts with, one of `dismissWords` (whole words, any case: close, dismiss, accept, refuse,
+reject, decline, consent, agree, OK, got it, no thanks... and fermer, accepter, refuser, tout refuser, continuer sans
+accepter, j'accepte, non merci...) in at most `dismissMaxNameWords` (4) words and names none of `menuWords` (menu,
+navigation, sidebar, drawer, and their French, Spanish and Italian forms), among at most `maxDismissControls` (6)
+controls. Never a layer that is, or is inside, a `header`, a `nav` or the roles `banner` and `navigation`, unless
+it is a dialog itself: "Fermer le menu" in a sticky header closes a menu, not the header; a link "OK Magazine", a
+link "Terms you agree to" or a skip link moved off screen dismiss nothing. A layer whose own content the pass leaves
+out of reach is never dismissible. The status is lowered one level when the share without the dismissible ones
+reaches the threshold.
 
 **Evidence.** Every finding says the pass, the viewport asked for and the one measured (`innerWidth`,
 `clientWidth`, `scrollWidth`…), what was measured, and names related elements (`firstBeyondSelector`,
@@ -1779,12 +1815,13 @@ once per pass, with an id of its own.
 `reflow` in the config file: the passes and their sizes (above), `settleMinMs`, `settleQuietMs`, `settleMaxMs`,
 `scrollSettleMs` (100), `scrollSettleMaxMs` (1000), `settleMotionMs` (600), `settleBudgetMs` (6000 per layout), the
 reference size of the baseline `referenceWidthCssPx`, `referenceHeightCssPx` (1280 by 720) and when it is used
-`referenceMinWidthCssPx`, `referenceMinHeightCssPx` (1024 by 600), `horizontalMinTextShare` (0.01), `toleranceCssPx` (1), `beyondMinEm`, `controlBeyondMinShare`,
+`referenceMinWidthCssPx`, `referenceMinHeightCssPx` (1024 by 600), `horizontalMinTextShare` (0.5), `toleranceCssPx` (1), `beyondMinEm`, `controlBeyondMinShare`,
 `lostMinEm`, `lostMinLineShare`, `controlLostMinShare`, `hiddenTextMinChars`, `overlapMinShare`,
 `overlapCoreInset`, `overlapMinCssPx` (2), `inkDeltaE`, `inkMinPx`, `inkOverlapMinPx`, `inkOverlapMinShare`,
 `coveredMinShare`, `minReadableViewportShare`, `stickyObscuresStatus` (`advisory`, `likely` or `fail`),
-`stickyScrollPositions`, `layerMaxDescendants`, `maxDismissControls`, `dismissWords`, `carouselControlLevels`,
-`carouselControlWords`, `mainScrollerMinShare` (0.8), `fullScreenLayerMinShare` (0.9), `scrollToleranceCssPx`,
+`stickyScrollPositions`, `layerMaxDescendants`, `maxDismissControls`, `dismissWords`, `dismissMaxNameWords` (4),
+`menuWords`, `carouselControlWords`, `carouselRoleWords`, `mainScrollerMinTextShare` (0.5),
+`fullScreenLayerMinShare` (0.9), `coverMinHitShare` (0.6), `scrollToleranceCssPx`,
 `nestedScrollerMinShare`, `nestedScrollerMinTextChars`, `doubleScrollbarAtBaselineStatus` (`likely` or `info`),
 `nestedScrollerAtBaselineMinShare` (0.9), and the limits `maxElements`,
 `maxTextItems` (10000), `maxBoxes` (4000), `maxLinesPerText` (200), `maxBeyond` (2000), `maxFindingsPerRule` (20
@@ -1819,17 +1856,21 @@ does not list it, and nothing else in the extension changed.
 - Generated text (`::before`, `::after` content) is not measured as text, nor covers it as a box; text in
   canvas or in pictures is not text. A pseudo-element painted over text is therefore not seen.
 - Text under a rotation, a skew or a 3D transform is left out of every rule: its rectangles are bounding boxes.
-- Parked content is a judgement on geometry: navigation pushed wholly beyond an edge that does not scroll by a
-  layout that is broken, not by design, is reported as not displayed (`info`), not lost. The end of a block that is
-  partly in view is still lost.
+- Parked content is decided on markup tied to it: a closed drawer that no control names (`aria-controls`,
+  `popovertarget`, `commandfor`) and that is not hidden from assistive technology is `likely` lost, not parked; a
+  drawer in the flow (a flex column pushed off screen) is lost.
 - Motion by script is seen as an element whose `style` or `class` keeps changing; a script that moves content
   some other way (a canvas, a stream of new elements) only makes the layout unsettled.
-- `dismissWords` and `carouselControlWords` are English and French lists; names in other languages need the
-  lists extended.
+- `dismissWords`, `menuWords`, `carouselControlWords` and `carouselRoleWords` are English and French lists, with a
+  few other languages; names in other languages need the lists extended.
+- Through the Playwright API, a context created with a `screen` of its own has `screen` equal to the viewport after
+  a scan (Playwright's `setViewportSize` does that, and it is the only call that has Playwright send its emulation
+  again).
 - A page that reloads or navigates when the viewport changes cannot be measured at the passes: the survey stops
   and says so.
 - Cross-origin frames are measured as a box (excepted content) and not looked into; closed shadow roots are not
-  looked into. Same-origin frames are; their text is clipped by the frame, which counts as a scroller.
+  looked into. Same-origin frames are; their text is clipped by the frame, which scrolls on an axis only when the
+  frame's own root (or body) does not clip that axis.
 - Layers are looked for in the top document only: a fixed element inside a frame is not one.
 - A page that changes its DOM on resize (a framework that renders another component for small screens) gives new
   elements, which are compared with nothing: they can make `text-overlap` and `two-dimensional-scroll` findings

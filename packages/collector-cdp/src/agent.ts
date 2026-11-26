@@ -502,6 +502,8 @@ export interface Agent {
   named(element: Element): { selector: string; frame: string };
   /** An animation or a transition was running on the element when the page was stabilised (which stops them all). Read only. */
   wasAnimated(element: Element): boolean;
+  /** An animation that repeats for ever (iterations: infinite) was running on the element when the page was stabilised. Read only. */
+  wasRepeating(element: Element): boolean;
   /** The Tab walk of this collection reached the element. */
   wasTabbed(element: Element): boolean;
   /** The stabilising style sheet is adopted around the element (its document, its shadow roots, the frames it is in). */
@@ -546,6 +548,8 @@ export function agentFactory(options: AgentOptions): Agent {
   const tabbed = new Set<number>();
   /** Targets of the animations and transitions running when stabilise() began: the stabiliser ends them all. */
   const animated = new WeakSet<Element>();
+  /** Of those, the targets of animations that repeat for ever: a ticker, a spinner, an autoplaying track. */
+  const repeating = new WeakSet<Element>();
   const sheets: { root: Document | ShadowRoot; sheet: CSSStyleSheet }[] = [];
   const styledRoots = new WeakSet<Node>();
   /** Frames taken out of the Tab order by skipFrames, with the tabindex attribute they had. */
@@ -3832,7 +3836,10 @@ export function agentFactory(options: AgentOptions): Agent {
       try {
         for (const animation of document.getAnimations()) {
           const target = (animation.effect as KeyframeEffect | null)?.target;
-          if (target && animation.playState === 'running') animated.add(target);
+          if (target && animation.playState === 'running') {
+            animated.add(target);
+            if (animation.effect?.getComputedTiming().iterations === Infinity) repeating.add(target);
+          }
         }
       } catch {
         // An old browser without getAnimations: nothing is known to move.
@@ -4015,6 +4022,10 @@ export function agentFactory(options: AgentOptions): Agent {
 
     wasAnimated(element) {
       return animated.has(element);
+    },
+
+    wasRepeating(element) {
+      return repeating.has(element);
     },
 
     wasTabbed(element) {

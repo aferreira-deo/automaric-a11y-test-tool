@@ -1,0 +1,9 @@
+{
+  "description": "A heading hidden from assistive technology, in the flow, is made unreadable by real text laid over it: advisory (hiddenFromAT), never a failure.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div > h1", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/text-overlap", "flags": ["glyphsOverlap", "hiddenFromAT", "pixelConfirmed", "textOnText"] }
+  ]
+}

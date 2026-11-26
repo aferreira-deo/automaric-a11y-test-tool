@@ -31,8 +31,12 @@ export interface AgentReflowOptions {
   settleMotionMs: number;
   settleBudgetMs: number;
   dismissWords: string[];
-  carouselControlLevels: number;
+  dismissMaxNameWords: number;
+  menuWords: string[];
   carouselControlWords: string[];
+  carouselRoleWords: string[];
+  iconFontFamilyPattern: string;
+  coverMinHitShare: number;
 }
 
 /** What `measure()` reads: a `ReflowLayout` without what the collector adds. */
@@ -58,10 +62,14 @@ export interface ReflowAgent {
   begin(): void;
   /** Waits for the layout after the viewport changed: `settleMinMs`, then `settleQuietMs` without change, `settleMaxMs` at most. True when the size of the document kept still. */
   settle(min: boolean): Promise<boolean>;
-  /** What the waits of the layout being measured met so far: elements still moving by script, and whether the budget ran out. */
-  waits(): { motion: number; budgetSpent: boolean };
-  /** The scroll container that holds the page when the document does not scroll: the largest one that scrolls vertically and covers `minShare` of the viewport. Its key, or null. */
-  mainScroller(minShare: number): { key: number; max: number } | null;
+  /**
+   * What the waits of the layout being measured met so far: elements still moving by script, whether the budget ran
+   * out, and where what is known to move by itself is (page coordinates, the window at 0,0): elements a script kept
+   * changing, and elements with an animation that repeats for ever.
+   */
+  waits(): { motion: number; budgetSpent: boolean; boxes: ReflowRect[] };
+  /** The scroll container that holds the page when the document does not scroll: the one that scrolls vertically and holds the most text, `minTextShare` of the text of the document at least. Its key, or null. */
+  mainScroller(minTextShare: number): { key: number; max: number } | null;
   /** Scrolls the element of `key` vertically and waits as `scrollTo` does. Returns where it went. */
   scrollElement(key: number, y: number): Promise<{ x: number; y: number }>;
   /** Scrolls the window to the start and reads the layout. */
@@ -89,7 +97,7 @@ export const REFLOW_AGENT_GLOBAL = '__a11yVisionReflow';
 
 export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
   const MAIN = '__a11yVisionAgent';
-  type Main = { named(element: Element): { selector: string; frame: string }; keyFor(element: Element): number; wasAnimated?(element: Element): boolean };
+  type Main = { named(element: Element): { selector: string; frame: string }; keyFor(element: Element): number; wasRepeating?(element: Element): boolean };
   const main = (): Main => (globalThis as unknown as Record<string, Main>)[MAIN]!;
   const JOIN = ' >>> ';
   const SKIP_TAGS = ['script', 'style', 'template', 'noscript', 'head', 'title', 'meta', 'link', 'option', 'optgroup', 'datalist', 'textarea', 'select', 'br', 'wbr', 'source', 'track', 'param', 'area', 'map'];
@@ -280,6 +288,16 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       overflowX = overflowOf(bodyStyle.overflowX);
       overflowY = overflowOf(bodyStyle.overflowY);
     }
+    const vertical = /^vertical|^sideways/.test(rootStyle.writingMode);
+    // A root or a body that lays its children out in one row (a flex row that does not wrap), or snaps horizontally.
+    const trackOf = (element: Element | null): 'snap' | 'flex' | undefined => {
+      if (!element) return undefined;
+      const style = getComputedStyle(element);
+      if (/\b(x|inline|both)\b/.test(style.scrollSnapType)) return 'snap';
+      if (/flex$/.test(style.display) && style.flexDirection.startsWith('row') && style.flexWrap === 'nowrap') return 'flex';
+      return undefined;
+    };
+    const track = trackOf(root) ?? trackOf(document.body);
     return {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -289,9 +307,28 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       scrollHeight: scrolling.scrollHeight,
       overflowX,
       overflowY,
-      rtl: rootStyle.direction === 'rtl',
-      ...(/^vertical|^sideways/.test(rootStyle.writingMode) ? { vertical: true } : {}),
+      // The horizontal axis starts at the right: text right to left, or lines laid out from the right (vertical-rl).
+      rtl: vertical ? /-rl$/.test(rootStyle.writingMode) : rootStyle.direction === 'rtl',
+      ...(vertical ? { vertical: true } : {}),
+      ...(track ? { track } : {}),
     };
+  }
+
+  /** The overflow of the viewport of a document: that of its root, or that of its body when the root leaves it visible. */
+  function documentOverflow(doc: Document): { x: ReflowOverflow; y: ReflowOverflow; bodyPropagates: boolean } {
+    const view = doc.defaultView;
+    if (!view) return { x: 'auto', y: 'auto', bodyPropagates: false };
+    const rootStyle = view.getComputedStyle(doc.documentElement);
+    let x = overflowOf(rootStyle.overflowX);
+    let y = overflowOf(rootStyle.overflowY);
+    const bodyPropagates = x === 'visible' && y === 'visible';
+    if (bodyPropagates && doc.body) {
+      const bodyStyle = view.getComputedStyle(doc.body);
+      x = overflowOf(bodyStyle.overflowX);
+      y = overflowOf(bodyStyle.overflowY);
+    }
+    // The viewport of a document always scrolls what it does not clip.
+    return { x: x === 'visible' ? 'auto' : x, y: y === 'visible' ? 'auto' : y, bodyPropagates };
   }
 
   function exceptKindOf(element: Element, style: CSSStyleDeclaration): ReflowExceptKind | undefined {
@@ -343,57 +380,190 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])(${escaped.join('|')})(?=$|[^\\p{L}\\p{N}])`, 'iu');
     return (name) => pattern.test(name.replace(/\s+/g, ' ').trim().toLowerCase());
   }
-  const dismissName = wordsMatcher(options.dismissWords);
   const carouselName = wordsMatcher(options.carouselControlWords);
+  const menuName = wordsMatcher(options.menuWords);
+  const roleWords = options.carouselRoleWords.map((word) => word.toLowerCase());
+  const carouselLabel = wordsMatcher(options.carouselRoleWords);
+  const iconFont = (() => {
+    try {
+      return options.iconFontFamilyPattern ? new RegExp(options.iconFontFamilyPattern, 'i') : null;
+    } catch {
+      return null;
+    }
+  })();
   const CONTROL_SELECTOR = 'button,[role="button"],a[href],input[type="button"],input[type="submit"],[role="tab"],[role="link"]';
+  const BUTTON_SELECTOR = 'button,[role="button"],input[type="button"],input[type="submit"]';
+
+  /**
+   * A name that dismisses: a few words at most (`dismissMaxNameWords`) that are one of `dismissWords` or start with
+   * one ("Close", "Accept all cookies", "Fermer"), and that name no menu or navigation ("Close menu").
+   */
+  function dismissesByName(name: string): boolean {
+    const words = name.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (words === '' || words.split(' ').length > options.dismissMaxNameWords || menuName(words)) return false;
+    return options.dismissWords.some((word) => words === word || (words.startsWith(word) && !/[\p{L}\p{N}]/u.test(words.charAt(word.length))));
+  }
 
   function isShown(element: Element): boolean {
     return element.checkVisibility({ opacityProperty: true, visibilityProperty: true });
   }
 
-  /** Moves by itself: a declared CSS animation, an animation or transition running when the scan began, or a script that keeps changing its style. */
-  function movingOf(element: Element, style: CSSStyleDeclaration): boolean {
-    if (style.animationName && style.animationName !== 'none') return true;
-    if (pass.moving.has(element)) return true;
+  /** An animation of the element itself that repeats for ever: as the page ran it before it was stabilised (which ends every animation), or now. */
+  function repeatsForEver(element: Element): boolean {
     try {
-      return main().wasAnimated?.(element) === true;
+      if (main().wasRepeating?.(element) === true) return true;
+      return element.getAnimations().some((animation) => animation.playState !== 'idle' && animation.effect?.getComputedTiming().iterations === Infinity);
     } catch {
       return false;
     }
   }
 
   /**
-   * The viewport of a carousel: scroll snapping, `aria-roledescription` on it or around it, it or its track named
-   * in `aria-controls` of a control, previous / next / pagination controls in the region it shares with them, or
-   * a track wider than it that a translation or a declared transition of its position moves.
+   * Moves by itself: an animation that repeats for ever, or a script that keeps changing its style. An animation that
+   * runs once (an entrance, a fade-in) ends, and moves nothing for good.
    */
-  function carouselOf(element: Element, style: CSSStyleDeclaration, controlled: Set<Element>): boolean {
+  function movingOf(element: Element): boolean {
+    return pass.moving.has(element) || repeatsForEver(element);
+  }
+
+  /** A track that moves: a script keeps moving it, it repeats an animation for ever, a transition of its position runs, or it snaps. */
+  function trackMoves(track: Element): boolean {
+    const view = track.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(track);
     if (style.scrollSnapType !== 'none' && style.scrollSnapType !== '') return true;
-    if (element.closest('[aria-roledescription]') !== null) return true;
-    if (controlled.has(element)) return true;
-    const view = element.ownerDocument.defaultView;
-    const width = element.clientWidth;
-    for (const child of element.children) {
-      if (controlled.has(child)) return true;
-      if (!view) continue;
-      const childStyle = view.getComputedStyle(child);
-      const wider = child.scrollWidth > width + options.toleranceCssPx || child.getBoundingClientRect().width > width + options.toleranceCssPx;
-      if (!wider) continue;
-      const translated = /^matrix\([^,]+, [^,]+, [^,]+, [^,]+, (-?[\d.e+-]+), (-?[\d.e+-]+)\)$/.exec(childStyle.transform);
-      if (translated && Math.abs(parseFloat(translated[1]!)) > 0.5) return true;
-      if (childStyle.translate && childStyle.translate !== 'none' && childStyle.translate !== '0px') return true;
-      if (/(^|,\s*)(transform|translate|left|right|margin-left|margin-right|margin-inline-start|inset-inline-start)(\s*,|$)/.test(childStyle.transitionProperty)) return true;
+    if (pass.moving.has(track) || pass.repeaters.has(track) || repeatsForEver(track)) return true;
+    try {
+      return track
+        .getAnimations()
+        .some((animation) => animation.playState === 'running' && /^(transform|translate|left|right|margin-left|margin-right|inset-inline-start)$/.test(String((animation as unknown as { transitionProperty?: string }).transitionProperty ?? '')));
+    } catch {
+      return false;
     }
-    let region: Element | null = element.parentElement;
-    for (let level = 0; region && level < options.carouselControlLevels; level++, region = region.parentElement) {
-      if (region.localName === 'body' || region.localName === 'html') break;
-      for (const control of region.querySelectorAll(CONTROL_SELECTOR + ',[role="tablist"]')) {
-        if (element.contains(control) || !isShown(control)) continue;
-        if (control.getAttribute('role') === 'tablist' || control.getAttribute('role') === 'tab') return true;
-        if (carouselName(nameOf(control))) return true;
-      }
+  }
+
+  function labelOf(element: Element): string {
+    const label = element.getAttribute('aria-label');
+    if (label && label.trim()) return label;
+    const ids = (element.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
+    return ids.map((id) => element.ownerDocument.getElementById(id)?.textContent ?? '').join(' ');
+  }
+
+  /** The root of a carousel around an element: the nearest `aria-roledescription` of `carouselRoleWords`, or a region or group labelled so. */
+  function carouselRootOf(element: Element): Element | null {
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      const description = current.getAttribute('aria-roledescription');
+      if (description !== null && roleWords.includes(description.trim().toLowerCase())) return current;
+      const role = roleOf(current) || (current.localName === 'section' && labelOf(current).trim() ? 'region' : '');
+      if ((role === 'region' || role === 'group') && carouselLabel(labelOf(current))) return current;
     }
-    return false;
+    return null;
+  }
+
+  /**
+   * Previous and next buttons beside the clip: the wrapper of the clip (or of the box that only holds it) holds, apart
+   * from it, buttons only (one by one, or in containers that hold nothing else), one of them named previous or next.
+   */
+  function besideButtons(element: Element): boolean {
+    let clip: Element = element;
+    let wrapper = element.parentElement;
+    for (let level = 0; wrapper && wrapper.children.length === 1 && level < 2; level++) {
+      clip = wrapper;
+      wrapper = wrapper.parentElement;
+    }
+    if (!wrapper || wrapper.localName === 'body' || wrapper.localName === 'html') return false;
+    for (const node of wrapper.childNodes) if (node.nodeType === 3 && (node as Text).data.trim() !== '') return false;
+    const textOf = (item: Element): string => ((item as HTMLElement).innerText ?? item.textContent ?? '').replace(/\s+/g, '');
+    let prevNext = false;
+    for (const sibling of wrapper.children) {
+      if (sibling === clip || !isShown(sibling)) continue;
+      const controls = sibling.matches(BUTTON_SELECTOR) ? [sibling] : [...sibling.querySelectorAll('*')].filter((item) => isControl(item) && isShown(item));
+      if (controls.length === 0 || controls.some((control) => !control.matches(BUTTON_SELECTOR))) return false;
+      if (textOf(sibling).length > controls.map(textOf).join('').length) return false;
+      if (controls.some((control) => carouselName(nameOf(control)))) prevNext = true;
+    }
+    return prevNext;
+  }
+
+  /**
+   * The viewport of a carousel, on evidence tied to it: a control names it or its track in `aria-controls`; it is
+   * inside a carousel root (`carouselRootOf`) that holds a visible control outside of it; it snaps, or its track
+   * moves (`trackMoves`); previous and next buttons beside it (`besideButtons`).
+   */
+  function carouselOf(element: Element, style: CSSStyleDeclaration, named: Set<Element>): boolean {
+    if (named.has(element) || [...element.children].some((child) => named.has(child))) return true;
+    const root = carouselRootOf(element);
+    if (root && [...root.querySelectorAll(CONTROL_SELECTOR)].some((control) => !element.contains(control) && isShown(control))) return true;
+    if (style.scrollSnapType !== 'none' && style.scrollSnapType !== '') return true;
+    if ([...element.children].some(trackMoves)) return true;
+    return besideButtons(element);
+  }
+
+  /** Text that is no more than a glyph: no letter and no digit, a single character, a character of private use, or an icon font. */
+  function glyphLike(text: string, style: CSSStyleDeclaration): boolean {
+    const bare = text.replace(/\s+/g, '');
+    if (!/[\p{L}\p{N}]/u.test(bare) || [...bare].length <= 1) return true;
+    if (/[\uE000-\uF8FF]|[\u{F0000}-\u{FFFFD}]|[\u{100000}-\u{10FFFD}]/u.test(bare)) return true;
+    return iconFont !== null && iconFont.test(style.fontFamily);
+  }
+
+  /** Moved off its place as a block: translated, or pulled by a negative margin, by half its own size or more. */
+  function movedAsBlock(style: CSSStyleDeclaration, box: DOMRect): boolean {
+    const width = Math.max(box.width, 1);
+    const height = Math.max(box.height, 1);
+    let tx = 0;
+    let ty = 0;
+    const matrix = /^matrix\(([^)]*)\)$/.exec(style.transform);
+    const matrix3d = /^matrix3d\(([^)]*)\)$/.exec(style.transform);
+    if (matrix) {
+      const parts = matrix[1]!.split(',').map(Number);
+      tx = parts[4] ?? 0;
+      ty = parts[5] ?? 0;
+    } else if (matrix3d) {
+      const parts = matrix3d[1]!.split(',').map(Number);
+      tx = parts[12] ?? 0;
+      ty = parts[13] ?? 0;
+    }
+    if (style.translate && style.translate !== 'none') {
+      const [x = '0', y = '0'] = style.translate.split(/\s+/);
+      const length = (value: string, of: number): number => (value.endsWith('%') ? (parseFloat(value) / 100) * of : parseFloat(value) || 0);
+      tx += length(x, width);
+      ty += length(y, height);
+    }
+    if (Math.abs(tx) >= width / 2 || Math.abs(ty) >= height / 2) return true;
+    const margin = (value: string): number => parseFloat(value) || 0;
+    return -margin(style.marginLeft) >= width / 2 || -margin(style.marginRight) >= width / 2 || -margin(style.marginTop) >= height / 2;
+  }
+
+  /**
+   * What `clip-path` does to what an element holds: nothing it hides (`inset()` is a clip of the border box, given
+   * back as such), everything (a clip to nothing or to a pixel: the visually hidden pattern), or something this
+   * cannot tell (another shape).
+   */
+  function clipPathOf(value: string, box: DOMRect): { kind: 'none' | 'hidden' | 'unknown' } | { kind: 'inset'; rect: [number, number, number, number] } {
+    const text = value.trim();
+    if (text === 'none' || text === '') return { kind: 'none' };
+    const inset = /^inset\(([^)]*)\)$/.exec(text);
+    if (inset) {
+      const parts = inset[1]!.split(/\s+round\s+/)[0]!.trim().split(/\s+/);
+      const length = (part: string | undefined, of: number): number | null => {
+        if (part === undefined) return null;
+        if (part.endsWith('%')) return (parseFloat(part) / 100) * of;
+        if (part.endsWith('px') || part === '0') return parseFloat(part);
+        return NaN;
+      };
+      const top = length(parts[0], box.height) ?? 0;
+      const rightSide = length(parts[1], box.width) ?? top;
+      const bottomSide = length(parts[2], box.height) ?? top;
+      const left = length(parts[3], box.width) ?? rightSide;
+      if ([top, rightSide, bottomSide, left].some((part) => !Number.isFinite(part))) return { kind: 'unknown' };
+      const width = box.width - left - rightSide;
+      const height = box.height - top - bottomSide;
+      if (width <= 1 || height <= 1) return { kind: 'hidden' };
+      return { kind: 'inset', rect: [left, top, width, height] };
+    }
+    if (/^(circle|ellipse)\(\s*0(px|%)?[\s)]/.test(text) || /^polygon\(\s*(0(px|%)?\s+0(px|%)?\s*,?\s*)+\)$/.test(text)) return { kind: 'hidden' };
+    return { kind: 'unknown' };
   }
 
   function isPopup(element: Element): boolean {
@@ -448,13 +618,57 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     decorative: boolean;
     /** Moves by itself, or is inside what does. */
     moving: boolean;
-    /** Inside an element that a visible control names in aria-controls. */
+    /** Inside content a control names (aria-controls, popovertarget, commandfor), a dialog, a popover, hidden="until-found". */
     controlled: boolean;
+    /** Out of the flow: positioned absolute or fixed, or moved off its place as a block (`movedAsBlock`), it or an ancestor. */
+    placed: 'absolute' | 'fixed' | 'moved' | undefined;
+    /** Inside an element whose clip-path hides what this cannot measure: a shape other than `inset()`. */
     /** An ancestor is a containing block for fixed descendants (a transform, a filter, contain): fixed is then not fixed to the viewport. */
     contained: boolean;
     clipPath: boolean;
     offset: { x: number; y: number };
     top: boolean;
+    /** Whether the body of the document being walked is the viewport's (its root leaves overflow visible). */
+    bodyPropagates: boolean;
+  }
+
+  /** In what lies over a page while it is open: the top layer (a modal dialog, an open popover), a dialog, or another fixed layer as large as the viewport (a backdrop). */
+  function floating(node: Element): boolean {
+    const root = document.documentElement;
+    for (let current: Node | null = node; current; current = composedParent(current)) {
+      if (current.nodeType !== 1) continue;
+      const element = current as Element;
+      if (element.matches(':modal, :popover-open') || ['dialog', 'alertdialog'].includes(roleOf(element)) || element.getAttribute('aria-modal') === 'true') return true;
+      if (getComputedStyle(element).position === 'fixed') {
+        const box = element.getBoundingClientRect();
+        if (box.width * box.height >= 0.9 * root.clientWidth * root.clientHeight) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Where what moves by itself is, page coordinates of the top document with the window at 0,0: a script keeps changing it, or it repeats an animation for ever. */
+  function motionBoxes(): ReflowRect[] {
+    const out: ReflowRect[] = [];
+    const seen = new Set<Element>();
+    const add = (element: Element): void => {
+      if (seen.has(element) || !element.isConnected || element.ownerDocument !== document || out.length >= 200) return;
+      seen.add(element);
+      const box = element.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0) out.push(rect(box.left + window.scrollX, box.top + window.scrollY, box.width, box.height));
+    };
+    for (const element of pass.repeaters) add(element);
+    for (const element of pass.moving) add(element);
+    for (const element of document.querySelectorAll('*')) if (out.length < 200 && main().wasRepeating?.(element) === true) add(element);
+    try {
+      for (const animation of document.getAnimations()) {
+        const target = (animation.effect as KeyframeEffect | null)?.target;
+        if (target && animation.playState !== 'idle' && animation.effect?.getComputedTiming().iterations === Infinity) add(target);
+      }
+    } catch {
+      // No getAnimations: what repeats by script is known all the same.
+    }
+    return out;
   }
 
   return {
@@ -477,27 +691,34 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
     },
 
     waits() {
-      return { motion: pass.moving.size, budgetSpent: pass.budgetSpent };
+      const scrolled = { x: window.scrollX, y: window.scrollY };
+      if (scrolled.x !== 0 || scrolled.y !== 0) window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+      const boxes = motionBoxes();
+      if (scrolled.x !== 0 || scrolled.y !== 0) window.scrollTo({ left: scrolled.x, top: scrolled.y, behavior: 'instant' });
+      return { motion: pass.moving.size, budgetSpent: pass.budgetSpent, boxes };
     },
 
-    mainScroller(minShare) {
+    mainScroller(minTextShare) {
       const root = document.documentElement;
-      const viewArea = Math.max(1, root.clientWidth * root.clientHeight);
-      let best: { element: Element; area: number; max: number } | null = null;
+      // A shell fills the viewport (or clips the document): a short page that fits leaves room below and is no shell.
+      const clipsY = (element: Element | null): boolean => !!element && /hidden|clip/.test(getComputedStyle(element).overflowY);
+      const fills = clipsY(root) || clipsY(document.body) || (document.body?.getBoundingClientRect().bottom ?? 0) >= root.clientHeight - options.toleranceCssPx * 4;
+      if (!fills) return null;
+      const total = Math.max(1, (document.body?.innerText ?? '').replace(/\s+/g, '').length);
+      let best: { element: Element; chars: number; max: number } | null = null;
       let walked = 0;
       eachElement(document, (element) => {
-        if (++walked > options.maxElements || element.ownerDocument !== document) return;
+        if (++walked > options.maxElements || element.ownerDocument !== document || element === root || element === document.body) return;
         if (element.scrollHeight - element.clientHeight <= options.toleranceCssPx * 4) return;
         const style = getComputedStyle(element);
         if (style.overflowY !== 'auto' && style.overflowY !== 'scroll' && style.overflowY !== 'overlay') return;
         const box = element.getBoundingClientRect();
-        const w = Math.max(0, Math.min(box.right, root.clientWidth) - Math.max(box.left, 0));
-        const h = Math.max(0, Math.min(box.bottom, root.clientHeight) - Math.max(box.top, 0));
-        const covered = (w * h) / viewArea;
-        if (covered < minShare) return;
-        if (!best || covered > best.area) best = { element, area: covered, max: element.scrollHeight - element.clientHeight };
+        if (box.right <= 0 || box.bottom <= 0 || box.left >= root.clientWidth || box.top >= root.clientHeight) return;
+        const chars = ((element as HTMLElement).innerText ?? '').replace(/\s+/g, '').length;
+        if (chars < minTextShare * total) return;
+        if (!best || chars > best.chars) best = { element, chars, max: element.scrollHeight - element.clientHeight };
       });
-      const found = best as { element: Element; area: number; max: number } | null;
+      const found = best as { element: Element; chars: number; max: number } | null;
       return found ? { key: keyOf(found.element), max: found.max } : null;
     },
 
@@ -527,15 +748,17 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
       let boxesBeyond = 0;
       const tolerance = options.toleranceCssPx;
       const range = document.createRange();
-      const bodyPropagates = (() => {
-        const style = getComputedStyle(document.documentElement);
-        return overflowOf(style.overflowX) === 'visible' && overflowOf(style.overflowY) === 'visible';
-      })();
-      // What visible controls name in aria-controls: what they may show (a drawer, the track of a carousel).
+      // What visible controls name in aria-controls (a drawer, the track of a carousel), popovertarget or commandfor: what they may show.
+      const ariaControlled = new Set<Element>();
       const controlled = new Set<Element>();
-      for (const control of document.querySelectorAll('[aria-controls]')) {
+      for (const control of document.querySelectorAll('[aria-controls],[popovertarget],[commandfor]')) {
         if (!isShown(control)) continue;
-        for (const id of (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)) {
+        const ids = (control.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean);
+        for (const id of ids) {
+          const target = document.getElementById(id);
+          if (target) ariaControlled.add(target);
+        }
+        for (const id of [...ids, control.getAttribute('popovertarget') ?? '', control.getAttribute('commandfor') ?? ''].filter(Boolean)) {
           const target = document.getElementById(id);
           if (target) controlled.add(target);
         }
@@ -581,10 +804,14 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const client = element.getBoundingClientRect();
         const page = rect(client.left + context.offset.x, client.top + context.offset.y, client.width, client.height);
         // A fixed element under a transformed or contained ancestor scrolls with that ancestor: no layer.
-        const layer = context.layer ?? (context.top && ((position === 'fixed' && !context.contained) || position === 'sticky') ? key : undefined);
+        // The root and body are the page, also when a script fixes body in place to stop the page from scrolling.
+        const pageRoot = tag === 'html' || tag === 'body';
+        const layer = context.layer ?? (context.top && !pageRoot && ((position === 'fixed' && !context.contained) || position === 'sticky') ? key : undefined);
         const decorative = context.decorative || element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert');
-        const moving = context.moving || movingOf(element, style);
-        const isControlled = context.controlled || controlled.has(element);
+        const moving = context.moving || movingOf(element);
+        // Content shown on demand: what a control names, a dialog, a popover, what the find in page reveals.
+        const isControlled = context.controlled || controlled.has(element) || tag === 'dialog' || element.hasAttribute('popover') || element.getAttribute('hidden') === 'until-found';
+        const placed = context.placed ?? (pageRoot ? undefined : position === 'fixed' && !context.contained ? 'fixed' : position === 'absolute' || position === 'fixed' ? 'absolute' : movedAsBlock(style, client) ? 'moved' : undefined);
         const transformed = context.transformed || transformedBy(style);
         const ownExcept = context.except ? undefined : exceptKindOf(element, style);
         const except = context.except ?? ownExcept;
@@ -593,12 +820,14 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const invisible = context.invisible || parseFloat(style.opacity) <= 0;
         // What `content-visibility: hidden` holds is not painted, and still answers with the boxes of its last layout.
         const contentInvisible = invisible || style.contentVisibility === 'hidden';
-        const clipPath = context.clipPath || (style.clipPath !== 'none' && style.clipPath !== '');
+        // A clip-path is measured as the clip it is when it is an inset of the border box; one that hides all, or a shape this cannot follow, hides what it holds.
+        const ownClipPath = clipPathOf(style.clipPath, client);
+        const clipPath = context.clipPath || ownClipPath.kind === 'hidden' || ownClipPath.kind === 'unknown';
 
         // What it clips.
         let contentChain = ownChain;
         const replaced = REPLACED.includes(tag) && tag !== 'button';
-        if (tag !== 'html' && !(tag === 'body' && bodyPropagates) && style.display !== 'inline' && style.display !== 'contents' && !replaced) {
+        if (tag !== 'html' && !(tag === 'body' && context.bodyPropagates) && style.display !== 'inline' && style.display !== 'contents' && !replaced) {
           let x = overflowOf(style.overflowX);
           let y = overflowOf(style.overflowY);
           if (/paint|strict|content/.test(style.contain)) {
@@ -606,6 +835,18 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
             if (y === 'visible') y = 'clip';
           }
           let shown: ReflowRect = rect(client.left + element.clientLeft + context.offset.x, client.top + element.clientTop + context.offset.y, element.clientWidth, element.clientHeight);
+          if (ownClipPath.kind === 'inset') {
+            const [ix, iy, iw, ih] = ownClipPath.rect;
+            const inset: ReflowRect = rect(page[0] + ix, page[1] + iy, iw, ih);
+            if (x === 'visible' && y === 'visible') shown = inset;
+            else {
+              const left = Math.max(shown[0], inset[0]);
+              const topEdge = Math.max(shown[1], inset[1]);
+              shown = rect(left, topEdge, Math.max(0, Math.min(shown[0] + shown[2], inset[0] + inset[2]) - left), Math.max(0, Math.min(shown[1] + shown[3], inset[1] + inset[3]) - topEdge));
+            }
+            if (x === 'visible') x = 'clip';
+            if (y === 'visible') y = 'clip';
+          }
           if ((position === 'absolute' || position === 'fixed') && style.clip && style.clip !== 'auto') {
             const clipped = parseClip(style.clip, client);
             if (clipped) {
@@ -617,12 +858,9 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           if (x !== 'visible' || y !== 'visible') {
             const truncates = style.textOverflow === 'ellipsis' && /nowrap|pre/.test(style.whiteSpace) ? 'ellipsis' : style.webkitLineClamp && style.webkitLineClamp !== 'none' ? 'line-clamp' : undefined;
             const reveal = element.querySelector('button,summary,[aria-expanded],[role="button"]') !== null || (element.parentElement?.querySelector(':scope > button, :scope > [aria-expanded], :scope > [role="button"]') ?? null) !== null;
-            const carousel = carouselOf(element, style, controlled);
+            const carousel = carouselOf(element, style, ariaControlled);
             // What it holds is moved through it by itself (a ticker): its track, one or two levels down, moves.
-            const trackMoves = [...element.children].some((child) => {
-              const childStyle = view.getComputedStyle(child);
-              return movingOf(child, childStyle) || [...child.children].some((grand) => movingOf(grand, view.getComputedStyle(grand)));
-            });
+            const trackMoves = [...element.children].some((child) => movingOf(child) || [...child.children].some((grand) => movingOf(grand)));
             const clip: ReflowClipBox = {
               key,
               rect: shown,
@@ -635,7 +873,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
               ...(reveal ? { revealControl: true } : {}),
               ...(carousel ? { carousel: true } : {}),
               ...(trackMoves || moving ? { moving: true } : {}),
-              ...(style.direction === 'rtl' ? { rtl: true } : {}),
+              ...(style.direction === 'rtl' || /-rl$/.test(style.writingMode) ? { rtl: true } : {}),
+              ...(context.top ? {} : { inFrame: true }),
               ...(element.querySelector('table,[role="table"],[role="grid"],[role="treegrid"]') ? { holdsTable: true } : {}),
               ...(except ? { except } : {}),
               ...(layer !== undefined ? { layer } : {}),
@@ -659,6 +898,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           decorative,
           moving,
           controlled: isControlled,
+          placed,
           contained: context.contained || containsFixed(style),
         };
 
@@ -666,6 +906,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const lines: ReflowRect[] = [];
         let chars = 0;
         let sample = '';
+        let ownText = '';
         // Text that paints: not under opacity 0 or a clip-path, visible, of a colour that is not transparent.
         const textShown = !contentInvisible && !clipPath && style.visibility === 'visible' && alphaOf(style.webkitTextFillColor || style.color) > 0;
         for (const node of childrenOf(element)) {
@@ -688,6 +929,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
             }
             if (any) {
               chars += collapsed.length;
+              if (ownText.length < 200) ownText += collapsed;
               if (sample.length < options.sampleChars) sample = `${sample} ${collapsed}`.trim().slice(0, options.sampleChars);
             }
           } else if (node.nodeType === 1) {
@@ -702,20 +944,25 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
             frames.readable++;
             const origin = contentOrigin(element);
             const frameKey = keyOf(doc.documentElement);
+            // The viewport of the frame's document scrolls what its own root (or body) does not clip.
+            const own = documentOverflow(doc);
+            const frameView = doc.defaultView;
+            const scrolling = doc.scrollingElement ?? doc.documentElement;
             clips.push({
               key: frameKey,
               rect: rect(origin.x + context.offset.x, origin.y + context.offset.y, element.clientWidth, element.clientHeight),
-              x: 'auto',
-              y: 'auto',
-              scroll: [doc.documentElement.scrollWidth, doc.documentElement.scrollHeight, 0, 0, element.clientWidth, element.clientHeight],
+              x: own.x,
+              y: own.y,
+              scroll: [scrolling.scrollWidth, scrolling.scrollHeight, r2(frameView?.scrollX ?? 0), r2(frameView?.scrollY ?? 0), element.clientWidth, element.clientHeight],
               tag: 'iframe',
               role: '',
               frame: true,
               ...(layer !== undefined ? { layer } : {}),
             });
             const inner = chainWith(contentChain, frameKey);
+            // As laid out at the frame's own scroll position, as the content of a scroll container is.
             const offset = { x: origin.x + context.offset.x, y: origin.y + context.offset.y };
-            visit(doc.documentElement, { ...child, chain: inner, absChain: inner, fixedChain: inner, offset, top: false });
+            visit(doc.documentElement, { ...child, chain: inner, absChain: inner, fixedChain: inner, offset, top: false, bodyPropagates: own.bodyPropagates });
           } else frames.opaque++;
         }
 
@@ -737,9 +984,11 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
               ...(transformed ? { transformed: true } : {}),
               ...(ruby !== undefined ? { ruby } : {}),
               ...(popup ? { popup: true } : {}),
-              ...(decorative ? { decorative: true } : {}),
+              // Hidden from assistive technology: a glyph is decoration; text is measured, as what is seen.
+              ...(decorative ? (glyphLike(ownText, style) ? { decorative: true } : { hiddenFromAT: true }) : {}),
               ...(moving ? { moving: true } : {}),
               ...(isControlled ? { controlled: true } : {}),
+              ...(placed ? { placed } : {}),
               sample,
             });
           } else textsBeyond++;
@@ -761,6 +1010,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
                 paints: paintsOwn(element, style) && style.visibility === 'visible',
                 ...(style.display === 'inline' ? { inline: true } : {}),
                 ...(decorative ? { decorative: true } : {}),
+                ...(isControlled ? { controlled: true } : {}),
+                ...(placed ? { placed } : {}),
                 tag,
               });
             } else boxesBeyond++;
@@ -794,9 +1045,11 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         decorative: false,
         moving: false,
         controlled: false,
+        placed: undefined,
         contained: false,
         offset: { x: window.scrollX, y: window.scrollY },
         top: true,
+        bodyPropagates: documentOverflow(document).bodyPropagates,
       });
       range.detach();
       const scrolling = document.scrollingElement ?? document.documentElement;
@@ -831,7 +1084,7 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           if (++walked > options.maxElements) return;
           const style = getComputedStyle(element);
           if (style.display === 'none') continue;
-          if ((style.position === 'fixed' && !contained) || style.position === 'sticky') {
+          if (((style.position === 'fixed' && !contained) || style.position === 'sticky') && element.localName !== 'body' && element.localName !== 'html') {
             found.push(element);
             continue;
           }
@@ -891,9 +1144,48 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
         const controls = visibleControls.length;
         const landmark = LANDMARK_TAGS.includes(element.localName) || LANDMARK_ROLES.includes(role) || element.querySelector(':scope > header, :scope > footer, :scope > nav') !== null;
         const dialog = ['dialog', 'alertdialog'].includes(role) || element.getAttribute('aria-modal') === 'true' || (element.localName === 'dialog' && element.hasAttribute('open'));
-        const modalSelf = element.getAttribute('aria-modal') === 'true' || element.matches(':modal');
-        const modal = modalSelf || [...element.querySelectorAll('[aria-modal="true"],dialog')].some((item) => (item.getAttribute('aria-modal') === 'true' || item.matches(':modal')) && isShown(item));
-        const dismissControl = [...visibleControls, ...(isControl(element) ? [element] : [])].some((item) => dismissName(nameOf(item)));
+        const view: ReflowRect = [0, 0, document.documentElement.clientWidth, document.documentElement.clientHeight];
+        const inView = (item: Element): boolean => {
+          const box = item.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && box.right > view[0] + 1 && box.bottom > view[1] + 1 && box.left < view[2] - 1 && box.top < view[3] - 1;
+        };
+        // Modal: a dialog opened modally (the top layer), aria-modal, an open popover; shown, and in the viewport (not a drawer parked off screen).
+        const modalOf = (item: Element): boolean => (item.getAttribute('aria-modal') === 'true' || item.matches(':modal') || item.matches(':popover-open')) && isShown(item) && inView(item);
+        const modal = modalOf(element) || [...element.querySelectorAll('[aria-modal="true"],dialog,[popover]')].some(modalOf);
+        // A way to dismiss it: a button shown in the viewport and in the layer, named to close, accept or refuse. Never in
+        // a header or a navigation, unless the layer is a dialog: "Close the menu" closes a menu, not the bar.
+        const inBar = element.closest('header,nav,[role="banner"],[role="navigation"]') !== null;
+        const box = element.getBoundingClientRect();
+        const inLayer = (item: Element): boolean => {
+          const own = item.getBoundingClientRect();
+          return own.right > box.left && own.left < box.right && own.bottom > box.top && own.top < box.bottom;
+        };
+        const dismissControl =
+          (dialog || !inBar) &&
+          [...visibleControls, ...(isControl(element) ? [element] : [])].some((item) => item.matches(BUTTON_SELECTOR) && inView(item) && inLayer(item) && dismissesByName(nameOf(item)));
+        // Over the page: the browser's hit test finds it on top at most points of the viewport it covers.
+        let hits = 0;
+        let points = 0;
+        const force = new CSSStyleSheet();
+        force.replaceSync('*,*::before,*::after{pointer-events:auto!important}');
+        const adopted = document.adoptedStyleSheets;
+        document.adoptedStyleSheets = [...adopted, force];
+        try {
+          for (const fx of [0.2, 0.5, 0.8]) {
+            for (const fy of [0.2, 0.5, 0.8]) {
+              const x = Math.max(box.left, 0) + (Math.min(box.right, view[2]) - Math.max(box.left, 0)) * fx;
+              const y = Math.max(box.top, 0) + (Math.min(box.bottom, view[3]) - Math.max(box.top, 0)) * fy;
+              if (x < 0 || y < 0 || x >= view[2] || y >= view[3]) continue;
+              points++;
+              // It, or another layer over the page (the dialog on its backdrop): not the page.
+              const hit = document.elementFromPoint(x, y);
+              if (hit && (composedContains(element, hit) || floating(hit))) hits++;
+            }
+          }
+        } finally {
+          document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== force);
+        }
+        const covers = points > 0 && hits >= options.coverMinHitShare * points;
         out.push({
           key: keyOf(element),
           position: style.position === 'fixed' ? 'fixed' : 'sticky',
@@ -901,6 +1193,8 @@ export function reflowAgentFactory(options: AgentReflowOptions): ReflowAgent {
           painted,
           ...(dialog ? { dialog: true } : {}),
           ...(modal ? { modal: true } : {}),
+          ...(covers ? { covers: true } : {}),
+          ...(points > 0 && hits === 0 ? { behind: true } : {}),
           ...(dismissControl ? { dismissControl: true } : {}),
           ...(landmark ? { landmark: true } : {}),
           buttons,

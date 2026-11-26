@@ -1,0 +1,9 @@
+{
+  "description": "An entrance animation that runs once moves nothing for good: the text cut by the box is lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

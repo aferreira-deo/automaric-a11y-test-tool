@@ -1,0 +1,9 @@
+{
+  "description": "In an application shell, a top bar outside the scroller and a header stuck inside it leave less than half of 256 px to read: likely.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div > div:nth-of-type(2) > header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["mainScroller"] }
+  ]
+}

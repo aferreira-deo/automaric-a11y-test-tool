@@ -1,0 +1,12 @@
+{
+  "description": "A body fixed in place to stop the page from scrolling is the page, not a fixed layer: what it leaves below the viewport is out of reach because the document is locked (scroll-locked), and an open modal is over it, so info (modalOpen). Nothing is lost.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#consent", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline", "dismissible"] },
+    { "selector": "#consent", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": ["atBaseline", "dismissible"] },
+    { "selector": "html", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": ["fullScreenLayer", "modalOpen"] },
+    { "selector": "html", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": ["fullScreenLayer", "modalOpen"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

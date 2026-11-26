@@ -1,0 +1,9 @@
+{
+  "description": "Two columns inside a wrapper with overflow: auto that has nothing to scroll, cut by a body with overflow-x: hidden: a scroller that cannot scroll that far reaches nothing, and the second column is lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["control", "rootOverflowHidden"] }
+  ]
+}

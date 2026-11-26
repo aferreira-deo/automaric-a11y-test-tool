@@ -136,4 +136,41 @@ describe('withStablePage, putting the page back', () => {
     expect(methods).toContain('Emulation.setPageScaleFactor');
     expect(methods).not.toContain('Emulation.clearDeviceMetricsOverride');
   });
+
+  it('with reapplyEmulation, clears its own override once, hands the emulation back to the caller before the scroll positions are put back, and leaves nothing of its own', async () => {
+    const sent: string[] = [];
+    const cdp: CdpSession = {
+      send(method) {
+        sent.push(method);
+        return Promise.resolve({});
+      },
+      on: () => undefined,
+      off: () => undefined,
+    };
+    const world: World = {
+      contextId: 1,
+      evaluate(expression) {
+        sent.push(expression.endsWith('.cleanup()') ? 'agent.cleanup' : 'agent');
+        return Promise.resolve({ result: { value: 1 } });
+      },
+    };
+    await withStablePage(cdp, world, original, resolveConfig({}), {}, (page) => {
+      page.onRestore(() => page.restoreMetrics().then(() => sent.push('collector.scrolls')));
+      return Promise.resolve();
+    }, {
+      emulation: 'reapply',
+      reapplyEmulation: () => {
+        sent.push('caller.emulation');
+        return Promise.resolve();
+      },
+    });
+    expect(sent.filter((method) => method === 'Emulation.clearDeviceMetricsOverride')).toHaveLength(1);
+    expect(sent.filter((method) => method === 'caller.emulation')).toHaveLength(1);
+    const clear = sent.indexOf('Emulation.clearDeviceMetricsOverride');
+    expect(sent.indexOf('caller.emulation')).toBe(clear + 1);
+    expect(sent.indexOf('collector.scrolls')).toBeGreaterThan(clear);
+    expect(sent.indexOf('agent.cleanup')).toBeGreaterThan(clear);
+    // Nothing of this session's metrics is set once the caller's emulation is back.
+    expect(sent.lastIndexOf('Emulation.setDeviceMetricsOverride')).toBeLessThan(clear);
+  });
 });

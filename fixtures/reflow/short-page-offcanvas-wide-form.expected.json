@@ -1,0 +1,10 @@
+{
+  "description": "A short page with an absolutely positioned navigation parked beyond the right edge (right: -320px) and a 620 px form. The parked navigation is no evidence of a page laid out horizontally: at 320 px the form needs horizontal scrolling (fail), the navigation lay beyond the edge at the baseline too (info), and at 256 px nothing fails for scrolling vertically.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "#nav", "check": "reflow", "status": "info", "wcag": "1.4.10", "rule": "reflow/two-dimensional-scroll", "flags": ["atBaseline"] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/two-dimensional-scroll", "flags": [] }
+  ]
+}

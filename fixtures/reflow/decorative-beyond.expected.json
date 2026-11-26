@@ -1,8 +1,9 @@
 {
-  "description": "A large decorative word (aria-hidden) that reaches beyond the right edge at 320 px: decoration is never the cause of a failure. Nothing is reported.",
+  "description": "A large word hidden from assistive technology (aria-hidden) that reaches beyond the right edge at 320 px. Visible text marked aria-hidden is measured as what is seen, but what is found about it alone is advisory at most (hiddenFromAT): the document needs horizontal scrolling for it, advisory. Never a failure.",
   "checks": ["reflow"],
   "exact": true,
   "expected": [
+    { "selector": "html > body > div > span", "check": "reflow", "status": "advisory", "wcag": "1.4.10", "rule": "reflow/two-dimensional-scroll", "flags": ["hiddenFromAT"] },
     { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
   ]
 }

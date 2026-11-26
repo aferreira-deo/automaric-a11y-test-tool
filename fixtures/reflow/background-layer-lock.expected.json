@@ -1,0 +1,9 @@
+{
+  "description": "A full-viewport background behind the page (z-index: -1) is no modal layer: what the locked document leaves below the viewport is out of reach. Fail at 320 px; the background obscures nothing.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/scroll-locked", "flags": [] },
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" }
+  ]
+}

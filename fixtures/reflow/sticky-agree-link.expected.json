@@ -1,0 +1,9 @@
+{
+  "description": "A link whose name holds agree dismisses nothing: the header is not dismissible, and sticky-obscures is likely.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > header", "check": "reflow", "status": "likely", "wcag": "1.4.10", "rule": "reflow/sticky-obscures", "flags": [] }
+  ]
+}

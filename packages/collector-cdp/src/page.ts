@@ -49,9 +49,10 @@ export interface StablePage {
   onRestore: (step: () => Promise<unknown>) => void;
   /**
    * Sets the device metrics the page is to have once the collection is over, for a collector that changed the
-   * viewport and puts back scroll positions after it: the metrics read before anything was overridden when the
-   * caller asked for them back (`RestoreOptions.emulation: 'reapply'`), otherwise the stable override of the
-   * collection (cleared at the very end).
+   * viewport and puts back scroll positions after it: the caller's own emulation, sent again by the caller once
+   * this session's override is cleared (`RestoreOptions.reapplyEmulation`); or the metrics read before anything
+   * was overridden when the caller asked for them back (`RestoreOptions.emulation: 'reapply'`); otherwise the
+   * stable override of the collection (cleared at the very end).
    */
   restoreMetrics: () => Promise<unknown>;
 }
@@ -232,6 +233,14 @@ export interface RestoreOptions {
    * caller that emulates through a session of its own and keeps this session attached (the Playwright wrapper).
    */
   emulation?: 'clear' | 'reapply';
+  /**
+   * For a caller that emulates through a session of its own (the Playwright wrapper): has that emulation sent
+   * again. When given, the metrics are not put back from here: this session's override is cleared, which in
+   * Chrome also drops the caller's, and this is called right after, before the scroll positions are put back,
+   * so that they are put back in the layout the page keeps. Nothing of this session's emulation is left
+   * afterwards, whatever `emulation` says.
+   */
+  reapplyEmulation?: () => Promise<void>;
 }
 
 /**
@@ -249,7 +258,10 @@ export interface RestoreOptions {
  * state only if nobody else had set one. With `restore.emulation: 'reapply'` it reads the metrics
  * from the page before overriding them (size of the visual viewport at scale 1, device pixel
  * ratio, mobile, screen, page scale), sets them again before the scroll positions are put back,
- * and leaves them: right for a caller that keeps this session attached (the Playwright wrapper).
+ * and leaves them: right for a caller that keeps this session attached. A caller that emulates through a
+ * session of its own and can have that emulation sent again (the Playwright wrapper) passes
+ * `restore.reapplyEmulation`: this session's override is then cleared before the scroll positions are put
+ * back, the caller's emulation is sent again, and nothing of this session's is left.
  * Media features are different: only `prefers-reduced-motion` is touched, the others keep
  * whatever value another session gave them. `cdp` itself should carry no media emulation.
  */
@@ -350,9 +362,19 @@ export async function withStablePage<T>(
 
   // Read before anything is overridden.
   let originalMetrics: OriginalMetrics | null = null;
-  const reapply = restore.emulation === 'reapply';
+  const handBack = restore.reapplyEmulation;
+  const reapply = !handBack && restore.emulation === 'reapply';
+  let handedBack = false;
   const stableMetrics = (): Promise<unknown> => cdp.send('Emulation.setDeviceMetricsOverride', { ...original.viewport, deviceScaleFactor: scale, mobile: false });
   const restoreMetrics = async (): Promise<void> => {
+    if (handBack) {
+      // Once: the override of this session is cleared, and the caller sends its own emulation again.
+      if (handedBack) return;
+      handedBack = true;
+      await cdp.send('Emulation.clearDeviceMetricsOverride');
+      await handBack();
+      return;
+    }
     if (!reapply || !originalMetrics) {
       await stableMetrics();
       return;
@@ -421,7 +443,7 @@ export async function withStablePage<T>(
     };
     for (const restorer of [...restorers].reverse()) await step(restorer);
     // The scroll positions are put back in the layout the page will have: with the caller's own metrics.
-    if (reapply && originalMetrics) await step(restoreMetrics);
+    if ((reapply && originalMetrics) || handBack) await step(restoreMetrics);
     if (agentReady) await step(() => agent('cleanup()'));
     // Reading the accessibility tree enables the domain in this session: a session kept for the next scan
     // (the Playwright wrapper keeps it) starts from a clean one, as a new session would.
@@ -430,6 +452,7 @@ export async function withStablePage<T>(
     await step(() => cdp.send('DOM.disable'));
     await step(() => cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false }));
     if (overrideMotion) await step(() => setMedia([]));
-    if (!(reapply && originalMetrics)) await step(() => cdp.send('Emulation.clearDeviceMetricsOverride'));
+    // Cleared already when the caller's emulation was handed back: clearing again could only be harmful.
+    if (!(reapply && originalMetrics) && !handedBack) await step(() => cdp.send('Emulation.clearDeviceMetricsOverride'));
   }
 }

@@ -1,0 +1,9 @@
+{
+  "description": "The second column of a grid lies wholly beyond the right edge of a viewport that does not scroll horizontally: lost. Fail.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div > section:nth-of-type(2)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["control", "rootOverflowHidden"] }
+  ]
+}

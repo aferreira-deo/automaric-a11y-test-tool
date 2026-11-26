@@ -76,8 +76,30 @@ export interface ReflowPixelCandidate {
   region: ReflowRect;
   /** Share of the smaller middle band of a line that the other covers. */
   share: number;
-  /** The other is decorative text: `a` is the one that may be covered, whichever the hit test finds on top, and only ink hidden under the other counts. */
+  /**
+   * The other is text hidden from assistive technology (`ReflowText.hiddenFromAT`): `a` is real text. When the other
+   * lies on top, `a` is the covered one and only ink of it that the other hides counts; when `a` lies on top, the other
+   * is the covered one, unless it is placed out of the flow (`behind`): decoration laid out behind real text.
+   */
   coverOnly?: boolean;
+  behind?: boolean;
+  /** `a` is text hidden from assistive technology under a box. */
+  hiddenA?: boolean;
+}
+
+/**
+ * Which of a pair is the covered one, from which of the two the hit test finds on top: null when nothing is to be
+ * captured (a text over the box under it, real text over decoration laid out behind it). `coverOnly`: only ink of
+ * the covered text that the other hides counts (decoration over real text). `hidden`: the covered one is text hidden
+ * from assistive technology: what is found is advisory at most.
+ */
+export function reflowPixelRoles(candidate: ReflowPixelCandidate, top: 'a' | 'b' | 'unknown'): { victim: number; cover: number; coverOnly: boolean; hidden: boolean } | null {
+  if (candidate.kind === 'box') return top === 'a' ? null : { victim: candidate.a, cover: candidate.b, coverOnly: false, hidden: !!candidate.hiddenA };
+  if (candidate.coverOnly) {
+    if (top === 'a') return candidate.behind ? null : { victim: candidate.b, cover: candidate.a, coverOnly: false, hidden: true };
+    return { victim: candidate.a, cover: candidate.b, coverOnly: true, hidden: false };
+  }
+  return top === 'a' ? { victim: candidate.b, cover: candidate.a, coverOnly: false, hidden: false } : { victim: candidate.a, cover: candidate.b, coverOnly: false, hidden: false };
 }
 
 /** What the captures of a pixel test show (device pixels). */
@@ -258,81 +280,127 @@ interface LineLoss {
 
 /** What one axis of a rectangle becomes on its way out through its clipping ancestors and the root. */
 interface AxisReach {
-  /** Visible at once, in the best case of every scroll position: the part of the line, or the window it is seen through. */
-  lo: number;
-  hi: number;
-  /** The line was passed through a scroll container: [lo, hi] is then the window, and `need` what of the line has to fit in it. */
-  window: boolean;
-  need: number;
+  /** Some scroll position of the scrollers around it shows it with less than the threshold hidden. */
+  ok: boolean;
+  /** Some scroll position shows something of it. */
+  any: boolean;
+  /** What of it stays hidden at the best position (frame by frame: the largest of what each one hides at least). */
+  missing: number;
   /** What made it too small, first. */
   by: LostBy | null;
   side?: Side;
 }
 
+type Interval = [number, number];
+
+function meet(a: Interval | null, b: Interval | null): Interval | null {
+  if (!a || !b) return null;
+  const lo = Math.max(a[0], b[0]);
+  const hi = Math.min(a[1], b[1]);
+  return hi >= lo ? [lo, hi] : null;
+}
+
 /**
- * Reachability of an extent of a line on one axis, scroll container by scroll container from the inside out. A
- * line inside a scroller is reachable when it lies in what the scroller can scroll to (not before its start);
- * from there on what matters is the scroller's own box, which is the window the line is read through, and that
- * window is what the next clipping ancestor and the root are tested against: never the raw position of the line,
- * which scrolling moves.
+ * Where an extent of `length` may start for less than `allowed` of it to lie outside the window `[w0, w1]`; null
+ * when nowhere. Inside a window at least as long, from `w0 - allowed` to `w1 - length + allowed`; in a shorter
+ * one, around the positions where it covers the window, while what sticks out stays under what is allowed.
+ */
+function placesIn(length: number, w0: number, w1: number, allowed: number): Interval | null {
+  const slack = allowed - Math.max(0, length - Math.max(0, w1 - w0)) - 1e-6;
+  if (slack <= 0) return null;
+  return [Math.min(w0, w1 - length) - slack, Math.max(w0, w1 - length) + slack];
+}
+
+/** The least of an extent that lies outside the window, over the starts it may take. */
+function leastOutside(length: number, w0: number, w1: number, starts: Interval): number {
+  const best0 = Math.min(w0, w1 - length);
+  const best1 = Math.max(w0, w1 - length);
+  const base = Math.max(0, length - Math.max(0, w1 - w0));
+  const away = starts[0] > best1 ? starts[0] - best1 : starts[1] < best0 ? best0 - starts[1] : 0;
+  return Math.min(length, base + away);
+}
+
+/**
+ * Reachability of an extent of a line (or a control) on one axis, from the inside out. The positions it can take are
+ * carried as an interval of where it starts: each scroll container adds what scrolling it moves its content by (from
+ * where it is scrolled to, `[pos − (max − scroll), pos + scroll]`), and the boxes that clip it (those of clipping
+ * ancestors, the scroller's own, which does not move with it, the viewport and the start edge of the document) keep
+ * only the positions where it is shown, wholly or with less than `minVisible` of it hidden. Boxes that scroll
+ * together are taken together. A line longer than the box of a scroller it is in is read across that box by
+ * scrolling (which `two-dimensional-scroll` reports): what has to be shown at once is then as long as that box.
  */
 function reachAxis(layout: Layout, start: number, end: number, chain: number, layer: number | undefined, axis: 'x' | 'y', minVisible: number): AxisReach {
   const vp = layout.viewport;
-  const out: AxisReach = { lo: start, hi: end, window: false, need: end - start, by: null };
-  const missing = (): number => (out.window ? Math.max(0, out.need - Math.max(0, out.hi - out.lo)) : end - start - Math.max(0, out.hi - out.lo));
-  const cut = (lo: number, hi: number, by: LostBy, side?: Side): void => {
-    const before = missing();
-    out.lo = Math.max(out.lo, lo);
-    out.hi = Math.min(out.hi, hi);
-    if (out.by === null && (out.hi <= out.lo || (missing() >= minVisible && before < minVisible) || (missing() > before && minVisible <= 0.01))) {
-      out.by = by;
-      if (side) out.side = side;
-    }
-  };
-  for (const clip of layout.chain(chain)) {
-    if (out.hi <= out.lo) break;
+  const tolerance = layout.config.toleranceCssPx;
+  const full = Math.max(0, end - start);
+  const clips = layout.chain(chain).filter((clip) => (axis === 'x' ? clip.x : clip.y) !== 'visible');
+  const boxOf = (clip: ReflowClipBox): Interval => (axis === 'x' ? [clip.rect[0], right(clip.rect)] : [clip.rect[1], bottom(clip.rect)]);
+  const scrolls = (clip: ReflowClipBox): boolean => {
     const mode = axis === 'x' ? clip.x : clip.y;
-    if (mode === 'visible') continue;
-    const box0 = axis === 'x' ? clip.rect[0] : clip.rect[1];
-    const box1 = axis === 'x' ? right(clip.rect) : bottom(clip.rect);
-    // A body that clips is the viewport that does not scroll, as overflow on the root is.
-    const by: LostBy = clip.tag === 'body' && (mode === 'hidden' || mode === 'clip') ? (axis === 'x' ? 'rootX' : 'rootY') : clip.key;
-    if (mode === 'hidden' || mode === 'clip') {
-      cut(box0, box1, by);
+    return mode === 'auto' || mode === 'scroll';
+  };
+  // What has to be shown at once: the line, or as much of it as the smallest scroller it is in shows.
+  const length = Math.min(full, ...clips.filter(scrolls).map((clip) => Math.max(0, boxOf(clip)[1] - boxOf(clip)[0])));
+  const out: AxisReach = { ok: true, any: true, missing: 0, by: null };
+  let ok: Interval | null = [start, start + (full - length)];
+  let any: Interval | null = ok;
+  let worst = 0;
+  let frame: { lo: number; hi: number; by: LostBy; side?: Side }[] = [];
+  const close = (): void => {
+    let w0 = -Infinity;
+    let w1 = Infinity;
+    for (const box of frame) {
+      w0 = Math.max(w0, box.lo);
+      w1 = Math.min(w1, box.hi);
+      if (out.by === null && meet(ok, placesIn(length, w0, w1, minVisible)) === null) {
+        out.by = box.by;
+        if (box.side) out.side = box.side;
+      }
+    }
+    ok = meet(ok, placesIn(length, w0, w1, minVisible));
+    if (any) worst = Math.max(worst, leastOutside(length, w0, w1, any));
+    any = meet(any, placesIn(length, w0, w1, length));
+    frame = [];
+  };
+  for (const clip of clips) {
+    const [box0, box1] = boxOf(clip);
+    if (!scrolls(clip)) {
+      // A body that clips is the viewport that does not scroll, as overflow on the root is; not that of a frame.
+      const by: LostBy = clip.tag === 'body' && !clip.inFrame ? (axis === 'x' ? 'rootX' : 'rootY') : clip.key;
+      frame.push({ lo: box0, hi: box1, by });
       continue;
     }
-    // A scroll container: what it can scroll to, in the coordinates of the layout as measured.
-    const [sw, sh, sl, st] = clip.scroll;
-    const tolerance = layout.config.toleranceCssPx;
-    const [area0, area1] =
-      axis === 'x' ? (clip.rtl ? [box1 - sl - sw, box1 - sl] : [box0 - sl, box0 - sl + sw]) : [box0 - st, box0 - st + sh];
-    cut(area0 - tolerance, area1 + tolerance, clip.key);
-    if (out.hi <= out.lo) break;
-    // From here on the line is read through the box of the scroller, wherever it is scrolled to.
-    out.need = Math.min(out.window ? out.need : out.hi - out.lo, box1 - box0);
-    out.window = true;
-    out.lo = box0;
-    out.hi = box1;
+    // A scroll container: what it holds moves with its scrolling, its own box does not.
+    close();
+    if (!any) break;
+    const [sw, sh, sl, st, cw, ch] = clip.scroll;
+    const range = axis === 'x' ? Math.max(0, sw - cw) : Math.max(0, sh - ch);
+    const at = axis === 'x' ? sl : st;
+    const [d0, d1] = axis === 'x' && clip.rtl ? [at, at + range] : [at - range, at];
+    ok = ok ? [ok[0] + d0 - tolerance, ok[1] + d1 + tolerance] : null;
+    any = [any[0] + d0 - tolerance, any[1] + d1 + tolerance];
+    frame.push({ lo: box0, hi: box1, by: clip.key });
   }
-  if (out.hi <= out.lo) return out;
-  const extent = axis === 'x' ? vp.clientWidth : vp.clientHeight;
-  if (layout.inFixed(layer)) {
-    // A fixed element does not scroll with the document: what lies outside the viewport stays there.
-    if (out.lo < 0) cut(0, Infinity, 'fixed', axis === 'x' ? 'left' : 'top');
-    if (out.hi > extent) cut(-Infinity, extent, 'fixed', axis === 'x' ? 'right' : 'bottom');
-    return out;
+  if (any) {
+    const extent = axis === 'x' ? vp.clientWidth : vp.clientHeight;
+    if (layout.inFixed(layer)) {
+      // A fixed element does not scroll with the document: what lies outside the viewport stays there.
+      frame.push({ lo: 0, hi: Infinity, by: 'fixed', side: axis === 'x' ? 'left' : 'top' });
+      frame.push({ lo: -Infinity, hi: extent, by: 'fixed', side: axis === 'x' ? 'right' : 'bottom' });
+    } else if (axis === 'x') {
+      // The start edge: the left of a document laid out left to right, the right of one laid out from the right.
+      frame.push(vp.rtl ? { lo: -Infinity, hi: vp.clientWidth, by: 'edge', side: 'right' } : { lo: 0, hi: Infinity, by: 'edge', side: 'left' });
+      const [minX, maxX] = layout.reach('x');
+      frame.push({ lo: minX, hi: maxX, by: 'rootX', side: vp.rtl ? 'left' : 'right' });
+    } else {
+      frame.push({ lo: 0, hi: Infinity, by: 'edge', side: 'top' });
+      frame.push({ lo: -Infinity, hi: layout.reach('y')[1], by: 'rootY', side: 'bottom' });
+    }
+    close();
   }
-  if (axis === 'x') {
-    // The start edge: the left of a document laid out left to right, the right of one laid out right to left.
-    if (vp.rtl) cut(-Infinity, vp.clientWidth, 'edge', 'right');
-    else cut(0, Infinity, 'edge', 'left');
-    const [minX, maxX] = layout.reach('x');
-    cut(minX, maxX, 'rootX', vp.rtl ? 'left' : 'right');
-  } else {
-    cut(0, Infinity, 'edge', 'top');
-    const [, maxY] = layout.reach('y');
-    cut(-Infinity, maxY, 'rootY', 'bottom');
-  }
+  out.ok = ok !== null;
+  out.any = any !== null;
+  out.missing = any ? worst : full;
   return out;
 }
 
@@ -343,16 +411,15 @@ function lossOf(layout: Layout, rect: R, chain: number, layer: number | undefine
   const minY = share === undefined ? config.lostMinLineShare * rect[3] : 0.01;
   const x = reachAxis(layout, rect[0], right(rect), chain, layer, 'x', minX);
   const y = reachAxis(layout, rect[1], bottom(rect), chain, layer, 'y', minY);
-  const visible = (a: AxisReach, length: number): number => (a.hi <= a.lo ? 0 : a.window ? Math.max(0, length - Math.max(0, a.need - (a.hi - a.lo))) : a.hi - a.lo);
-  const vx = visible(x, rect[2]);
-  const vy = visible(y, rect[3]);
-  const shown: R | null = vx > 0 && vy > 0 ? [x.window ? rect[0] : x.lo, y.window ? rect[1] : y.lo, vx, vy] : null;
-  const lostX = share === undefined ? rect[2] - vx >= minX : false;
-  const lostY = share === undefined ? rect[3] - vy >= minY : false;
+  const vx = x.any ? Math.max(0, rect[2] - x.missing) : 0;
+  const vy = y.any ? Math.max(0, rect[3] - y.missing) : 0;
+  const shown: R | null = x.any && y.any ? [rect[0], rect[1], Math.max(vx, 0.01), Math.max(vy, 0.01)] : null;
+  const lostX = share === undefined ? !x.ok : false;
+  const lostY = share === undefined ? !y.ok : false;
   const lostArea = share !== undefined && (!shown || 1 - (vx * vy) / Math.max(area(rect), 0.0001) >= share);
   if (!shown || lostX || lostY || lostArea) {
     // The axis that loses the line names the cause; x first, as it did.
-    const pick = !shown ? (vx <= 0 ? x : y) : lostX ? x : lostY ? y : rect[2] - vx >= rect[3] - vy ? x : y;
+    const pick = !shown ? (!x.any ? x : y) : lostX ? x : lostY ? y : rect[2] - vx >= rect[3] - vy ? x : y;
     const other = pick === x ? y : x;
     const cause = pick.by ?? other.by;
     const side = pick.by !== null ? pick.side : other.side;
@@ -396,22 +463,20 @@ function toRoot(by: LostBy | null): boolean {
 }
 
 /**
- * Parked: wholly beyond the root's reach, nothing of it cut in part, as a closed off-canvas menu is (moved off
- * the page, whatever the side). Treated like content that is not displayed, never as lost. Inside a fixed layer
- * of which something is shown, content below the bottom of the viewport is not parked: it is the part of a
- * dialog or a banner that a short window leaves out of reach.
+ * What an item wholly beyond the root's reach is (an edge the document does not scroll to, the viewport around a
+ * fixed element). `parked`: out of the flow (`placed`: positioned, or moved off its place as a block) and named as
+ * content shown on demand (`controlled`: what a control names, a dialog, a popover), or hidden from assistive
+ * technology while it is off screen, as a closed drawer is: treated as content that is not displayed, never as lost.
+ * `likely`: out of the flow without any of that evidence. `lost`: in the flow (a column, a cell, a block, an item of a
+ * flex or grid row), or cut in part. Inside a fixed layer of which something is shown, content below the bottom of
+ * the viewport is lost: it is the part of a dialog or a banner that a short window leaves out of reach. Nothing of an
+ * ancestor decides it: only the item itself.
  */
-function parked(layout: Layout, loss: ItemLoss, item: { key: number; span: [number, number]; layer?: number | undefined }, whole: boolean, shownLayers: Set<number>): boolean {
-  if (!toRoot(loss.by) || !whole) return false;
-  if (loss.by === 'fixed') return !(loss.side === 'bottom' && item.layer !== undefined && shownLayers.has(item.layer));
-  // The end of a block too wide for the viewport is cut off with it, not parked: what pushes the item out has to
-  // lie wholly beyond the edge as well.
-  const cause = causeOf(layout, item);
-  if (cause === item.key) return true;
-  const rect = rectOfKey(layout, cause);
-  const vp = layout.viewport;
-  const tolerance = layout.config.toleranceCssPx;
-  return !rect || right(rect) <= tolerance || rect[0] >= vp.clientWidth - tolerance;
+function offScreen(loss: ItemLoss, item: { layer?: number | undefined; placed?: string | undefined; controlled?: boolean | undefined; hiddenFromAT?: boolean | undefined }, whole: boolean, shownLayers: Set<number>): 'lost' | 'parked' | 'likely' {
+  if (!toRoot(loss.by) || !whole) return 'lost';
+  if (loss.by === 'fixed' && loss.side === 'bottom' && item.layer !== undefined && shownLayers.has(item.layer)) return 'lost';
+  if (!item.placed) return 'lost';
+  return item.controlled || item.hiddenFromAT ? 'parked' : 'likely';
 }
 
 /** Fixed layers of which some text or control is shown in the viewport. */
@@ -432,17 +497,20 @@ function controlLoss(layout: Layout, box: ReflowBox): LineLoss {
   return lossOf(layout, box.rect, box.chain, box.layer, 0, layout.config.controlLostMinShare);
 }
 
-/** It scrolls horizontally and fits vertically, and that share of its running text lies in lines wholly beyond the inline end, where that scrolling reaches them. */
+/** Running text: in the flow (neither positioned nor moved), seen by assistive technology, not excepted content, in no layer, not rotated. */
+function running(text: ReflowText): boolean {
+  return !text.except && !text.decorative && !text.hiddenFromAT && text.layer === undefined && !text.transformed && !text.placed;
+}
+
+/** That share of its running text lies in lines wholly beyond the inline end. */
 function sideways(data: ReflowLayout, config: ReflowConfig): boolean {
   const vp = data.viewport;
-  const tolerance = config.scrollToleranceCssPx;
-  if (!userScrollable(vp.overflowX) || vp.scrollWidth <= vp.clientWidth + tolerance || vp.scrollHeight > vp.clientHeight + tolerance) return false;
   const layout = new Layout(data, config);
-  const running = data.texts.filter((text) => !text.except && !text.decorative && text.layer === undefined && !text.transformed);
-  const total = running.reduce((sum, text) => sum + text.chars, 0);
+  const texts = data.texts.filter(running);
+  const total = texts.reduce((sum, text) => sum + text.chars, 0);
   if (total === 0) return false;
   let beyond = 0;
-  for (const text of running) {
+  for (const text of texts) {
     const whole = text.lines.filter((line) => {
       const shown = layout.through(line, text.chain, 'all').rect;
       return shown !== null && (vp.rtl ? right(shown) <= config.toleranceCssPx : shown[0] >= vp.clientWidth - config.toleranceCssPx);
@@ -453,34 +521,36 @@ function sideways(data: ReflowLayout, config: ReflowConfig): boolean {
 }
 
 /**
- * The page is laid out to scroll horizontally, on positive evidence only: the root has a vertical writing mode;
- * or at the baseline the document scrolls horizontally and fits vertically, and running text is laid out in
- * lines wholly beyond the inline end, where that scrolling reaches it (`horizontalMinTextShare`), at the
- * baseline or, given, at the narrow pass, which a page that scrolls vertically answers by growing downwards. A
- * page that is a little too wide (a ribbon, a box with a negative margin) is not one.
+ * The page is laid out to scroll horizontally, on positive evidence of the reference layout only: the root has a
+ * vertical writing mode; or the document scrolls horizontally and not vertically, and either its root (or body) is
+ * a horizontal track (it snaps horizontally, or is a flex row that does not wrap) or most of its running text in the
+ * flow (`horizontalMinTextShare`) is laid out in lines wholly beyond the inline end. Content out of the flow (an
+ * off-canvas menu parked beyond the edge) is no evidence, nor a page that is a little too wide. `narrow` is not
+ * used: what the reference layout is decides.
  */
-export function horizontalLayout(baseline: ReflowLayout, config: ReflowConfig, narrow?: ReflowLayout): boolean {
+export function horizontalLayout(baseline: ReflowLayout, config: ReflowConfig, _narrow?: ReflowLayout): boolean {
   const vp = baseline.viewport;
   if (vp.vertical) return true;
   const tolerance = config.scrollToleranceCssPx;
-  if (!userScrollable(vp.overflowX) || vp.scrollWidth <= vp.clientWidth + tolerance || vp.scrollHeight > vp.clientHeight + tolerance) return false;
-  return sideways(baseline, config) || (narrow !== undefined && sideways(narrow, config));
+  if (!userScrollable(vp.overflowX) || vp.scrollWidth <= vp.clientWidth + tolerance) return false;
+  if (vp.scrollHeight > vp.clientHeight + tolerance && userScrollable(vp.overflowY)) return false;
+  return vp.track !== undefined || sideways(baseline, config);
 }
 
 /**
  * The axis on which content beyond the viewport needs a second direction of scrolling, for a pass; null when the
  * rule does not apply. The narrow pass always looks at the horizontal axis; the short one at the vertical axis of
- * a page laid out horizontally (`horizontalLayout`, with the narrow pass when it ran).
+ * a page laid out horizontally (`horizontalLayout`).
  */
-export function beyondAxisOf(pass: ReflowPassName, baseline: ReflowLayout, config: ReflowConfig, narrow?: ReflowLayout): 'x' | 'y' | null {
-  if (pass === 'short') return horizontalLayout(baseline, config, narrow) ? 'y' : null;
+export function beyondAxisOf(pass: ReflowPassName, baseline: ReflowLayout, config: ReflowConfig, _narrow?: ReflowLayout): 'x' | 'y' | null {
+  if (pass === 'short') return horizontalLayout(baseline, config) ? 'y' : null;
   return 'x';
 }
 
 /** Whether a pass is of a page laid out horizontally: what the collector decided for the short pass, measured for the others. */
 function horizontalFor(base: Layout, layout: Layout): boolean {
   if (layout.data.pass === 'short') return layout.data.beyondAxis === 'y';
-  return horizontalLayout(base.data, layout.config, layout.data.pass === 'narrow' ? layout.data : undefined);
+  return horizontalLayout(base.data, layout.config);
 }
 
 /** How far a rectangle reaches beyond the viewport edge on an axis (0 when it does not). */
@@ -500,6 +570,10 @@ interface BeyondItem {
   reach: number;
   first: R;
   sample: string;
+  /** Text hidden from assistive technology (`ReflowText.hiddenFromAT`). */
+  hidden: boolean;
+  /** Out of the flow (`ReflowText.placed`). */
+  placed: boolean;
 }
 
 /** Texts, controls and excepted content that lie beyond the edge on `axis` and that scrolling the document reaches. */
@@ -520,7 +594,7 @@ function beyondItems(layout: Layout, axis: 'x' | 'y'): BeyondItem[] {
       reach = Math.max(reach, by);
       first ??= shown;
     }
-    if (lines > 0 && first) out.push({ key: text.key, span: text.span, kind: text.except ?? 'text', lines, reach, first, sample: text.sample });
+    if (lines > 0 && first) out.push({ key: text.key, span: text.span, kind: text.except ?? 'text', lines, reach, first, sample: text.sample, hidden: !!text.hiddenFromAT, placed: !!text.placed });
   }
   for (const box of layout.data.boxes) {
     if (box.kind === 'box' || box.layer !== undefined || box.transformed || box.decorative) continue;
@@ -530,7 +604,7 @@ function beyondItems(layout: Layout, axis: 'x' | 'y'): BeyondItem[] {
     const extent = axis === 'x' ? shown[2] : shown[3];
     if (by <= 0) continue;
     if (box.kind === 'control' && by < config.controlBeyondMinShare * extent) continue;
-    out.push({ key: box.key, span: box.span, kind: box.kind === 'control' ? 'control' : box.kind, lines: 1, reach: by, first: shown, sample: '' });
+    out.push({ key: box.key, span: box.span, kind: box.kind === 'control' ? 'control' : box.kind, lines: 1, reach: by, first: shown, sample: '', hidden: false, placed: !!box.placed });
   }
   return out;
 }
@@ -596,24 +670,34 @@ function twoDimensional(base: Layout, layout: Layout): ReflowCandidate[] {
       const cause = causeOf(layout, item);
       groups.set(cause, [...(groups.get(cause) ?? []), item]);
     }
-    const bothAxes = axis === 'x' ? vp.scrollHeight - vp.clientHeight > config.scrollToleranceCssPx && userScrollable(vp.overflowY) : true;
-    const horizontal = axis === 'x' && horizontalFor(base, layout);
+    const scrollsVertically = vp.scrollHeight - vp.clientHeight > config.scrollToleranceCssPx && userScrollable(vp.overflowY);
+    const bothAxes = axis === 'x' ? scrollsVertically : true;
+    // A page laid out to scroll horizontally is meant to scroll that way: on the horizontal axis, nothing to report as
+    // long as it does not scroll vertically as well, which would be two dimensions whatever it is laid out as.
+    const skipX = axis === 'x' && !scrollsVertically && horizontalFor(base, layout);
+    // On the vertical axis (the short pass, a page laid out horizontally): only when the page still needs horizontal
+    // scrolling for its running text at this pass. One that grows downwards instead scrolls in one direction.
+    const skipY = axis === 'y' && !beyondItems(layout, 'x').some((item) => item.kind === 'text' && !item.hidden && !item.placed);
     for (const [cause, items] of groups) {
+      if (skipX || skipY) break;
       const running = items.filter((item) => item.kind === 'text' || item.kind === 'control');
       const fresh = running.filter((item) => !atBaseline.has(item.key));
+      const seen = fresh.filter((item) => !item.hidden);
       const excepted = [...new Set(items.filter((item) => item.kind !== 'text' && item.kind !== 'control').map((item) => item.kind))].sort();
       const flags: string[] = [];
       let status: Status;
-      // A page laid out to scroll horizontally is meant to scroll that way: nothing to report on this axis.
-      if (horizontal) continue;
-      if (fresh.length > 0) status = 'fail';
-      else {
+      if (seen.length > 0) status = 'fail';
+      else if (fresh.length > 0) {
+        // Text hidden from assistive technology alone: what is seen, but perhaps decoration.
+        status = 'advisory';
+        flags.push('hiddenFromAT');
+      } else {
         status = 'info';
         flags.push(running.length > 0 ? 'atBaseline' : 'exceptedOnly');
       }
       if (excepted.length > 0) flags.push('excepted');
       if (bothAxes) flags.push('documentScrollsBothAxes');
-      const first = (fresh[0] ?? running[0] ?? items[0])!;
+      const first = (seen[0] ?? fresh[0] ?? running[0] ?? items[0])!;
       const lines = running.filter((item) => item.kind === 'text').reduce((sum, item) => sum + item.lines, 0);
       const controls = running.filter((item) => item.kind === 'control').length;
       out.push({
@@ -694,6 +778,10 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
     sample: string;
     control: boolean;
     moving: boolean;
+    /** Text hidden from assistive technology. */
+    hidden: boolean;
+    /** Wholly beyond the root's reach, out of the flow, with nothing that names it (`offScreen`): likely at most. */
+    unnamed: boolean;
   }
   const groups = new Map<string, { by: LostBy; side: Side | undefined; items: Lost[] }>();
   const add = (by: LostBy, side: Side | undefined, item: Lost): void => {
@@ -703,7 +791,6 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
     groups.set(id, group);
   };
   const shownLayers = shownFixedLayers(layout);
-  const movedAway: ReflowText[] = [];
   const before = new Set(base.data.disclosures);
   const newDisclosure = layout.data.disclosures.some((key) => !before.has(key));
   for (const text of layout.data.texts) {
@@ -712,22 +799,30 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
     if (loss.lines === 0 || loss.by === null || loss.by === 'rootY') continue;
     const atBase = base.textByKey.get(text.key);
     if (!atBase || atBase.transformed || textLoss(base, atBase).lines > 0) continue;
-    if (parked(layout, loss, text, loss.whole === text.lines.length, shownLayers)) {
-      // What a control names in aria-controls, or what a disclosure control that appeared may show, is not reported at all.
-      if (!text.controlled && !newDisclosure) movedAway.push(text);
-      continue;
-    }
-    add(loss.by, loss.side, { key: text.key, lines: loss.lines, chars: Math.round((text.chars * loss.lines) / Math.max(1, text.lines.length)), first: loss.firstLine, sample: text.sample, control: false, moving: !!text.moving });
+    const where = offScreen(loss, text, loss.whole === text.lines.length, shownLayers);
+    // Content shown on demand and parked out of the flow, or hidden from assistive technology off screen: not reported.
+    if (where === 'parked') continue;
+    add(loss.by, loss.side, {
+      key: text.key,
+      lines: loss.lines,
+      chars: Math.round((text.chars * loss.lines) / Math.max(1, text.lines.length)),
+      first: loss.firstLine,
+      sample: text.sample,
+      control: false,
+      moving: !!text.moving,
+      hidden: !!text.hiddenFromAT,
+      unnamed: where === 'likely',
+    });
   }
   for (const box of layout.data.boxes) {
     if (box.kind !== 'control' || box.transformed || box.decorative) continue;
     const loss = controlLoss(layout, box);
     if (!loss.lost || loss.by === null || loss.by === 'rootY') continue;
-    // Wholly parked off screen, with the text it holds: counted with the text.
-    if (parked(layout, { lines: 1, whole: loss.shown ? 0 : 1, by: loss.by, ...(loss.side ? { side: loss.side } : {}), firstLine: box.rect }, box, !loss.shown, shownLayers)) continue;
+    const where = offScreen({ lines: 1, whole: loss.shown ? 0 : 1, by: loss.by, ...(loss.side ? { side: loss.side } : {}), firstLine: box.rect }, box, !loss.shown, shownLayers);
+    if (where === 'parked') continue;
     const atBase = base.boxByKey.get(box.key);
     if (!atBase || atBase.transformed || controlLoss(base, atBase).lost) continue;
-    add(loss.by, loss.side, { key: box.key, lines: 0, chars: 0, first: box.rect, sample: '', control: true, moving: false });
+    add(loss.by, loss.side, { key: box.key, lines: 0, chars: 0, first: box.rect, sample: '', control: true, moving: false, hidden: false, unnamed: where === 'likely' });
   }
   // Clipping elements that already cut text at the baseline: a viewport by design (a carousel, a ticker).
   const cutAtBaseline = new Set<number>();
@@ -740,15 +835,22 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
     const { by, side } = group;
     // Content that moves through what clips it by itself (a ticker) is not lost; with nothing else in the group, info at most.
     const still = group.items.filter((item) => !item.moving);
-    const items = still.length > 0 ? still : group.items;
+    // What assistive technology is told about counts first; text hidden from it alone is advisory at most.
+    const seen = still.filter((item) => !item.hidden);
+    const items = seen.length > 0 ? seen : still.length > 0 ? still : group.items;
     const first = items[0]!;
     const flags: string[] = [];
-    let status: Status = 'fail';
+    // In the flow, or cut in part: lost. Out of the flow beyond the root's reach with nothing naming it: likely.
+    let status: Status = items.some((item) => !item.unnamed) ? 'fail' : 'likely';
+    if (status === 'likely') flags.push('outOfFlow');
     let key: number;
     let box: R | null;
     if (still.length === 0) {
       status = 'info';
       flags.push('moving');
+    } else if (seen.length === 0) {
+      status = status === 'fail' || status === 'likely' ? 'advisory' : status;
+      flags.push('hiddenFromAT');
     }
     if (typeof by === 'number') {
       const clip = layout.clipByKey.get(by);
@@ -760,7 +862,7 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
         status = 'info';
         flags.push('moving');
       } else if (clip?.truncates) {
-        status = 'advisory';
+        status = status === 'fail' || status === 'likely' ? 'advisory' : status;
         flags.push(clip.truncates === 'ellipsis' ? 'ellipsis' : 'lineClamp');
       } else if (cutAtBaseline.has(by)) {
         status = 'info';
@@ -770,7 +872,7 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
         flags.push('carousel');
       } else if (clip?.revealControl) {
         // A control inside or beside it may show what it hides ("Read more", a menu button, arrows).
-        status = 'advisory';
+        status = status === 'fail' || status === 'likely' ? 'advisory' : status;
         flags.push('revealControl');
       }
       flags.push('clippedByAncestor');
@@ -812,12 +914,9 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
       sample: first.sample,
     });
   }
-  // Text displayed at the baseline that a pass does not display at all, or parks off screen where nothing reveals it.
+  // Text displayed at the baseline that a pass does not display at all.
   const shown = new Set(layout.data.texts.map((text) => text.key));
-  const missing = [
-    ...base.data.texts.filter((text) => !shown.has(text.key) && text.layer === undefined && !text.decorative && textLoss(base, text).lines === 0),
-    ...movedAway.flatMap((text) => base.textByKey.get(text.key) ?? []),
-  ];
+  const missing = base.data.texts.filter((text) => !shown.has(text.key) && text.layer === undefined && !text.decorative && textLoss(base, text).lines === 0);
   const hiddenChars = missing.reduce((sum, text) => sum + text.chars, 0);
   if (hiddenChars >= config.hiddenTextMinChars && !newDisclosure && missing.length > 0) {
     out.push({
@@ -828,8 +927,8 @@ function contentLost(base: Layout, layout: Layout): ReflowCandidate[] {
       key: missing[0]!.key,
       related: [],
       box: null,
-      flags: movedAway.length > 0 ? ['notDisplayed', 'offScreen'] : ['notDisplayed'],
-      values: { ...passValues(layout), textsNotDisplayed: missing.length, charsNotDisplayed: hiddenChars, ...(movedAway.length > 0 ? { textsMovedOffScreen: movedAway.length } : {}) },
+      flags: ['notDisplayed'],
+      values: { ...passValues(layout), textsNotDisplayed: missing.length, charsNotDisplayed: hiddenChars },
       capture: null,
       sample: missing[0]!.sample,
     });
@@ -852,7 +951,8 @@ interface Shown {
 function shownTexts(layout: Layout): Shown[] {
   const inset = layout.config.overlapCoreInset;
   return layout.data.texts.flatMap((text) => {
-    if (text.transformed || text.popup) return [];
+    // A glyph of decoration is left out of every rule.
+    if (text.transformed || text.popup || text.decorative) return [];
     const rects = text.lines.flatMap((line) => {
       const shown = layout.through(line, text.chain, 'all').rect;
       return shown ? [core(shown, inset)] : [];
@@ -967,18 +1067,30 @@ export function reflowPixelPlan(baseline: ReflowLayout, pass: ReflowLayout, conf
   const layout = new Layout(pass, config);
   const out: ReflowPixelCandidate[] = [];
   for (const pair of overlapPairs(layout)) {
-    // Decorative text (aria-hidden, inert) is never the one made unreadable; it may be what covers real text.
-    const aDecorative = !!(pair.a.item as ReflowText).decorative;
-    const bDecorative = pair.kind === 'text' && !!(pair.b.item as ReflowText).decorative;
-    if (aDecorative && (pair.kind === 'box' || bDecorative)) continue;
-    const [a, b] = aDecorative ? [pair.b.key, pair.a.key] : [pair.a.key, pair.b.key];
-    const coverOnly = aDecorative || bDecorative;
+    // Text hidden from assistive technology is tested as the covered one only under a box, or under real text laid
+    // over it (see `reflowPixelRoles`); with other such text, never.
+    const aHidden = !!(pair.a.item as ReflowText).hiddenFromAT;
+    const bHidden = pair.kind === 'text' && !!(pair.b.item as ReflowText).hiddenFromAT;
+    if (aHidden && bHidden) continue;
+    const [a, b] = aHidden && pair.kind === 'text' ? [pair.b.key, pair.a.key] : [pair.a.key, pair.b.key];
+    const coverOnly = pair.kind === 'text' && (aHidden || bHidden);
+    const hiddenItem = coverOnly ? ((aHidden ? pair.a.item : pair.b.item) as ReflowText) : null;
     const aBefore = base.textByKey.has(a);
     const bBefore = pair.kind === 'text' ? base.textByKey.has(b) : base.boxByKey.has(b);
     // The text made unreadable is content of the page at the baseline.
     if (pair.kind === 'box' ? !aBefore : !aBefore && !bBefore) continue;
     if (pairMet(base, a, b)) continue;
-    out.push({ id: candidateId(REFLOW_RULES.overlap, pass.pass, a, b), a, b, kind: pair.kind, region: roundRect(pair.region), share: round(pair.share), ...(coverOnly ? { coverOnly: true } : {}) });
+    out.push({
+      id: candidateId(REFLOW_RULES.overlap, pass.pass, a, b),
+      a,
+      b,
+      kind: pair.kind,
+      region: roundRect(pair.region),
+      share: round(pair.share),
+      ...(coverOnly ? { coverOnly: true } : {}),
+      ...(hiddenItem?.placed ? { behind: true } : {}),
+      ...(pair.kind === 'box' && aHidden ? { hiddenA: true } : {}),
+    });
   }
   return out;
 }
@@ -1039,6 +1151,20 @@ export function inkConfirms(ink: ReflowInk, config: ReflowConfig): { glyphs: boo
   return { glyphs, covered };
 }
 
+/** Something that moves by itself (`ReflowLayout.motionBoxes`, or one of the two moving) meets one of the two or the region they meet in. */
+function movesNear(layout: Layout, keys: number[], region: R): boolean {
+  const margin = layout.config.toleranceCssPx;
+  const areas: R[] = [[region[0] - margin, region[1] - margin, region[2] + 2 * margin, region[3] + 2 * margin]];
+  for (const key of keys) {
+    const text = layout.textByKey.get(key);
+    if (text?.moving) return true;
+    if (text) areas.push(...text.lines);
+    const box = layout.boxByKey.get(key);
+    if (box) areas.push(box.rect);
+  }
+  return (layout.data.motionBoxes ?? []).some((moving) => areas.some((other) => intersectRects(moving, other) !== null));
+}
+
 /** Rule 3: text made unreadable by other text or by a box painted over it, where it was not at the baseline. */
 function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screenshot>): { candidates: ReflowCandidate[]; cleared: number; total: number } {
   const config = layout.config;
@@ -1047,23 +1173,24 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
   let cleared = 0;
   for (const pair of plan) {
     const test = layout.data.pixels[pair.id];
-    // The browser's hit test finds the text over the box: the box paints under it.
-    // Real text over decoration: the decoration paints under it.
-    if ((pair.kind === 'box' || pair.coverOnly) && test?.top === 'a') {
+    // The browser's hit test finds the text over the box: the box paints under it. Real text over decoration laid
+    // out behind it: the decoration paints under it.
+    const roles = reflowPixelRoles(pair, test?.top ?? 'unknown');
+    if (!roles) {
       cleared++;
       continue;
     }
     const flags: string[] = [pair.kind === 'text' ? 'textOnText' : 'textUnderBox'];
     // The covered one: the one the hit test found below the other (text on text); the text under a box.
-    const victim = pair.kind === 'text' && !pair.coverOnly && test?.top === 'a' ? pair.b : pair.a;
-    const other = victim === pair.a ? pair.b : pair.a;
+    const victim = roles.victim;
+    const other = roles.cover;
     const values: Record<string, string | number | boolean> = { ...passValues(layout), overlapShare: pair.share };
     let status: Status;
     const ink = test ? reflowInk(test, clips, config) : null;
     if (ink) {
       const found = inkConfirms(ink, config);
-      // Decoration under or over real text: only ink of the real text that it hides counts.
-      const confirmed = pair.coverOnly ? { glyphs: false, covered: found.covered } : found;
+      // Decoration over real text: only ink of the real text that it hides counts.
+      const confirmed = roles.coverOnly ? { glyphs: false, covered: found.covered } : found;
       Object.assign(values, {
         inkVictimPx: ink.victim,
         inkVictimAlonePx: ink.alone,
@@ -1079,9 +1206,10 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
       if (confirmed.glyphs) flags.push('glyphsOverlap');
       if (confirmed.covered) flags.push('inkCovered');
       flags.push('pixelConfirmed');
-      if (pair.coverOnly) flags.push('decorativeCover');
-      // Something kept moving by script while this was measured: the pixels may show a passing moment.
-      if (layout.data.motion) {
+      if (roles.coverOnly) flags.push('decorativeCover');
+      // Something that moves by itself where the two meet: the pixels may show a passing moment. Decided from where
+      // what moves is, not from whether it moved while this was captured.
+      if (movesNear(layout, [victim, other], pair.region)) {
         status = 'likely';
         flags.push('unsettled');
       }
@@ -1089,10 +1217,15 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
       // From boxes alone, two texts that meet are likely to be unreadable when the region could not
       // be captured; beyond the limit of tests (`maxPixelChecks`) nothing was looked at, which is no
       // evidence: info. A text under a box is info, as which of the two is painted on top is not known.
-      status = pair.kind === 'text' && test && !pair.coverOnly ? 'likely' : 'info';
+      status = pair.kind === 'text' && test && !roles.coverOnly ? 'likely' : 'info';
       flags.push('geometryOnly');
       if (test?.reason) flags.push(test.reason === 'layer-over' ? 'layerOver' : test.reason === 'not-in-view' ? 'notInView' : 'notCaptured');
       else if (!test) flags.push('notTested');
+    }
+    // Text hidden from assistive technology made unreadable: what is seen, but perhaps decoration.
+    if (roles.hidden) {
+      if (status === 'fail' || status === 'likely') status = 'advisory';
+      flags.push('hiddenFromAT');
     }
     const text = layout.textByKey.get(victim) ?? layout.textByKey.get(pair.a);
     out.push({
@@ -1121,6 +1254,8 @@ function textOverlap(base: Layout, layout: Layout, clips: Record<string, Screens
 function stuckLayers(states: ReflowScrollState[], state: ReflowScrollState, tolerance: number): ReflowLayer[] {
   const top = states[0];
   return state.layers.filter((layer) => {
+    // Under the page (a background behind it): it hides nothing.
+    if (layer.behind) return false;
     if (layer.position === 'fixed') return true;
     const kept = states.some((other) => {
       if (other === state || other.scroller !== state.scroller) return false;
@@ -1157,13 +1292,36 @@ function dismissible(layer: ReflowLayer, config: ReflowConfig, blocked: Set<numb
   return !!layer.dismissControl && layer.controls <= config.maxDismissControls;
 }
 
+/**
+ * The readable share of the viewport at one scroll position: what fixed and stuck elements leave of it. In an
+ * application shell (the document does not scroll; the scroll container that holds the page was scrolled), only the
+ * box that container shows is read in: the rest of the viewport (bars around it, stuck or not) is not, and what
+ * sticks over that box is taken away. Always a share of the whole viewport.
+ */
+function readableShare(layout: Layout, state: ReflowScrollState, layers: ReflowLayer[]): number {
+  const vp = layout.viewport;
+  const view: R = [0, 0, vp.clientWidth, vp.clientHeight];
+  const scroller = state.scroller !== undefined ? layout.clipByKey.get(state.scroller) : undefined;
+  const reading = scroller ? intersectRects(scroller.rect, view) : view;
+  if (!reading) return 0;
+  const covered = unionArea(
+    layers.flatMap((layer) =>
+      layer.painted.flatMap((rect) => {
+        const shown = intersectRects(rect, reading);
+        return shown ? [shown] : [];
+      }),
+    ),
+  );
+  return Math.max(0, area(reading) - covered) / Math.max(1, vp.clientWidth * vp.clientHeight);
+}
+
 /** The worst scroll position of a layout for fixed and stuck elements: the least readable share of the viewport. */
 function worstState(layout: Layout): { state: ReflowScrollState; layers: ReflowLayer[]; readable: number } | null {
   const states = layout.data.scrolls;
   let worst: { state: ReflowScrollState; layers: ReflowLayer[]; readable: number } | null = null;
   for (const state of states) {
     const layers = stuckLayers(states, state, layout.config.toleranceCssPx);
-    const readable = 1 - obscured(layers, layout.viewport);
+    const readable = readableShare(layout, state, layers);
     if (!worst || readable < worst.readable - 1e-9) worst = { state, layers, readable };
   }
   return worst;
@@ -1178,7 +1336,7 @@ function sticky(base: Layout, layout: Layout, blocked: Set<number>): ReflowCandi
   const flags: string[] = [];
   let status: Status = config.stickyObscuresStatus;
   const kept = worst.layers.filter((layer) => !dismissible(layer, config, blocked));
-  const withoutDismissible = 1 - obscured(kept, layout.viewport);
+  const withoutDismissible = readableShare(layout, worst.state, kept);
   if (kept.length < worst.layers.length) flags.push('dismissible');
   if (atBaseline && atBaseline.readable < config.minReadableViewportShare) {
     status = 'info';
@@ -1189,18 +1347,23 @@ function sticky(base: Layout, layout: Layout, blocked: Set<number>): ReflowCandi
   }
   if (worst.state.y > 0) flags.push('afterScroll');
   if (worst.state.scroller !== undefined) flags.push('mainScroller');
+  if (worst.layers.length === 0) flags.push('scrollerBox');
   const vp = layout.viewport;
   const ranked = [...worst.layers].sort((a, b) => obscured([b], vp) - obscured([a], vp) || a.key - b.key);
-  const main = ranked[0]!;
+  const main = ranked[0];
+  // No layer at all: the box of the scroll container of a shell is what leaves so little to read.
+  const key = main?.key ?? worst.state.scroller ?? 0;
+  const scrollerRect = worst.state.scroller !== undefined ? layout.clipByKey.get(worst.state.scroller)?.rect : undefined;
+  const mainBox: R | null = main ? [main.rect[0] + worst.state.x, main.rect[1] + worst.state.y, main.rect[2], main.rect[3]] : (scrollerRect ?? null);
   return [
     {
-      id: candidateId(REFLOW_RULES.sticky, layout.data.pass, main.key),
+      id: candidateId(REFLOW_RULES.sticky, layout.data.pass, key),
       rule: REFLOW_RULES.sticky,
       pass: layout.data.pass,
       status,
-      key: main.key,
+      key,
       related: ranked.slice(1).map((layer) => ({ role: 'layer', key: layer.key })),
-      box: roundRect([main.rect[0] + worst.state.x, main.rect[1] + worst.state.y, main.rect[2], main.rect[3]]),
+      box: mainBox ? roundRect(mainBox) : null,
       flags: flags.sort(),
       values: {
         ...passValues(layout),
@@ -1244,7 +1407,9 @@ function scrollLocked(base: Layout, layout: Layout): ReflowCandidate[] {
   const found = unreachable(layout);
   const before = unreachable(base);
   const known = new Set([...before.texts.map((t) => t.key), ...before.controls.map((b) => b.key), ...before.others.map((b) => b.key)]);
-  const freshTexts = found.texts.filter((text) => !known.has(text.key) && base.textByKey.has(text.key));
+  const freshAll = found.texts.filter((text) => !known.has(text.key) && base.textByKey.has(text.key));
+  // Text hidden from assistive technology alone is advisory at most.
+  const freshTexts = freshAll.filter((text) => !text.hiddenFromAT);
   const freshControls = found.controls.filter((box) => !known.has(box.key) && base.boxByKey.has(box.key));
   const freshOthers = found.others.filter((box) => !known.has(box.key) && base.boxByKey.has(box.key));
   const total = found.texts.length + found.controls.length + found.others.length;
@@ -1258,12 +1423,17 @@ function scrollLocked(base: Layout, layout: Layout): ReflowCandidate[] {
     flags.push('atBaseline');
   } else if (freshTexts.length + freshControls.length > 0) status = 'fail';
   else if (freshOthers.length > 0) status = 'likely';
-  else {
+  else if (freshAll.length > 0) {
+    status = 'advisory';
+    flags.push('hiddenFromAT');
+  } else {
     status = 'info';
     flags.push('atBaseline');
   }
   const top = layout.data.scrolls[0];
-  const fullScreen = !!top?.layers.some((layer) => obscured([layer], vp) >= config.fullScreenLayerMinShare);
+  // A layer over the whole viewport counts only when the hit test finds it over the page: a background behind the
+  // page (z-index: -1) stops nothing.
+  const fullScreen = !!top?.layers.some((layer) => layer.covers && obscured([layer], vp) >= config.fullScreenLayerMinShare);
   if (fullScreen) flags.push('fullScreenLayer');
   // An open modal layer that stops the page from scrolling: what lies behind it is not lost while it is open. Its
   // own content has to be reachable, which `content-lost` measures (a fixed layer whose fields lie beyond the viewport).
@@ -1271,7 +1441,7 @@ function scrollLocked(base: Layout, layout: Layout): ReflowCandidate[] {
     status = 'info';
     flags.push('modalOpen');
   }
-  const first = freshTexts[0] ?? found.texts[0];
+  const first = freshTexts[0] ?? freshAll[0] ?? found.texts[0];
   return [
     {
       id: candidateId(REFLOW_RULES.locked, layout.data.pass, 0),

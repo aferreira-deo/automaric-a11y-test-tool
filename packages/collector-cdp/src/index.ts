@@ -57,6 +57,12 @@ export interface CollectOptions {
    */
   emulation?: 'clear' | 'reapply';
   /**
+   * For a caller that emulates through a session of its own (see `RestoreOptions.reapplyEmulation`): called once
+   * this session's override is cleared, to have the caller's emulation sent again, before the scroll positions
+   * are put back. Nothing of this session's emulation is left afterwards.
+   */
+  reapplyEmulation?: () => Promise<void>;
+  /**
    * Where the name-role-value check may activate controls: a browser of its own, in which copies of
    * the page are loaded (see `ProbeHost`). Without it nothing is activated, whatever
    * `nameRoleValue.probe` says, and the survey says so. The page under test is never probed.
@@ -290,6 +296,7 @@ async function collectOnce(raw: CdpSession, config: Config, signal: StopSignal |
       stepTimeoutMs: () => (signal?.aborted ? (options.restoreStepTimeoutMs ?? RESTORE_STEP_TIMEOUT_MS) : null),
       ...(options.onRestoreIncomplete ? { onIncomplete: options.onRestoreIncomplete } : {}),
       ...(options.emulation ? { emulation: options.emulation } : {}),
+      ...(options.reapplyEmulation ? { reapplyEmulation: options.reapplyEmulation } : {}),
     });
     // The captures were taken at this scale, whatever the page had before.
     snapshot.environment = { ...environment, devicePixelRatio: config.focus.deviceScaleFactor };

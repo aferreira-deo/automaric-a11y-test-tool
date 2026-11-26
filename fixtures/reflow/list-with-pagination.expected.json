@@ -1,0 +1,12 @@
+{
+  "description": "Items of a list cut at 320 px, with pagination links (Previous, 1, 2, Next) below: links of a pagination are not carousel controls, and the text is lost. Fail for each item.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div > div:nth-of-type(1)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] },
+    { "selector": "html > body > main > div > div:nth-of-type(2)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] },
+    { "selector": "html > body > main > div > div:nth-of-type(3)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] },
+    { "selector": "html > body > main > div > div:nth-of-type(4)", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor"] }
+  ]
+}

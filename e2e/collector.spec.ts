@@ -171,23 +171,21 @@ function navigatingMidScan(page: Page, paths: string[]): void {
 }
 
 test('a page that goes to another document while it is read is read again there, once', async ({ page, baseURL }) => {
-  const scan = (target: Page) => new A11yVision({ page: target }).withChecks(['headings', 'lists']).analyze();
+  const scan = () => new A11yVision({ page }).withChecks(['headings', 'lists']).analyze();
   await page.goto('/lists/near-threshold.html');
-  const direct = await scan(page);
+  const direct = await scan();
   expect(direct.environment.navigatedFrom).toBeUndefined();
 
-  // A page of its own: the scanner keeps one session per page, made when the page is first scanned.
-  const other = await page.context().newPage();
-  await other.goto('/lists/plain-text.html');
-  navigatingMidScan(other, ['/lists/near-threshold.html']);
-  const redirected = await scan(other);
+  await page.goto('/lists/plain-text.html');
+  navigatingMidScan(page, ['/lists/near-threshold.html']);
+  const redirected = await scan();
   // The findings are those of the page the browser ended on, as if it had been scanned directly.
   expect(redirected.url).toBe(`${baseURL}/lists/near-threshold.html`);
   expect(redirected.environment.navigatedFrom).toBe(`${baseURL}/lists/plain-text.html`);
   expect(redirected.findings).toEqual(direct.findings);
   expect(redirected.findings.filter((finding) => finding.status === 'likely').length).toBeGreaterThan(3);
   // The page is given back as any scanned page is.
-  expect(await other.evaluate(() => ({ sheets: document.adoptedStyleSheets.length, ratio: window.devicePixelRatio }))).toEqual({ sheets: 0, ratio: 1 });
+  expect(await page.evaluate(() => ({ sheets: document.adoptedStyleSheets.length, ratio: window.devicePixelRatio }))).toEqual({ sheets: 0, ratio: 1 });
 });
 
 test('a page that navigates during the second reading as well is an error that says so', async ({ page }) => {

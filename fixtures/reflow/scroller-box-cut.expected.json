@@ -1,0 +1,9 @@
+{
+  "description": "A horizontal scroller whose own box is cut by an outer overflow: hidden: the last cards can never be scrolled into the part of it that is shown. Fail, on the outer element.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > main > div", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/content-lost", "flags": ["clippedByAncestor", "control"] }
+  ]
+}

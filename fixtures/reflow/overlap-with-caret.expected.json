@@ -1,0 +1,9 @@
+{
+  "description": "A caret that blinks elsewhere does not lower an overlap the pixels confirm: a failure, every time.",
+  "checks": ["reflow"],
+  "exact": true,
+  "expected": [
+    { "selector": "html", "check": "reflow", "status": "info", "rule": "reflow/survey" },
+    { "selector": "html > body > div > h1", "check": "reflow", "status": "fail", "wcag": "1.4.10", "rule": "reflow/text-overlap", "flags": ["glyphsOverlap", "pixelConfirmed", "textOnText"] }
+  ]
+}
